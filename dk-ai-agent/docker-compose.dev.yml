@@ -1,0 +1,18 @@
+services:
+  postgres:
+    ports:
+      - "${DEV_BIND_ADDRESS:-127.0.0.1}:${POSTGRES_PORT:-5432}:5432"
+
+  backend:
+    ports:
+      - "${DEV_BIND_ADDRESS:-127.0.0.1}:${BACKEND_PORT:-8123}:8123"
+    # 与 docker-compose.yml 同款显式透传：合并（-f ... -f ...）场景下本就会从主文件继承，
+    # 此处再声明一份是为开发 profile 自洽——无论以何种方式组合本文件，初始超管密码与
+    # Session 超时都可经 .env 覆盖，避免本地调试与生产透传面漂移。
+    environment:
+      ADMIN_INITIAL_PASSWORD: ${ADMIN_INITIAL_PASSWORD:-}
+      SESSION_TIMEOUT: ${SESSION_TIMEOUT:-24h}
+
+  ai-worker:
+    ports:
+      - "${DEV_BIND_ADDRESS:-127.0.0.1}:${AI_WORKER_PORT:-8001}:8000"

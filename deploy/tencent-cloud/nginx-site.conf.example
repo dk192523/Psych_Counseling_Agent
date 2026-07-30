@@ -1,0 +1,28 @@
+# Replace psych.example.com with your domain, then let Certbot add the TLS directives.
+server {
+    listen 80;
+    listen [::]:80;
+    server_name psych.example.com;
+
+    client_max_body_size 2m;
+    # Browsers honor this header only after HTTPS is enabled by Certbot.
+    add_header Strict-Transport-Security "max-age=31536000" always;
+
+    location / {
+        proxy_pass http://127.0.0.1:3004;
+        proxy_http_version 1.1;
+
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        # This Nginx is the public edge. Overwrite an untrusted client-supplied XFF value.
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Connection "";
+
+        # Required for SSE and deep-thinking responses.
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 600s;
+        proxy_send_timeout 600s;
+    }
+}

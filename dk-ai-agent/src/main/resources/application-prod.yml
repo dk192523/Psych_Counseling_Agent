@@ -1,0 +1,21 @@
+# 生产环境配置（覆盖 application.yml）。注意提交时不要包含敏感信息。
+#
+# API 文档生产收口（双重纵深防御，缺一不可）：
+#  1) springdoc api-docs/swagger-ui enabled=false —— /v3/api-docs（含分组端点）与 /swagger-ui/**
+#     端点本身不再注册，permitAll 白名单无对象可放行；
+#  2) knife4j.production=true —— knife4j 生产防护拦截 doc.html 及文档资源访问；
+#  3) app.docs.enabled=false —— SecurityConfig 将四个文档路径移出 permitAll，
+#     即便有人重新启用 springdoc，安全链仍拦截未认证访问。
+springdoc:
+  api-docs:
+    enabled: false
+  swagger-ui:
+    enabled: false
+knife4j:
+  production: true
+server:
+  # 后端只暴露在 Compose 内网，信任前置 Nginx 传入的 Forwarded/X-Forwarded-*。
+  forward-headers-strategy: framework
+app:
+  docs:
+    enabled: false

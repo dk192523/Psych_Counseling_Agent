@@ -1,0 +1,156 @@
+name: ${COMPOSE_PROJECT_NAME:-psych-counseling-agent}
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: ${LOG_MAX_SIZE:-10m}
+    max-file: "${LOG_MAX_FILE:-5}"
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    init: true
+    logging: *default-logging
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-dk_ai_db}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-dk}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-dk_ai_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 45s
+    logging: *default-logging
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      SERVER_PORT: 8123
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-dk_ai_db}
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-postgres}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-dk}
+      JDBC_CONNECTION_TIMEOUT_MS: ${JDBC_CONNECTION_TIMEOUT_MS:-5000}
+      JDBC_QUERY_TIMEOUT: ${JDBC_QUERY_TIMEOUT:-25s}
+      PG_CONNECT_TIMEOUT_SECONDS: ${PG_CONNECT_TIMEOUT_SECONDS:-5}
+      PG_SOCKET_TIMEOUT_SECONDS: ${PG_SOCKET_TIMEOUT_SECONDS:-30}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
+      DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com}
+      DEEPSEEK_ANTHROPIC_BASE_URL: ${DEEPSEEK_ANTHROPIC_BASE_URL:-https://api.deepseek.com/anthropic}
+      DEEPSEEK_CHAT_MODEL: ${DEEPSEEK_CHAT_MODEL:-deepseek-v4-flash}
+      DEEPSEEK_WEB_SEARCH_TOOL: ${DEEPSEEK_WEB_SEARCH_TOOL:-web_search_20260209}
+      CHAT_HISTORY_MAX_MESSAGES: ${CHAT_HISTORY_MAX_MESSAGES:-1000}
+      CHAT_HISTORY_CONTEXT_WINDOW: ${CHAT_HISTORY_CONTEXT_WINDOW:-30}
+      CHAT_MEMORY_ENABLED: ${CHAT_MEMORY_ENABLED:-true}
+      CHAT_MEMORY_DIGEST_MAX_CHARS: ${CHAT_MEMORY_DIGEST_MAX_CHARS:-1200}
+      CHAT_MEMORY_FOLD_THRESHOLD: ${CHAT_MEMORY_FOLD_THRESHOLD:-6}
+      CHAT_MEMORY_RECALL_CANDIDATES: ${CHAT_MEMORY_RECALL_CANDIDATES:-30}
+      CHAT_MEMORY_RECALL_EPISODES: ${CHAT_MEMORY_RECALL_EPISODES:-4}
+      CHAT_MEMORY_RECALL_SNIPPET_CHARS: ${CHAT_MEMORY_RECALL_SNIPPET_CHARS:-300}
+      DEEP_THINKING_ENABLED: ${DEEP_THINKING_ENABLED:-true}
+      DEEP_THINKING_STEP_TIMEOUT_SECONDS: ${DEEP_THINKING_STEP_TIMEOUT_SECONDS:-45}
+      DEEP_THINKING_HISTORY_MESSAGES: ${DEEP_THINKING_HISTORY_MESSAGES:-12}
+      DEEP_THINKING_MAX_QUERIES: ${DEEP_THINKING_MAX_QUERIES:-3}
+      DEEP_THINKING_ASSOCIATION_HYPOTHESES: ${DEEP_THINKING_ASSOCIATION_HYPOTHESES:-3}
+      DEEP_THINKING_CANDIDATE_TOP_K: ${DEEP_THINKING_CANDIDATE_TOP_K:-6}
+      DEEP_THINKING_SIMILARITY_THRESHOLD: ${DEEP_THINKING_SIMILARITY_THRESHOLD:-0.25}
+      DEEP_THINKING_CANDIDATE_LIMIT: ${DEEP_THINKING_CANDIDATE_LIMIT:-12}
+      DEEP_THINKING_EVIDENCE_LIMIT: ${DEEP_THINKING_EVIDENCE_LIMIT:-4}
+      DEEP_THINKING_TRANSCRIPT_SNIPPETS: ${DEEP_THINKING_TRANSCRIPT_SNIPPETS:-2}
+      DEEP_THINKING_CANDIDATE_TEXT_CHARS: ${DEEP_THINKING_CANDIDATE_TEXT_CHARS:-900}
+      DEEP_THINKING_CONTEXT_MAX_CHARS: ${DEEP_THINKING_CONTEXT_MAX_CHARS:-8000}
+      DEEP_THINKING_VECTOR_MAX_CONCURRENCY: ${DEEP_THINKING_VECTOR_MAX_CONCURRENCY:-8}
+      DEEP_THINKING_TRANSCRIPT_MAX_CONCURRENCY: ${DEEP_THINKING_TRANSCRIPT_MAX_CONCURRENCY:-8}
+      AI_WORKER_ENABLED: ${AI_WORKER_ENABLED:-true}
+      AI_WORKER_BASE_URL: ${AI_WORKER_BASE_URL:-http://ai-worker:8000}
+      AI_WORKER_CONNECT_TIMEOUT_SECONDS: ${AI_WORKER_CONNECT_TIMEOUT_SECONDS:-2}
+      AI_WORKER_REQUEST_TIMEOUT_SECONDS: ${AI_WORKER_REQUEST_TIMEOUT_SECONDS:-25}
+      AI_WORKER_MAX_CONCURRENCY: ${AI_WORKER_MAX_CONCURRENCY:-4}
+      AI_WORKER_FAILURE_THRESHOLD: ${AI_WORKER_FAILURE_THRESHOLD:-3}
+      AI_WORKER_CIRCUIT_OPEN_SECONDS: ${AI_WORKER_CIRCUIT_OPEN_SECONDS:-30}
+      AI_WORKER_SHARED_SECRET: ${AI_WORKER_SHARED_SECRET:-}
+      ADMIN_INITIAL_PASSWORD: ${ADMIN_INITIAL_PASSWORD:-}
+      # 生产同源反代无需 CORS：缺省透传空值 → 后端不注册任何跨域放行。
+      # 若生产前后端分域，显式设置生产前端 Origin（逗号分隔，严禁 "*"）。
+      APP_CORS_ALLOWED_ORIGIN_PATTERNS: ${APP_CORS_ALLOWED_ORIGIN_PATTERNS:-}
+      SESSION_TIMEOUT: ${SESSION_TIMEOUT:-24h}
+      SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-false}
+      COUNSELING_TRANSCRIPT_DIRECTORY: /data/transcripts
+      ONNX_EMBEDDING_MODEL_URI: ${ONNX_EMBEDDING_MODEL_URI:-https://media.githubusercontent.com/media/spring-projects/spring-ai/v1.0.0/models/spring-ai-transformers/src/main/resources/onnx/all-MiniLM-L6-v2/model.onnx}
+    volumes:
+      - ../counseling-kb/raw:/data/transcripts:ro
+      - onnx_cache:/tmp/spring-ai-onnx-generative
+      - djl_cache:/home/app/.djl.ai
+    expose:
+      - "8123"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "--show-error", "http://127.0.0.1:8123/api/actuator/health/readiness"]
+      interval: 15s
+      timeout: 5s
+      retries: 40
+      start_period: 120s
+
+  ai-worker:
+    build:
+      context: ../ai-worker
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    init: true
+    logging: *default-logging
+    environment:
+      PYTHONUTF8: "1"
+      PYTHONIOENCODING: utf-8
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
+      DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com}
+      DEEPSEEK_CHAT_MODEL: ${DEEPSEEK_CHAT_MODEL:-deepseek-v4-flash}
+      AI_WORKER_LLM_ENABLED: ${AI_WORKER_LLM_ENABLED:-true}
+      AI_WORKER_MODEL_TIMEOUT_SECONDS: ${AI_WORKER_MODEL_TIMEOUT_SECONDS:-20}
+      AI_WORKER_MODEL_MAX_CONCURRENCY: ${AI_WORKER_MODEL_MAX_CONCURRENCY:-4}
+      AI_WORKER_SHARED_SECRET: ${AI_WORKER_SHARED_SECRET:-}
+      COUNSELING_TRANSCRIPT_DIRECTORY: /data/transcripts
+    volumes:
+      - ../counseling-kb/raw:/data/transcripts:ro
+    expose:
+      - "8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/internal/v1/health/live', timeout=2)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  frontend:
+    build:
+      context: ./dk-ai-agent-frontend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    init: true
+    logging: *default-logging
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "${FRONTEND_BIND_ADDRESS:-127.0.0.1}:${FRONTEND_PORT:-3001}:80"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1/ >/dev/null 2>&1 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+volumes:
+  postgres_data:
+  onnx_cache:
+  djl_cache:

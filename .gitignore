@@ -1,0 +1,23 @@
+# Local secrets and runtime artifacts
+.env
+.env.*
+!.env.example
+# 本地敏感配置（真实密钥只放这里，绝不提交；.dockerignore 同步排除，防止被打进镜像）
+**/application-local.yml
+**/application-local.yaml
+
+# 构建/发布产物（可再生，不进 git；二进制 EXE 由 build-launcher.cmd 本地生成）
+release/
+**/launcher/*.exe
+**/.venv/
+**/.pytest_cache/
+**/__pycache__/
+**/*.py[cod]
+
+# Build output and IDE state
+**/target/
+**/node_modules/
+**/dist/
+.idea/
+*.log
+*.err.log

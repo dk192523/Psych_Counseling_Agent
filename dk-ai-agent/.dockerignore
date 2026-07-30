@@ -1,0 +1,16 @@
+.git
+.idea
+target
+*.log
+*.err.log
+dk-ai-agent-frontend/node_modules
+dk-ai-agent-frontend/dist
+dk-image-search-mcp-server/target
+*.zip
+*.pdf
+*.html
+.venv
+__pycache__
+**/application-local.yml
+**/application-local.yaml
+node_modules

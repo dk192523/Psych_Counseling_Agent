@@ -1,0 +1,184 @@
+spring:
+  application:
+    name: dk-ai-agent
+  profiles:
+    active: local
+  threads:
+    virtual:
+      enabled: true
+  http:
+    client:
+      # 兜底所有自动配置 RestClient（含 Spring AI OpenAI/DeepSeek 调用）：无读超时时一次挂起的
+      # 模型调用会永久持有整合锁，导致该会话淘汰停摆。DeepSeekWebSearchTool 手建 RestClient 不受此影响。
+      connect-timeout: ${HTTP_CLIENT_CONNECT_TIMEOUT:5s}
+      read-timeout: ${HTTP_CLIENT_READ_TIMEOUT:60s}
+  lifecycle:
+    timeout-per-shutdown-phase: ${SPRING_LIFECYCLE_TIMEOUT_PER_SHUTDOWN_PHASE:30s}
+  servlet:
+    encoding:
+      charset: UTF-8
+      enabled: true
+      force: true
+# 临时注释掉，便于大家开发调试和部署（实际填写 PgVector 数据库信息）
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/dk_ai_db}
+    username: ${SPRING_DATASOURCE_USERNAME:postgres}
+    password: ${SPRING_DATASOURCE_PASSWORD:dk}
+    hikari:
+      connection-timeout: ${JDBC_CONNECTION_TIMEOUT_MS:5000}
+      data-source-properties:
+        connectTimeout: ${PG_CONNECT_TIMEOUT_SECONDS:5}
+        socketTimeout: ${PG_SOCKET_TIMEOUT_SECONDS:30}
+        tcpKeepAlive: true
+  jdbc:
+    template:
+      query-timeout: ${JDBC_QUERY_TIMEOUT:25s}
+  ai:
+    model:
+      chat: openai
+      embedding: transformers
+    openai:
+      api-key: ${DEEPSEEK_API_KEY:${SPRING_AI_OPENAI_API_KEY:sk-replace-with-your-deepseek-key}}
+      base-url: ${DEEPSEEK_BASE_URL:https://api.deepseek.com}
+      chat:
+        options:
+          model: ${DEEPSEEK_CHAT_MODEL:deepseek-v4-flash}
+    embedding:
+      transformer:
+        onnx:
+          model-uri: ${ONNX_EMBEDDING_MODEL_URI:https://media.githubusercontent.com/media/spring-projects/spring-ai/v1.0.0/models/spring-ai-transformers/src/main/resources/onnx/all-MiniLM-L6-v2/model.onnx}
+        tokenizer:
+          uri: classpath:/onnx/all-MiniLM-L6-v2/tokenizer.json
+        cache:
+          enabled: true
+# 临时注释掉，便于大家开发调试和部署（实际需要启动 MCP 服务）
+#    mcp:
+#      client:
+#        sse:
+#          connections:
+#            server1:
+#              url: http://localhost:8127
+#        stdio:
+#          servers-configuration: classpath:mcp-servers.json
+# 临时注释掉，便于大家开发调试和部署（实际需要启动 PgVector 数据库）
+    vectorstore:
+      pgvector:
+        index-type: HNSW
+        dimensions: 384
+        distance-type: COSINE_DISTANCE
+        max-document-batch-size: 10000 # Optional: Maximum number of documents per batch
+server:
+  port: ${SERVER_PORT:8123}
+  shutdown: graceful
+  servlet:
+    context-path: /api
+    session:
+      timeout: ${SESSION_TIMEOUT:24h}
+      cookie:
+        # 显式声明 HttpOnly，不再寄希望于 Tomcat 默认值。
+        http-only: true
+        # 通过 HTTPS 反向代理部署时设为 true；直接 HTTP 调试必须保持 false。
+        secure: ${SESSION_COOKIE_SECURE:false}
+        # SameSite=Lax 经 Boot 的 WebServerFactoryCustomizer 接线进 Tomcat Rfc6265CookieProcessor：
+        # 落实 SecurityConfig 中禁用 CSRF 所依赖的缓解项（不再依赖浏览器对缺省属性的默认 Lax 行为，
+        # 旧内核浏览器不会把缺省当 None 处理）。Secure 属性待 TLS 上线后再随 prod profile 开启，
+        # 否则当前 HTTP 部署下浏览器将拒绝回送 Cookie、全站会话立即失效。
+        same-site: lax
+# springdoc-openapi config
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+    tags-sorter: alpha
+    operations-sorter: alpha
+  api-docs:
+    path: /v3/api-docs
+  group-configs:
+    - group: 'default'
+      paths-to-match: '/**'
+      packages-to-scan: com.dk.dkaiagent.controller
+# knife4j config
+knife4j:
+  enable: true
+  setting:
+    language: zh_cn
+deepseek:
+  api-key: ${DEEPSEEK_API_KEY:${SPRING_AI_OPENAI_API_KEY:sk-replace-with-your-deepseek-key}}
+  anthropic-base-url: ${DEEPSEEK_ANTHROPIC_BASE_URL:https://api.deepseek.com/anthropic}
+  chat-model: ${DEEPSEEK_CHAT_MODEL:deepseek-v4-flash}
+  web-search-tool: ${DEEPSEEK_WEB_SEARCH_TOOL:web_search_20260209}
+# 修改日志级别，查看 Spring AI 更多调用细节
+logging:
+  level:
+    org.springframework.ai: ${SPRING_AI_LOG_LEVEL:INFO}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: when_authorized
+
+app:
+  admin:
+    # 初始超管口令（compose 透传 ADMIN_INITIAL_PASSWORD）；为空则首次启动随机生成 12 位并仅 WARN 日志输出一次
+    initial-password: ${ADMIN_INITIAL_PASSWORD:}
+  cors:
+    # 允许携带凭据跨域的 Origin 显式白名单（逗号分隔，严禁 "*"）。缺省仅开发前端；
+    # 生产经 nginx 同源反代无需 CORS——compose 透传空值即不注册任何 CORS 放行；
+    # 若生产前后端分域，显式填生产前端 Origin（如 https://app.example.com）。
+    allowed-origin-patterns: ${APP_CORS_ALLOWED_ORIGIN_PATTERNS:http://localhost:3001,http://127.0.0.1:3001}
+  docs:
+    # API 文档（knife4j/springdoc）在 SecurityConfig 白名单中的放行开关：开发环境缺省可见；
+    # application-prod.yml 强制 false，与 springdoc/knife4j 的端点禁用构成纵深防御。
+    enabled: ${APP_DOCS_ENABLED:true}
+  chat-history:
+    # Database retention and default context hydration are intentionally separate.
+    # Raw-message retention cap; consolidation into the long-term digest must run before eviction.
+    max-messages-per-conversation: ${CHAT_HISTORY_MAX_MESSAGES:1000}
+    context-window-messages: ${CHAT_HISTORY_CONTEXT_WINDOW:30}
+    title-max-length: ${CHAT_HISTORY_TITLE_MAX_LENGTH:30}
+    memory:
+      # Long-term digest + episode recall. Any failure degrades silently and never blocks the main answer.
+      enabled: ${CHAT_MEMORY_ENABLED:true}
+      digest-max-chars: ${CHAT_MEMORY_DIGEST_MAX_CHARS:1200}
+      fold-threshold-messages: ${CHAT_MEMORY_FOLD_THRESHOLD:6}
+      recall-candidates: ${CHAT_MEMORY_RECALL_CANDIDATES:30}
+      recall-max-episodes: ${CHAT_MEMORY_RECALL_EPISODES:4}
+      recall-snippet-chars: ${CHAT_MEMORY_RECALL_SNIPPET_CHARS:300}
+  deep-thinking:
+    # Deep mode adds planner + evidence-grader calls. Any preparation failure falls back
+    # to the existing QuestionAnswerAdvisor chain before the first answer token is sent.
+    enabled: ${DEEP_THINKING_ENABLED:true}
+    step-timeout-seconds: ${DEEP_THINKING_STEP_TIMEOUT_SECONDS:45}
+    history-messages: ${DEEP_THINKING_HISTORY_MESSAGES:12}
+    max-queries: ${DEEP_THINKING_MAX_QUERIES:3}
+    association-hypotheses: ${DEEP_THINKING_ASSOCIATION_HYPOTHESES:3}
+    candidate-top-k: ${DEEP_THINKING_CANDIDATE_TOP_K:6}
+    similarity-threshold: ${DEEP_THINKING_SIMILARITY_THRESHOLD:0.25}
+    candidate-limit: ${DEEP_THINKING_CANDIDATE_LIMIT:12}
+    evidence-limit: ${DEEP_THINKING_EVIDENCE_LIMIT:4}
+    transcript-snippets-per-case: ${DEEP_THINKING_TRANSCRIPT_SNIPPETS:2}
+    candidate-text-chars: ${DEEP_THINKING_CANDIDATE_TEXT_CHARS:900}
+    context-max-chars: ${DEEP_THINKING_CONTEXT_MAX_CHARS:8000}
+    vector-max-concurrency: ${DEEP_THINKING_VECTOR_MAX_CONCURRENCY:8}
+    transcript-max-concurrency: ${DEEP_THINKING_TRANSCRIPT_MAX_CONCURRENCY:8}
+  ai-worker:
+    # The Python worker is an optional enhancement. Any failure falls back to the
+    # in-process Java planner/grader without preventing application startup.
+    enabled: ${AI_WORKER_ENABLED:true}
+    base-url: ${AI_WORKER_BASE_URL:http://localhost:8001}
+    connect-timeout-seconds: ${AI_WORKER_CONNECT_TIMEOUT_SECONDS:2}
+    request-timeout-seconds: ${AI_WORKER_REQUEST_TIMEOUT_SECONDS:25}
+    max-concurrency: ${AI_WORKER_MAX_CONCURRENCY:4}
+    failure-threshold: ${AI_WORKER_FAILURE_THRESHOLD:3}
+    circuit-open-seconds: ${AI_WORKER_CIRCUIT_OPEN_SECONDS:30}
+    shared-secret: ${AI_WORKER_SHARED_SECRET:}
+  rag:
+    # 默认从 dk-ai-agent 工作目录读取兄弟目录中的 799 份 raw 逐字稿
+    transcript-directory: ${COUNSELING_TRANSCRIPT_DIRECTORY:../counseling-kb/raw}
+    embedding-dimensions: 384
+    embedding-version: transformers-all-MiniLM-L6-v2-384-v1
