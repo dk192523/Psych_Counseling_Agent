@@ -123,6 +123,12 @@ management:
       show-details: when_authorized
 
 app:
+  chat:
+    # 聊天回答缓存：同一会话同一输入且上下文未变时，TTL 内回放上次回答，整条管线不执行，省 token。
+    answer-cache:
+      enabled: ${CHAT_ANSWER_CACHE_ENABLED:true}
+      ttl-seconds: ${CHAT_ANSWER_CACHE_TTL_SECONDS:600}
+      max-entries: ${CHAT_ANSWER_CACHE_MAX_ENTRIES:1000}
   admin:
     # 初始超管口令（compose 透传 ADMIN_INITIAL_PASSWORD）；为空则首次启动随机生成 12 位并仅 WARN 日志输出一次
     initial-password: ${ADMIN_INITIAL_PASSWORD:}

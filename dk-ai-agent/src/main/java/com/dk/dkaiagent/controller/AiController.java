@@ -3,6 +3,7 @@ package com.dk.dkaiagent.controller;
 import com.dk.dkaiagent.agent.counseling.CounselingAgentExecutor;
 import com.dk.dkaiagent.agent.counseling.CounselingStreamEvent;
 import com.dk.dkaiagent.app.CounselingApp;
+import com.dk.dkaiagent.cache.AnswerCache;
 import com.dk.dkaiagent.history.ConversationDetail;
 import com.dk.dkaiagent.history.ConversationHistoryService;
 import com.dk.dkaiagent.history.ConversationSummary;
@@ -26,7 +27,10 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import reactor.core.publisher.Flux;
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.Optional;
 
 @RestController
 @RequestMapping("/ai")
@@ -40,6 +44,9 @@ public class AiController {
 
     @Resource
     private CounselingAgentExecutor counselingAgentExecutor;
+
+    @Resource
+    private AnswerCache answerCache;
 
     @PostMapping("/conversations")
     @ResponseStatus(HttpStatus.CREATED)
@@ -110,16 +117,53 @@ public class AiController {
             boolean deepThinking) {
         // 开流前完成所有权校验：跨用户与不存在一律 404，绝不带着他人主体进入下游。
         long ownerId = requireConversationOwner(chatId);
-        Flux<ChatStreamEvent> events = deepThinking
+
+        if (!answerCache.enabled()) {
+            return buildChatEvents(ownerId, message, chatId, deepThinking)
+                    .map(this::toServerSentEvent);
+        }
+
+        // 历史指纹取当前消息数：中间插入新轮次即变化，保证只缓存"完全相同的重复请求"。
+        long fingerprint = conversationHistoryService.countMessages(chatId);
+        String cacheKey = answerCache.key(chatId, deepThinking, message, fingerprint);
+        Optional<List<AnswerCache.CachedEvent>> hit = answerCache.get(cacheKey);
+        if (hit.isPresent()) {
+            // 命中：重复请求视为同一轮，直接回放且不重复落库。
+            return Flux.fromIterable(hit.get())
+                    .map(AiController::toStreamEvent)
+                    .map(this::toServerSentEvent);
+        }
+
+        List<AnswerCache.CachedEvent> buffer = Collections.synchronizedList(new ArrayList<>());
+        return buildChatEvents(ownerId, message, chatId, deepThinking)
+                .doOnNext(event -> buffer.add(toCachedEvent(event)))
+                .doOnComplete(() -> answerCache.put(cacheKey, buffer))
+                .map(this::toServerSentEvent);
+    }
+
+    /** 快速/深度两条分支汇合点；缓存包在其外，两种模式都覆盖。 */
+    private Flux<ChatStreamEvent> buildChatEvents(
+            long ownerId, String message, String chatId, boolean deepThinking) {
+        return deepThinking
                 ? counselingAgentExecutor.stream(message, chatId, ownerId).map(ChatStreamEvent::from)
                 : counselingApp.doChatWithRagByStream(ownerId, message, chatId)
                 .map(chunk -> "[DONE]".equals(chunk)
                         ? new ChatStreamEvent("done", "")
                         : new ChatStreamEvent("delta", chunk));
-        return events
-                .map(event -> ServerSentEvent.<ChatStreamEvent>builder()
-                        .data(event)
-                        .build());
+    }
+
+    private ServerSentEvent<ChatStreamEvent> toServerSentEvent(ChatStreamEvent event) {
+        return ServerSentEvent.<ChatStreamEvent>builder().data(event).build();
+    }
+
+    private static AnswerCache.CachedEvent toCachedEvent(ChatStreamEvent event) {
+        return new AnswerCache.CachedEvent(
+                event.type(), event.content(), event.phase(), event.effectiveMode(), event.fallback());
+    }
+
+    private static ChatStreamEvent toStreamEvent(AnswerCache.CachedEvent cached) {
+        return new ChatStreamEvent(
+                cached.type(), cached.content(), cached.phase(), cached.effectiveMode(), cached.fallback());
     }
 
     /** Backwards-compatible overload used by existing Java callers and tests. */

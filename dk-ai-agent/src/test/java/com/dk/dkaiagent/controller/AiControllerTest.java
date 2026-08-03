@@ -1,6 +1,7 @@
 package com.dk.dkaiagent.controller;
 
 import com.dk.dkaiagent.app.CounselingApp;
+import com.dk.dkaiagent.cache.AnswerCache;
 import com.dk.dkaiagent.agent.counseling.CounselingAgentExecutor;
 import com.dk.dkaiagent.agent.counseling.CounselingStreamEvent;
 import com.dk.dkaiagent.history.ConversationDetail;
@@ -32,6 +33,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.when;
 
 class AiControllerTest {
@@ -42,6 +44,7 @@ class AiControllerTest {
     private CounselingApp counselingApp;
     private ConversationHistoryService conversationHistoryService;
     private CounselingAgentExecutor counselingAgentExecutor;
+    private AnswerCache answerCache;
     private MockedStatic<CurrentUser> currentUser;
 
     @BeforeEach
@@ -53,6 +56,8 @@ class AiControllerTest {
         ReflectionTestUtils.setField(controller, "counselingApp", counselingApp);
         ReflectionTestUtils.setField(controller, "conversationHistoryService", conversationHistoryService);
         ReflectionTestUtils.setField(controller, "counselingAgentExecutor", counselingAgentExecutor);
+        answerCache = new AnswerCache(true, 600, 1000);
+        ReflectionTestUtils.setField(controller, "answerCache", answerCache);
         // 认证主体由 B2 的 CurrentUser 从安全上下文读取；单测中以静态桩固定主体 id。
         currentUser = mockStatic(CurrentUser.class);
         currentUser.when(CurrentUser::requireUserId).thenReturn(OWNER_ID);
@@ -217,5 +222,59 @@ class AiControllerTest {
         verify(counselingApp, never()).doChatWithRag(anyLong(), anyString(), anyString());
         verify(counselingApp, never()).doChatWithRagByStream(anyLong(), anyString(), anyString());
         verify(counselingAgentExecutor, never()).stream(anyString(), anyString(), anyLong());
+    }
+
+    @Test
+    void repeatedFastRequestWithinTtlServesCachedStreamWithoutSecondGeneration() {
+        when(conversationHistoryService.getConversation("chat-id", OWNER_ID))
+                .thenReturn(Optional.of(detail("chat-id")));
+        when(counselingApp.doChatWithRagByStream(OWNER_ID, "message", "chat-id"))
+                .thenReturn(Flux.just("answer", "[DONE]"));
+
+        controller.doChatWithCounselingSSE("message", "chat-id").collectList().block();
+        List<ServerSentEvent<AiController.ChatStreamEvent>> second = controller
+                .doChatWithCounselingSSE("message", "chat-id").collectList().block();
+
+        assertEquals(2, second.size());
+        assertEquals("answer", second.get(0).data().content());
+        assertEquals("done", second.get(1).data().type());
+        // 第二次命中缓存：生成管线只执行一次。
+        verify(counselingApp, times(1)).doChatWithRagByStream(OWNER_ID, "message", "chat-id");
+    }
+
+    @Test
+    void repeatedDeepRequestWithinTtlServesCachedStreamWithoutSecondAgentRun() {
+        when(conversationHistoryService.getConversation("chat-id", OWNER_ID))
+                .thenReturn(Optional.of(detail("chat-id")));
+        when(counselingAgentExecutor.stream("message", "chat-id", OWNER_ID)).thenReturn(Flux.just(
+                CounselingStreamEvent.status("planning", "正在规划"),
+                CounselingStreamEvent.delta("回答", "deep", false),
+                CounselingStreamEvent.done("deep", false)
+        ));
+
+        controller.doChatWithCounselingSSE("message", "chat-id", true).collectList().block();
+        List<ServerSentEvent<AiController.ChatStreamEvent>> second = controller
+                .doChatWithCounselingSSE("message", "chat-id", true).collectList().block();
+
+        assertEquals(3, second.size());
+        assertEquals("status", second.get(0).data().type());
+        assertEquals("done", second.get(2).data().type());
+        // 深度模式同样命中缓存：agent 只跑一次。
+        verify(counselingAgentExecutor, times(1)).stream("message", "chat-id", OWNER_ID);
+    }
+
+    @Test
+    void changedHistoryFingerprintMissesCacheAndRegenerates() {
+        when(conversationHistoryService.getConversation("chat-id", OWNER_ID))
+                .thenReturn(Optional.of(detail("chat-id")));
+        when(counselingApp.doChatWithRagByStream(OWNER_ID, "message", "chat-id"))
+                .thenReturn(Flux.just("answer", "[DONE]"));
+        // 两次请求之间插入了新轮次：指纹（消息数）变化 → 不应命中缓存。
+        when(conversationHistoryService.countMessages("chat-id")).thenReturn(1, 2);
+
+        controller.doChatWithCounselingSSE("message", "chat-id").collectList().block();
+        controller.doChatWithCounselingSSE("message", "chat-id").collectList().block();
+
+        verify(counselingApp, times(2)).doChatWithRagByStream(OWNER_ID, "message", "chat-id");
     }
 }

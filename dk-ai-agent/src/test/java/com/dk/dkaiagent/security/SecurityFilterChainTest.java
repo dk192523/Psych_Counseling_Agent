@@ -5,6 +5,7 @@ import com.dk.dkaiagent.account.RegisterThrottleService;
 import com.dk.dkaiagent.account.UserAccountService;
 import com.dk.dkaiagent.account.UserRepository;
 import com.dk.dkaiagent.app.CounselingApp;
+import com.dk.dkaiagent.cache.AnswerCache;
 import com.dk.dkaiagent.agent.counseling.CounselingAgentExecutor;
 import com.dk.dkaiagent.history.ConversationHistoryService;
 import org.junit.jupiter.api.Test;
@@ -68,6 +69,9 @@ class SecurityFilterChainTest {
 
     @MockitoBean
     private CounselingAgentExecutor counselingAgentExecutor;
+
+    @MockitoBean
+    private AnswerCache answerCache;
 
     private static PsychUser activeUser(long id, String username) {
         return new PsychUser(id, username, "$2a$10$hash", "USER", "ACTIVE", NOW, NOW, null, null, null);
