@@ -73,8 +73,10 @@
           :connection-status="connectionStatus"
           :input-disabled="historyLoading || conversationLoading || !chatId"
           :thinking-state="thinkingState"
+          :retryable-turn="retryableTurn"
           ai-type="psych"
           @send-message="sendMessage"
+          @retry-send="retryFailedTurn"
         />
       </main>
     </div>
@@ -309,6 +311,9 @@ const mobileHistoryOpen = ref(false)
 const responseMode = ref(readStoredResponseMode())
 const thinkingState = ref(null)
 const memoryStats = ref(null)
+// U9：可手动重发的中断轮次（message/mode/aiMessageIndex/clientMsgId）。
+// 键沿用首轮生成的 clientMsgId，后端幂等去重保证重发不会重复归档。
+const retryableTurn = ref(null)
 let eventSource = null
 let streamVersion = 0
 
@@ -418,6 +423,8 @@ const stopStream = () => {
     connectionStatus.value = 'disconnected'
   }
   thinkingState.value = null
+  // 任何流收尾（新发送、切会话、删会话）都作废旧的重发入口，避免把旧轮次重放进新会话。
+  retryableTurn.value = null
 }
 
 const setResponseMode = (mode) => {
@@ -449,8 +456,40 @@ const refreshCurrentMemory = async () => {
     // 请求返回前用户可能已切换会话，过期结果直接丢弃。
     if (chatId.value !== targetId) return
     memoryStats.value = detail.memory || null
+    return detail.memory || null
   } catch (error) {
     console.error('刷新会话记忆状态失败:', error)
+    return null
+  }
+}
+
+/*
+ * U6：digest 时效性。
+ *
+ * 评审建议"每 30s 轮询"，但这个方向是错的：整合只由后端 onTurnArchived 在虚拟线程上触发，
+ * 用户空闲时 digest 不会自己前进——固定轮询绝大多数请求都在确认"没变化"，纯浪费。
+ *
+ * 真正的窗口在别处：done 事件到达时，整合往往还在虚拟线程里跑。此刻取到的是整合前的旧
+ * digest，而下一次刷新要等到下一轮回答结束——长对话里用户就一直看着过期的卡片。
+ *
+ * 所以只在这个已知窗口内做有界重试，用 updatedAt 判断整合是否落库，拿到新值立刻停。
+ * 整合不一定发生（未达折叠阈值就不会推进），因此重试次数必须有上限而不是等到变化为止。
+ */
+const MEMORY_SETTLE_DELAYS_MS = [1200, 3000, 6000]
+
+const refreshMemoryUntilSettled = async () => {
+  const targetId = chatId.value
+  const before = memoryStats.value
+  const baseline = `${before?.updatedAt ?? ''}|${before?.digestedCount ?? -1}`
+
+  for (const delay of MEMORY_SETTLE_DELAYS_MS) {
+    await new Promise(resolve => setTimeout(resolve, delay))
+    // 期间用户切了会话或又发了一轮，这条重试链就没有意义了。
+    if (chatId.value !== targetId || connectionStatus.value === 'connecting') return
+
+    const memory = await refreshCurrentMemory()
+    if (!memory) return
+    if (`${memory.updatedAt ?? ''}|${memory.digestedCount ?? -1}` !== baseline) return
   }
 }
 
@@ -537,6 +576,18 @@ const confirmDeleteConversation = async (conversation) => {
   }
 }
 
+// crypto.randomUUID 只在安全上下文（HTTPS/localhost）可用；非安全部署退回手工 v4，
+// 保证幂等键在任何环境都存在。
+const newClientMsgId = () => {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID()
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (char) => {
+    const random = (Math.random() * 16) | 0
+    return (char === 'x' ? random : (random & 0x3) | 0x8).toString(16)
+  })
+}
+
 const sendMessage = (message) => {
   if (!chatId.value || connectionStatus.value === 'connecting') return
 
@@ -547,18 +598,61 @@ const sendMessage = (message) => {
   addMessage('', false)
 
   connectionStatus.value = 'connecting'
-  const selectedMode = responseMode.value
-  thinkingState.value = selectedMode === 'deep'
-    ? {
-        active: true,
-        phase: 'planning',
-        label: '正在启动深度思考…',
-        fallback: false,
-        startedAt: Date.now()
-      }
-    : null
+  openChatStream({
+    message,
+    mode: responseMode.value,
+    chatId: chatId.value,
+    aiMessageIndex,
+    clientMsgId: newClientMsgId(),
+    retryCount: 0
+  })
+}
+
+// U9 手动重发入口：沿用首轮的 aiMessageIndex 与 clientMsgId——用户气泡不重复添加，
+// 后端按幂等键去重归档。手动重发自带 retryCount>1，不再触发自动重试。
+const retryFailedTurn = () => {
+  const turn = retryableTurn.value
+  if (!turn || turn.chatId !== chatId.value || connectionStatus.value === 'connecting') return
+
+  stopStream()
+  const aiMessage = messages.value[turn.aiMessageIndex]
+  if (aiMessage) {
+    aiMessage.content = ''
+  }
+
+  connectionStatus.value = 'connecting'
+  openChatStream({ ...turn, retryCount: turn.retryCount + 1 })
+}
+
+/*
+ * U9：分级容错。
+ * - 首字节前失败（一个 delta 都没收到）视为连接抖动，自动用同一 clientMsgId 重发一次：
+ *   后端幂等键保证重发绝不重复归档，重连期间两种模式都显示指示条。
+ * - 流中途断开（已收到部分回答）不自动重发——重发会从头再答一遍，与已显示的半截回答
+ *   叠加成两段内容；改为置错误态并提供手动"重新发送"。
+ */
+const openChatStream = ({ message, mode, chatId: turnChatId, aiMessageIndex, clientMsgId, retryCount }) => {
+  if (retryCount > 0) {
+    thinkingState.value = {
+      active: true,
+      phase: 'planning',
+      label: '网络波动，正在重新连接…',
+      fallback: false,
+      startedAt: Date.now()
+    }
+  } else {
+    thinkingState.value = mode === 'deep'
+      ? {
+          active: true,
+          phase: 'planning',
+          label: '正在启动深度思考…',
+          fallback: false,
+          startedAt: Date.now()
+        }
+      : null
+  }
   const activeStreamVersion = ++streamVersion
-  const currentEventSource = chatWithPsychApp(message, chatId.value, selectedMode === 'deep')
+  const currentEventSource = chatWithPsychApp(message, turnChatId, mode === 'deep', clientMsgId)
   eventSource = currentEventSource
 
   currentEventSource.onmessage = (event) => {
@@ -587,21 +681,38 @@ const sendMessage = (message) => {
       eventSource = null
       refreshConversations({ silent: true })
       // 回答结束后后端可能已整合记忆，静默重取 detail 刷新芯片与 digest 卡片。
+      // 整合是异步的（虚拟线程），done 时往往还没落库，所以后面跟一段有界重试。
       refreshCurrentMemory()
+      refreshMemoryUntilSettled()
     }
   }
 
   currentEventSource.onerror = (error) => {
     if (eventSource !== currentEventSource || activeStreamVersion !== streamVersion) return
     console.error('SSE Error:', error)
-    connectionStatus.value = 'error'
-    thinkingState.value = null
     currentEventSource.close()
     eventSource = null
 
+    const receivedAnyDelta = Boolean(messages.value[aiMessageIndex]?.content)
+    if (!receivedAnyDelta && retryCount < 1) {
+      connectionStatus.value = 'connecting'
+      openChatStream({
+        message,
+        mode,
+        chatId: turnChatId,
+        aiMessageIndex,
+        clientMsgId,
+        retryCount: retryCount + 1
+      })
+      return
+    }
+
+    connectionStatus.value = 'error'
+    thinkingState.value = null
     if (!messages.value[aiMessageIndex]?.content) {
       messages.value[aiMessageIndex].content = '连接中断了，请稍后再试。'
     }
+    retryableTurn.value = { message, mode, chatId: turnChatId, aiMessageIndex, clientMsgId, retryCount }
     refreshConversations({ silent: true })
   }
 }
@@ -615,8 +726,53 @@ const initializeConversations = async () => {
   }
 }
 
-onMounted(initializeConversations)
-onBeforeUnmount(stopStream)
+/*
+ * U8：移动端键盘弹出时把可视高度同步到 --app-viewport-height。
+ *
+ * 为什么不能只靠 100dvh：dvh 跟随的是浏览器 UI（地址栏）的伸缩，而软键盘在 iOS Safari 上
+ * 根本不改变 layout viewport——它只缩小 visualViewport，然后把整页往上平移来让焦点可见。
+ * 结果就是标题和模式栏被顶出屏幕。只有读 visualViewport.height 才能拿到键盘遮挡后的真实高度。
+ *
+ * offsetTop 那一项是补偿 iOS 已经平移过的量：键盘弹出时它非 0，不减掉的话外壳仍会偏移。
+ */
+const applyViewportHeight = () => {
+  const viewport = window.visualViewport
+  const height = viewport ? viewport.height - viewport.offsetTop : window.innerHeight
+  document.documentElement.style.setProperty('--app-viewport-height', `${Math.round(height)}px`)
+}
+
+const bindViewportListeners = () => {
+  applyViewportHeight()
+  const viewport = window.visualViewport
+  if (!viewport) {
+    // 老浏览器无 visualViewport：退回 resize，CSS 侧的 100dvh 兜底仍然生效。
+    window.addEventListener('resize', applyViewportHeight)
+    return
+  }
+  viewport.addEventListener('resize', applyViewportHeight)
+  viewport.addEventListener('scroll', applyViewportHeight)
+}
+
+const unbindViewportListeners = () => {
+  const viewport = window.visualViewport
+  if (viewport) {
+    viewport.removeEventListener('resize', applyViewportHeight)
+    viewport.removeEventListener('scroll', applyViewportHeight)
+  } else {
+    window.removeEventListener('resize', applyViewportHeight)
+  }
+  document.documentElement.style.removeProperty('--app-viewport-height')
+}
+
+onMounted(() => {
+  bindViewportListeners()
+  return initializeConversations()
+})
+
+onBeforeUnmount(() => {
+  stopStream()
+  unbindViewportListeners()
+})
 </script>
 
 <style scoped>
@@ -624,9 +780,11 @@ onBeforeUnmount(stopStream)
   display: flex;
   min-height: 100vh;
   flex-direction: column;
-  background-color: #f4f7f7;
+  background: var(--psych-canvas-base);
 }
 
+/* 头部玻璃条：全页唯一用 backdrop-filter 的地方——内容从它下面滚过，
+   模糊这一层的合成成本可控，换来真正的"毛玻璃"质感。 */
 .header {
   position: sticky;
   top: 0;
@@ -634,16 +792,21 @@ onBeforeUnmount(stopStream)
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(120px, auto);
   align-items: center;
-  padding: 14px 24px;
-  background-color: #2c7a7b;
-  box-shadow: 0 2px 8px rgba(22, 52, 52, 0.12);
-  color: white;
+  /* 高度必须是固定契约：下方 content-wrapper 的确定高度按它推算（56px）。
+     只用 padding 撑高的话，wrapper 的高度计算会和实际 header 脱节。 */
+  height: 56px;
+  padding: 0 24px;
+  background: rgba(255, 255, 255, 0.66);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border-bottom: 1px solid var(--psych-glass-line);
+  color: var(--psych-ink);
 }
 
 .title {
   margin: 0;
-  font-size: 20px;
-  font-weight: 700;
+  font-size: 19px;
+  font-weight: 800;
 }
 
 .header-status {
@@ -660,26 +823,27 @@ onBeforeUnmount(stopStream)
   flex: 0 0 auto;
   align-items: center;
   gap: 6px;
-  padding: 3px 10px;
-  border: 1px solid rgba(255, 255, 255, 0.32);
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.12);
-  color: rgba(255, 255, 255, 0.92);
+  padding: 4px 11px;
+  border: 1px solid var(--psych-glass-line);
+  border-radius: var(--psych-radius-pill);
+  background: rgba(255, 255, 255, 0.55);
+  color: var(--psych-ink-secondary);
   font-size: 12px;
   white-space: nowrap;
-  transition: background-color 0.15s ease;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
 }
 
 .memory-chip:hover {
-  background: rgba(255, 255, 255, 0.2);
+  background: var(--psych-glass-strong);
+  border-color: rgba(37, 99, 235, 0.30);
 }
 
 .memory-chip-dot {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: #9fe8d9;
-  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.12);
+  background: var(--psych-primary);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.16);
 }
 
 .memory-chip-compact {
@@ -690,7 +854,7 @@ onBeforeUnmount(stopStream)
   max-width: 260px;
   min-width: 0;
   overflow: hidden;
-  color: rgba(255, 255, 255, 0.82);
+  color: var(--psych-ink-muted);
   font-size: 13px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -702,33 +866,33 @@ onBeforeUnmount(stopStream)
   align-items: center;
   gap: 8px;
   padding-left: 12px;
-  border-left: 1px solid rgba(255, 255, 255, 0.22);
+  border-left: 1px solid var(--psych-glass-line);
 }
 
 .account-chip {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 3px 10px 3px 4px;
-  border: 1px solid rgba(255, 255, 255, 0.3);
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.12);
+  padding: 3px 11px 3px 4px;
+  border: 1px solid var(--psych-glass-line);
+  border-radius: var(--psych-radius-pill);
+  background: rgba(255, 255, 255, 0.55);
   transition: background-color 0.15s ease;
 }
 
 .account-chip:hover {
-  background: rgba(255, 255, 255, 0.2);
+  background: var(--psych-glass-strong);
 }
 
 .account-avatar {
   display: inline-flex;
-  width: 20px;
-  height: 20px;
+  width: 22px;
+  height: 22px;
   align-items: center;
   justify-content: center;
   border-radius: 50%;
-  background: #9fe8d9;
-  color: #16413f;
+  background: linear-gradient(135deg, var(--psych-primary), var(--psych-accent));
+  color: #ffffff;
   font-size: 11px;
   font-weight: 800;
 }
@@ -736,7 +900,7 @@ onBeforeUnmount(stopStream)
 .account-name {
   max-width: 110px;
   overflow: hidden;
-  color: rgba(255, 255, 255, 0.94);
+  color: var(--psych-ink);
   font-size: 12px;
   font-weight: 600;
   text-overflow: ellipsis;
@@ -744,20 +908,21 @@ onBeforeUnmount(stopStream)
 }
 
 .account-link {
-  padding: 5px 10px;
-  border: 1px solid rgba(255, 255, 255, 0.3);
-  border-radius: 6px;
+  padding: 5px 12px;
+  border: 1px solid var(--psych-glass-line);
+  border-radius: var(--psych-radius-pill);
   background: transparent;
-  color: rgba(255, 255, 255, 0.9);
+  color: var(--psych-ink-secondary);
   cursor: pointer;
   font-size: 12px;
   white-space: nowrap;
-  transition: background-color 0.15s ease;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
 }
 
 .account-link:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.16);
-  color: #ffffff;
+  background: var(--psych-primary-soft);
+  border-color: rgba(37, 99, 235, 0.35);
+  color: var(--psych-primary);
 }
 
 .account-link:disabled {
@@ -766,20 +931,28 @@ onBeforeUnmount(stopStream)
 }
 
 .admin-entry {
-  border-color: rgba(159, 232, 217, 0.55);
-  background: rgba(159, 232, 217, 0.14);
-  color: #c9f4ea;
+  border-color: rgba(37, 99, 235, 0.40);
+  background: var(--psych-primary-soft);
+  color: var(--psych-primary);
   font-weight: 700;
 }
 
-.admin-entry:hover {
-  background: rgba(159, 232, 217, 0.26);
+.admin-entry:hover:not(:disabled) {
+  background: #dbe7fd;
+  border-color: var(--psych-primary);
+  color: var(--psych-primary);
 }
 
 .content-wrapper {
   display: grid;
-  min-height: calc(100vh - 140px);
-  flex: 1;
+  /* 高度必须是确定值，不能用 min-height：grid 的 auto 行会随会话内容撑高，
+     整条 flex 高度链随之失效——chat-messages 的内部滚动永不触发，
+     输入舱被推出视口（长会话要滚到页面最底才能输入）。
+     flex 必须是 none：外层容器高度由内容决定时，flex-basis 0% 会覆盖掉
+     这里的确定高度，让 wrapper 回退成内容高（移动端修复同样用了 flex: none）。
+     56px = header 固定高度；页脚从折叠线以下开始，滚动页面可见。 */
+  height: calc(100vh - 56px);
+  flex: none;
   grid-template-columns: 280px minmax(0, 1fr);
 }
 
@@ -790,6 +963,9 @@ onBeforeUnmount(stopStream)
   flex-direction: column;
   gap: 10px;
   overflow: hidden;
+  /* 蓝色柔光渐变画布：消息列、输入舱、气泡、卡片全部浮在它上面，
+     玻璃面的"透"透的就是这一层。 */
+  background: var(--psych-gradient-canvas);
 }
 
 .chat-area :deep(.chat-container) {
@@ -799,50 +975,54 @@ onBeforeUnmount(stopStream)
 
 .mode-toolbar {
   display: flex;
-  min-height: 44px;
-  padding: 8px 10px;
+  min-height: 46px;
+  padding: 7px 12px;
   align-items: center;
   justify-content: space-between;
   gap: 14px;
-  border: 1px solid #d8e1e1;
-  border-radius: 8px;
-  background: #ffffff;
+  border: 1px solid var(--psych-glass-line);
+  border-radius: var(--psych-radius-pill);
+  background: var(--psych-glass);
+  box-shadow: 0 2px 10px -4px var(--psych-shadow-glass);
+  flex-shrink: 0;
 }
 
 .mode-toolbar p {
   margin: 0;
-  color: #5d6f70;
+  color: var(--psych-ink-muted);
   font-size: 12px;
   line-height: 1.45;
   text-align: right;
 }
 
+/* 分段切换：玻璃轨道 + 激活态主色胶囊 */
 .mode-switch {
   display: inline-grid;
   flex: 0 0 auto;
   grid-template-columns: repeat(2, 1fr);
-  border: 1px solid #9eb8b8;
-  border-radius: 7px;
-  overflow: hidden;
+  gap: 4px;
+  padding: 3px;
+  border: 1px solid var(--psych-glass-line);
+  border-radius: var(--psych-radius-pill);
+  background: rgba(255, 255, 255, 0.55);
 }
 
 .mode-switch button {
   min-width: 82px;
-  padding: 7px 12px;
+  padding: 6px 14px;
   border: 0;
-  background: #ffffff;
-  color: #315d5e;
+  border-radius: var(--psych-radius-pill);
+  background: transparent;
+  color: var(--psych-ink-secondary);
   cursor: pointer;
   font-size: 13px;
-}
-
-.mode-switch button + button {
-  border-left: 1px solid #9eb8b8;
+  transition: background-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease;
 }
 
 .mode-switch button.active {
-  background: #2c7a7b;
+  background: var(--psych-primary);
   color: #ffffff;
+  box-shadow: 0 2px 8px -2px var(--psych-primary-glow);
 }
 
 .mode-switch button:disabled {
@@ -851,7 +1031,7 @@ onBeforeUnmount(stopStream)
 }
 
 .mode-switch button:focus-visible {
-  outline: 2px solid #1f5f60;
+  outline: 2px solid var(--psych-primary);
   outline-offset: -3px;
 }
 
@@ -868,17 +1048,18 @@ onBeforeUnmount(stopStream)
   align-items: center;
   justify-content: center;
   padding: 20px;
-  background: rgba(20, 42, 42, 0.45);
-  backdrop-filter: blur(2px);
+  background: rgba(30, 41, 59, 0.38);
+  backdrop-filter: blur(3px);
 }
 
 .modal-card {
   width: 100%;
   max-width: 400px;
-  padding: 20px 22px;
-  border-radius: 12px;
-  background: #ffffff;
-  box-shadow: 0 24px 60px rgba(15, 40, 40, 0.28);
+  padding: 22px 24px;
+  border: 1px solid var(--psych-glass-line);
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.22);
 }
 
 .modal-head {
@@ -890,24 +1071,25 @@ onBeforeUnmount(stopStream)
 
 .modal-head h2 {
   margin: 0;
-  color: #1d3b3c;
+  color: var(--psych-ink);
   font-size: 17px;
   font-weight: 800;
 }
 
 .modal-close {
-  padding: 2px 8px;
+  padding: 2px 9px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--psych-radius-pill);
   background: transparent;
-  color: #71898a;
+  color: var(--psych-ink-muted);
   cursor: pointer;
   font-size: 19px;
   line-height: 1;
 }
 
 .modal-close:hover:not(:disabled) {
-  background: #eef4f4;
+  background: var(--psych-primary-soft);
+  color: var(--psych-primary);
 }
 
 .modal-close:disabled {
@@ -917,7 +1099,7 @@ onBeforeUnmount(stopStream)
 
 .modal-text {
   margin: 0 0 14px;
-  color: #3c5354;
+  color: var(--psych-ink-secondary);
   font-size: 13px;
   line-height: 1.7;
 }
@@ -925,10 +1107,10 @@ onBeforeUnmount(stopStream)
 .modal-error {
   margin: 0 0 14px;
   padding: 9px 12px;
-  border: 1px solid #f0c8c8;
-  border-radius: 6px;
-  background: #fdf3f3;
-  color: #933838;
+  border: 1px solid #f3c6c6;
+  border-radius: 10px;
+  background: var(--psych-danger-soft);
+  color: #b34242;
   font-size: 13px;
   line-height: 1.55;
 }
@@ -941,28 +1123,28 @@ onBeforeUnmount(stopStream)
 }
 
 .modal-field span {
-  color: #557071;
+  color: var(--psych-ink-secondary);
   font-size: 12px;
   font-weight: 600;
 }
 
 .modal-field input {
-  padding: 9px 11px;
-  border: 1px solid #c8d6d6;
-  border-radius: 7px;
-  color: #21393a;
+  padding: 9px 12px;
+  border: 1px solid #d5deea;
+  border-radius: 10px;
+  color: var(--psych-ink);
   font-size: 13px;
   transition: border-color 0.16s ease, box-shadow 0.16s ease;
 }
 
 .modal-field input::placeholder {
-  color: #9fb0b0;
+  color: #9aa7ba;
 }
 
 .modal-field input:focus {
   outline: none;
-  border-color: #2c7a7b;
-  box-shadow: 0 0 0 3px rgba(44, 122, 123, 0.14);
+  border-color: var(--psych-primary);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.14);
 }
 
 .modal-field input:disabled {
@@ -978,18 +1160,19 @@ onBeforeUnmount(stopStream)
 
 .ghost-button {
   padding: 9px 16px;
-  border: 1px solid #c8d6d6;
-  border-radius: 7px;
-  background: #ffffff;
-  color: #315d5e;
+  border: 1px solid #d5deea;
+  border-radius: var(--psych-radius-pill);
+  background: rgba(255, 255, 255, 0.7);
+  color: var(--psych-ink-secondary);
   cursor: pointer;
   font-size: 13px;
-  transition: background-color 0.15s ease, border-color 0.15s ease;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
 }
 
 .ghost-button:hover:not(:disabled) {
-  border-color: #2c7a7b;
-  background: #edf7f6;
+  border-color: rgba(37, 99, 235, 0.4);
+  background: var(--psych-primary-soft);
+  color: var(--psych-primary);
 }
 
 .ghost-button:disabled {
@@ -998,19 +1181,20 @@ onBeforeUnmount(stopStream)
 }
 
 .solid-button {
-  padding: 9px 16px;
+  padding: 9px 18px;
   border: 0;
-  border-radius: 7px;
-  background: #2c7a7b;
+  border-radius: var(--psych-radius-pill);
+  background: linear-gradient(135deg, var(--psych-primary), var(--psych-accent));
   color: #ffffff;
   cursor: pointer;
   font-size: 13px;
   font-weight: 700;
+  box-shadow: 0 3px 10px -3px var(--psych-primary-glow);
   transition: filter 0.15s ease, transform 0.15s ease;
 }
 
 .solid-button:hover:not(:disabled) {
-  filter: brightness(1.08);
+  filter: brightness(1.06);
   transform: translateY(-1px);
 }
 
@@ -1032,7 +1216,9 @@ onBeforeUnmount(stopStream)
 @media (max-width: 768px) {
   .header {
     grid-template-columns: minmax(0, 1fr) minmax(72px, auto);
-    padding: 11px 14px;
+    /* 与下方 content-wrapper 的兜底 calc(100dvh - 48px) 保持同一契约 */
+    height: 48px;
+    padding: 0 14px;
   }
 
   .title {
@@ -1083,7 +1269,10 @@ onBeforeUnmount(stopStream)
 
   .content-wrapper {
     display: flex;
-    height: calc(100dvh - 48px);
+    /* U8：优先用 JS 写入的真实可视高度（键盘弹出后已扣除遮挡），
+       100dvh 只是 visualViewport 不可用时的兜底。 */
+    height: var(--app-viewport-height, calc(100dvh - 48px));
+    max-height: var(--app-viewport-height, calc(100dvh - 48px));
     min-height: 0;
     flex: none;
     flex-direction: column;
@@ -1094,6 +1283,8 @@ onBeforeUnmount(stopStream)
     min-height: 0;
     flex: 1;
     padding: 10px;
+    /* 键盘弹出后消息区自己滚，外壳不许滚——否则标题栏会被一起带走。 */
+    overflow: hidden;
   }
 
   .chat-area :deep(.chat-container) {
@@ -1101,33 +1292,49 @@ onBeforeUnmount(stopStream)
     min-height: 0;
   }
 
+  /* U7：模式栏在窄屏必须常驻可见。原来它是普通流式块，聊天区一长就被挤出视口，
+     用户根本找不到"深度思考"开关。sticky + 顶部吸附保证它永远在。 */
   .mode-toolbar {
+    position: sticky;
+    top: 0;
+    z-index: 5;
     min-height: 0;
     padding: 6px;
     align-items: stretch;
     flex-direction: column;
     gap: 5px;
+    flex-shrink: 0;
+    /* 纵向堆叠不适合胶囊半径，换回常规大圆角 */
+    border-radius: 16px;
   }
 
+  /* 整行等宽，取消固定 min-width：窄到 320px 也只是按钮变窄，不会溢出被裁掉。 */
   .mode-switch {
-    align-self: flex-start;
+    align-self: stretch;
+    width: 100%;
   }
 
   .mode-switch button {
-    min-width: 76px;
+    min-width: 0;
     padding: 6px 10px;
   }
 
+  /* 说明文字压到一行并允许省略，腾出的高度留给消息区；但按钮本身绝不隐藏。 */
   .mode-toolbar p {
     font-size: 11px;
     text-align: left;
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
   }
 }
 
 @media (max-width: 480px) {
   .header {
     grid-template-columns: minmax(0, 1fr) minmax(62px, auto);
-    padding: 9px 10px;
+    height: 44px;
+    padding: 0 10px;
   }
 
   .title {
@@ -1148,7 +1355,8 @@ onBeforeUnmount(stopStream)
   }
 
   .content-wrapper {
-    height: calc(100dvh - 44px);
+    height: var(--app-viewport-height, calc(100dvh - 44px));
+    max-height: var(--app-viewport-height, calc(100dvh - 44px));
   }
 }
 </style>

@@ -86,7 +86,7 @@ onBeforeUnmount(() => window.clearInterval(timer))
 .deep-thinking-indicator {
   width: min(420px, 72vw);
   padding: 4px 2px 2px;
-  color: #254f50;
+  color: #1e3a8a;
 }
 
 .thinking-heading {
@@ -112,7 +112,8 @@ onBeforeUnmount(() => window.clearInterval(timer))
 .thinking-mark span {
   width: 3px;
   height: 7px;
-  background: #2c7a7b;
+  border-radius: 2px;
+  background: var(--psych-primary);
   animation: thinking-bars 1s ease-in-out infinite;
 }
 
@@ -125,7 +126,7 @@ onBeforeUnmount(() => window.clearInterval(timer))
 }
 
 .elapsed-time {
-  color: #667879;
+  color: var(--psych-ink-muted);
   font-size: 12px;
   font-variant-numeric: tabular-nums;
 }
@@ -140,18 +141,20 @@ onBeforeUnmount(() => window.clearInterval(timer))
 .stage-segment {
   position: relative;
   height: 3px;
+  border-radius: 2px;
   overflow: hidden;
-  background: #cbd8d8;
+  background: rgba(37, 99, 235, 0.18);
 }
 
 .stage-segment.is-complete {
-  background: #2c7a7b;
+  background: var(--psych-primary);
 }
 
 .stage-segment.is-active::after {
   position: absolute;
   inset: 0;
-  background: #2c7a7b;
+  border-radius: inherit;
+  background: var(--psych-primary);
   content: '';
   transform-origin: left;
   animation: stage-scan 1.25s ease-in-out infinite;
@@ -159,17 +162,26 @@ onBeforeUnmount(() => window.clearInterval(timer))
 
 .thinking-note {
   margin: 9px 0 0;
-  color: #667879;
+  color: var(--psych-ink-muted);
   font-size: 12px;
   line-height: 1.45;
 }
 
 .is-fallback {
-  color: #785b20;
+  color: var(--psych-warning);
 }
 
 .is-fallback .thinking-mark span {
-  background: #a87416;
+  background: #d97706;
+}
+
+.is-fallback .stage-segment {
+  background: rgba(217, 119, 6, 0.20);
+}
+
+.is-fallback .stage-segment.is-complete,
+.is-fallback .stage-segment.is-active::after {
+  background: #d97706;
 }
 
 @keyframes thinking-bars {

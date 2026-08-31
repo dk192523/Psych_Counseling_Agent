@@ -2,7 +2,10 @@
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- viewport-fit=cover：全面屏下 env(safe-area-inset-*) 才有非零值，输入区避让才有依据；
+         interactive-widget=resizes-content：Android Chrome 键盘弹出时压缩内容区而非平移整页，
+         与 PsychMaster 的 visualViewport 监听互为兜底。 -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
     <meta name="description" content="AI 心理咨询师陪你梳理职场、家庭、关系与成长中的困扰。" />
     <meta name="keywords" content="AI 心理咨询师,AI心理咨询,心理疏导,职场压力,家庭关系,自我成长" />
     <meta name="robots" content="index, follow" />

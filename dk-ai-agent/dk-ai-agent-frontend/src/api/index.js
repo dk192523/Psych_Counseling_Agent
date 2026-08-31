@@ -142,8 +142,10 @@ export const connectSSE = (url, payload) => {
 }
 
 // AI 心理咨询师聊天
-export const chatWithPsychApp = (message, chatId, deepThinking = false) => {
-  return connectSSE('/ai/counseling/chat/sse', { message, chatId, deepThinking })
+// clientMsgId：前端为本轮生成的幂等键。SSE 中断后重发同一消息时携带同键，
+// 后端据此防止用户消息重复归档（见 PsychMaster 的 openChatStream）。
+export const chatWithPsychApp = (message, chatId, deepThinking = false, clientMsgId = null) => {
+  return connectSSE('/ai/counseling/chat/sse', { message, chatId, deepThinking, clientMsgId })
 }
 
 // 心理咨询会话历史

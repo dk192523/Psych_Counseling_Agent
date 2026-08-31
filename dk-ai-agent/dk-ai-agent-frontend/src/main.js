@@ -2,6 +2,7 @@ import { createApp } from 'vue'
 import App from './App.vue'
 import router from './router'
 import { createHead } from '@vueuse/head'
+import './styles/theme.css'
 import './style.css'
 
 const app = createApp(App)

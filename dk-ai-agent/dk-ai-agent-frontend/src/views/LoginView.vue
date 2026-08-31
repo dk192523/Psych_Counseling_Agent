@@ -261,7 +261,7 @@ const handleSubmit = async () => {
   display: grid;
   min-height: 100vh;
   grid-template-columns: minmax(380px, 46%) minmax(0, 1fr);
-  background: #f4f7f7;
+  background: var(--psych-canvas-base);
 }
 
 /* ---------- 左侧品牌面板 ---------- */
@@ -272,10 +272,10 @@ const handleSubmit = async () => {
   justify-content: center;
   overflow: hidden;
   background:
-    radial-gradient(120% 90% at 12% 8%, rgba(159, 232, 217, 0.16) 0%, transparent 46%),
-    radial-gradient(110% 100% at 90% 96%, rgba(15, 61, 62, 0.55) 0%, transparent 52%),
-    linear-gradient(158deg, #2c7a7b 0%, #22605f 52%, #16413f 100%);
-  color: #eef7f6;
+    radial-gradient(120% 90% at 12% 8%, rgba(14, 165, 233, 0.20) 0%, transparent 46%),
+    radial-gradient(110% 100% at 90% 96%, rgba(10, 22, 51, 0.60) 0%, transparent 52%),
+    linear-gradient(158deg, #2563eb 0%, #1d4ed8 52%, #16295c 100%);
+  color: #eef4ff;
 }
 
 .ripple {
@@ -284,7 +284,7 @@ const handleSubmit = async () => {
   top: 44%;
   aspect-ratio: 1;
   transform: translate(-50%, -50%);
-  border: 1px solid rgba(159, 232, 217, 0.22);
+  border: 1px solid rgba(147, 197, 253, 0.24);
   border-radius: 50%;
   animation: ripple 9s linear infinite;
 }
@@ -319,8 +319,8 @@ const handleSubmit = async () => {
   width: 12px;
   height: 12px;
   border-radius: 50%;
-  background: #9fe8d9;
-  box-shadow: 0 0 0 4px rgba(159, 232, 217, 0.22);
+  background: #93c5fd;
+  box-shadow: 0 0 0 4px rgba(147, 197, 253, 0.22);
 }
 
 .brand-logo-text {
@@ -344,7 +344,7 @@ const handleSubmit = async () => {
   border: 1px solid rgba(255, 255, 255, 0.34);
   border-radius: 50%;
   background: radial-gradient(circle at 34% 30%, rgba(255, 255, 255, 0.2), rgba(255, 255, 255, 0.04) 62%);
-  box-shadow: 0 0 0 10px rgba(255, 255, 255, 0.05), 0 0 46px rgba(159, 232, 217, 0.16);
+  box-shadow: 0 0 0 10px rgba(255, 255, 255, 0.05), 0 0 46px rgba(147, 197, 253, 0.20);
   animation: breathe 8s ease-in-out infinite;
 }
 
@@ -362,7 +362,7 @@ const handleSubmit = async () => {
 
 .brand-quote {
   margin: 0;
-  color: #f2fbfa;
+  color: #f2f7ff;
   font-family: Georgia, 'Songti SC', 'STSong', 'SimSun', serif;
   font-size: 24px;
   font-weight: 600;
@@ -393,7 +393,7 @@ const handleSubmit = async () => {
   width: 5px;
   height: 5px;
   border-radius: 50%;
-  background: rgba(159, 232, 217, 0.85);
+  background: rgba(147, 197, 253, 0.85);
 }
 
 /* ---------- 右侧表单 ---------- */
@@ -403,19 +403,19 @@ const handleSubmit = async () => {
   justify-content: center;
   padding: 40px 24px;
   background:
-    radial-gradient(60% 50% at 88% 6%, rgba(44, 122, 123, 0.08) 0%, transparent 70%),
-    radial-gradient(50% 42% at 6% 96%, rgba(44, 122, 123, 0.07) 0%, transparent 70%),
-    #f4f7f7;
+    radial-gradient(60% 50% at 88% 6%, rgba(37, 99, 235, 0.08) 0%, transparent 70%),
+    radial-gradient(50% 42% at 6% 96%, rgba(14, 165, 233, 0.08) 0%, transparent 70%),
+    var(--psych-gradient-canvas);
 }
 
 .form-card {
   width: 100%;
   max-width: 400px;
   padding: 34px 34px 26px;
-  border: 1px solid #dbe6e6;
-  border-radius: 12px;
-  background: #ffffff;
-  box-shadow: 0 18px 46px rgba(22, 52, 52, 0.09);
+  border: 1px solid var(--psych-glass-line);
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.78);
+  box-shadow: 0 18px 46px rgba(15, 23, 42, 0.10);
   animation: card-in 0.32s ease both;
 }
 
@@ -426,7 +426,7 @@ const handleSubmit = async () => {
 
 .form-title {
   margin: 0;
-  color: #1d3b3c;
+  color: var(--psych-ink);
   font-size: 26px;
   font-weight: 800;
   letter-spacing: 0.02em;
@@ -434,7 +434,7 @@ const handleSubmit = async () => {
 
 .form-subtitle {
   margin: 8px 0 0;
-  color: #71898a;
+  color: var(--psych-ink-muted);
   font-size: 13px;
 }
 
@@ -442,7 +442,7 @@ const handleSubmit = async () => {
   position: relative;
   display: grid;
   margin: 22px 0 18px;
-  border-bottom: 1px solid #e2ebeb;
+  border-bottom: 1px solid var(--psych-glass-line);
   grid-template-columns: 1fr 1fr;
 }
 
@@ -450,7 +450,7 @@ const handleSubmit = async () => {
   padding: 10px 0 12px;
   border: 0;
   background: transparent;
-  color: #7c9090;
+  color: var(--psych-ink-muted);
   cursor: pointer;
   font-size: 15px;
   font-weight: 600;
@@ -458,11 +458,11 @@ const handleSubmit = async () => {
 }
 
 .tab-bar button.active {
-  color: #2c7a7b;
+  color: var(--psych-primary);
 }
 
 .tab-bar button:focus-visible {
-  outline: 2px solid #2c7a7b;
+  outline: 2px solid var(--psych-primary);
   outline-offset: -4px;
 }
 
@@ -473,7 +473,7 @@ const handleSubmit = async () => {
   width: 50%;
   height: 2px;
   border-radius: 2px;
-  background: #2c7a7b;
+  background: var(--psych-primary);
   transition: transform 0.24s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
@@ -559,7 +559,7 @@ const handleSubmit = async () => {
 }
 
 .field-label {
-  color: #3c5354;
+  color: var(--psych-ink-secondary);
   font-size: 13px;
   font-weight: 600;
 }
@@ -572,10 +572,10 @@ const handleSubmit = async () => {
 .field input {
   width: 100%;
   padding: 11px 12px;
-  border: 1px solid #c8d6d6;
-  border-radius: 7px;
-  background: #fbfdfd;
-  color: #21393a;
+  border: 1px solid #d5deea;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.75);
+  color: var(--psych-ink);
   font-size: 14px;
   transition: border-color 0.16s ease, box-shadow 0.16s ease;
 }
@@ -585,13 +585,13 @@ const handleSubmit = async () => {
 }
 
 .field input::placeholder {
-  color: #9fb0b0;
+  color: #9aa7ba;
 }
 
 .field input:focus {
   outline: none;
-  border-color: #2c7a7b;
-  box-shadow: 0 0 0 3px rgba(44, 122, 123, 0.14);
+  border-color: var(--psych-primary);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.14);
 }
 
 .field input:disabled {
@@ -605,40 +605,41 @@ const handleSubmit = async () => {
   transform: translateY(-50%);
   padding: 4px 8px;
   border: 0;
-  border-radius: 4px;
+  border-radius: var(--psych-radius-pill);
   background: transparent;
-  color: #71898a;
+  color: var(--psych-ink-muted);
   cursor: pointer;
   font-size: 12px;
 }
 
 .eye-button:hover {
-  background: #edf4f4;
-  color: #2c7a7b;
+  background: var(--psych-primary-soft);
+  color: var(--psych-primary);
 }
 
 .submit-button {
   display: inline-flex;
-  height: 44px;
+  height: 46px;
   align-items: center;
   justify-content: center;
   gap: 8px;
   margin-top: 4px;
   border: 0;
-  border-radius: 7px;
-  background: linear-gradient(140deg, #33908f 0%, #256b6c 100%);
+  border-radius: var(--psych-radius-pill);
+  background: linear-gradient(135deg, var(--psych-primary) 0%, var(--psych-accent) 100%);
   color: #ffffff;
   cursor: pointer;
   font-size: 15px;
   font-weight: 700;
   letter-spacing: 0.24em;
   text-indent: 0.24em;
+  box-shadow: 0 6px 16px -6px var(--psych-primary-glow);
   transition: transform 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease;
 }
 
 .submit-button:hover:not(:disabled) {
   transform: translateY(-1px);
-  box-shadow: 0 8px 18px rgba(37, 107, 108, 0.28);
+  box-shadow: 0 10px 22px -8px var(--psych-primary-glow);
   filter: brightness(1.05);
 }
 
@@ -666,7 +667,7 @@ const handleSubmit = async () => {
 
 .form-foot {
   margin: 18px 0 0;
-  color: #7c9090;
+  color: var(--psych-ink-muted);
   font-size: 13px;
   text-align: center;
 }
@@ -675,7 +676,7 @@ const handleSubmit = async () => {
   padding: 0 2px;
   border: 0;
   background: transparent;
-  color: #2c7a7b;
+  color: var(--psych-primary);
   cursor: pointer;
   font-size: 13px;
   font-weight: 700;

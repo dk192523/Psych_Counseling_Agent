@@ -63,9 +63,10 @@ const coveredSummary = computed(() => {
 <style scoped>
 .memory-card {
   flex-shrink: 0;
-  border: 1px solid #cfe3e2;
-  border-radius: 8px;
-  background: #f2f8f7;
+  border: 1px solid var(--psych-glass-line);
+  border-radius: 14px;
+  background: var(--psych-glass);
+  box-shadow: 0 2px 10px -4px var(--psych-shadow-glass);
   overflow: hidden;
 }
 
@@ -74,21 +75,21 @@ const coveredSummary = computed(() => {
   width: 100%;
   align-items: center;
   gap: 10px;
-  padding: 9px 12px;
+  padding: 9px 13px;
   border: 0;
   background: transparent;
-  color: #246667;
+  color: var(--psych-primary);
   cursor: pointer;
   text-align: left;
   transition: background-color 0.15s ease;
 }
 
 .memory-toggle:hover {
-  background: #e8f3f2;
+  background: rgba(255, 255, 255, 0.55);
 }
 
 .memory-toggle:focus-visible {
-  outline: 2px solid #2c7a7b;
+  outline: 2px solid var(--psych-primary);
   outline-offset: -2px;
 }
 
@@ -106,15 +107,15 @@ const coveredSummary = computed(() => {
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: #2c7a7b;
-  box-shadow: 0 0 0 3px rgba(44, 122, 123, 0.16);
+  background: var(--psych-primary);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.16);
 }
 
 .memory-meta {
   flex: 1;
   min-width: 0;
   overflow: hidden;
-  color: #71898a;
+  color: var(--psych-ink-muted);
   font-size: 11px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -122,7 +123,7 @@ const coveredSummary = computed(() => {
 
 .memory-chevron {
   flex: 0 0 auto;
-  color: #2c7a7b;
+  color: var(--psych-primary);
   font-size: 12px;
   transform: rotate(-90deg);
   transition: transform 0.2s ease;
@@ -133,8 +134,8 @@ const coveredSummary = computed(() => {
 }
 
 .memory-body {
-  border-top: 1px dashed #cfe3e2;
-  background: #ffffff;
+  border-top: 1px dashed var(--psych-glass-line);
+  background: rgba(255, 255, 255, 0.65);
 }
 
 .memory-digest {
@@ -142,7 +143,7 @@ const coveredSummary = computed(() => {
   margin: 0;
   padding: 12px 14px;
   overflow-y: auto;
-  color: #35504f;
+  color: var(--psych-ink-secondary);
   font-size: 13px;
   line-height: 1.7;
   white-space: pre-wrap;

@@ -9,11 +9,9 @@
   padding: 0;
 }
 
+/* 字体、底色、滚动条统一定义在 styles/theme.css 与 style.css；
+   这里只保留 App 级的尺寸与移动端根字号。 */
 html, body {
-  font-family: 'PingFang SC', 'Microsoft YaHei', 'Helvetica Neue', Helvetica, Arial, sans-serif;
-  font-size: 16px;
-  color: #333;
-  background-color: #f0f2f5;
   width: 100%;
   height: 100%;
   overflow-x: hidden;
@@ -44,25 +42,5 @@ button {
   html, body {
     font-size: 14px;
   }
-}
-
-/* 滚动条样式 */
-::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-
-::-webkit-scrollbar-track {
-  background: #f1f1f1;
-  border-radius: 3px;
-}
-
-::-webkit-scrollbar-thumb {
-  background: #ccc;
-  border-radius: 3px;
-}
-
-::-webkit-scrollbar-thumb:hover {
-  background: #aaa;
 }
 </style>

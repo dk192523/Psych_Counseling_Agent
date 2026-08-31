@@ -332,7 +332,7 @@ let debounceTimer = null
 let toastSeq = 0
 
 const statCards = [
-  { key: 'totalUsers', label: '用户总数', color: '#2c7a7b' },
+  { key: 'totalUsers', label: '用户总数', color: '#2563eb' },
   { key: 'activeUsers', label: '活跃用户', color: '#3d9a6c' },
   { key: 'disabledUsers', label: '停用用户', color: '#c05656' },
   { key: 'adminCount', label: '管理员', color: '#b07f2e' },
@@ -670,7 +670,7 @@ onMounted(refreshAll)
 <style scoped>
 .admin-page {
   min-height: 100vh;
-  background: #f4f7f7;
+  background: var(--psych-canvas-base);
 }
 
 /* ---------- 顶栏 ---------- */
@@ -683,7 +683,7 @@ onMounted(refreshAll)
   justify-content: space-between;
   gap: 14px;
   padding: 13px 24px;
-  background-color: #2c7a7b;
+  background-color: var(--psych-primary);
   box-shadow: 0 2px 8px rgba(22, 52, 52, 0.12);
   color: #ffffff;
 }
@@ -718,7 +718,7 @@ onMounted(refreshAll)
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: #9fe8d9;
+  background: #93c5fd;
   box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.12);
 }
 
@@ -784,7 +784,7 @@ onMounted(refreshAll)
 .stat-card {
   position: relative;
   padding: 16px 18px 14px;
-  border: 1px solid #dce6e6;
+  border: 1px solid #d5deea;
   border-radius: 10px;
   background: #ffffff;
   overflow: hidden;
@@ -798,7 +798,7 @@ onMounted(refreshAll)
   top: 0;
   width: 100%;
   height: 3px;
-  background: var(--accent, #2c7a7b);
+  background: var(--accent, var(--psych-primary));
 }
 
 .stat-card:hover {
@@ -807,7 +807,7 @@ onMounted(refreshAll)
 }
 
 .stat-value {
-  color: #1d3b3c;
+  color: var(--psych-ink);
   font-size: 28px;
   font-weight: 800;
   font-variant-numeric: tabular-nums;
@@ -816,14 +816,14 @@ onMounted(refreshAll)
 
 .stat-label {
   margin-top: 4px;
-  color: #71898a;
+  color: var(--psych-ink-muted);
   font-size: 12px;
   letter-spacing: 0.06em;
 }
 
 /* ---------- 表格卡片 ---------- */
 .table-card {
-  border: 1px solid #dce6e6;
+  border: 1px solid #d5deea;
   border-radius: 10px;
   background: #ffffff;
   overflow: hidden;
@@ -835,7 +835,7 @@ onMounted(refreshAll)
   align-items: center;
   gap: 12px;
   padding: 14px 16px;
-  border-bottom: 1px solid #e6ecec;
+  border-bottom: 1px solid #e3eaf4;
 }
 
 .search-box {
@@ -849,7 +849,7 @@ onMounted(refreshAll)
   left: 10px;
   top: 50%;
   transform: translateY(-50%);
-  color: #93a8a8;
+  color: #9aa7ba;
   font-size: 15px;
   pointer-events: none;
 }
@@ -857,33 +857,33 @@ onMounted(refreshAll)
 .search-box input {
   width: 100%;
   padding: 8px 12px 8px 30px;
-  border: 1px solid #c8d6d6;
+  border: 1px solid #d5deea;
   border-radius: 7px;
-  background: #fbfdfd;
-  color: #21393a;
+  background: rgba(255, 255, 255, 0.75);
+  color: var(--psych-ink);
   font-size: 13px;
   transition: border-color 0.16s ease, box-shadow 0.16s ease;
 }
 
 .search-box input:focus {
   outline: none;
-  border-color: #2c7a7b;
-  box-shadow: 0 0 0 3px rgba(44, 122, 123, 0.14);
+  border-color: var(--psych-primary);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.14);
 }
 
 .status-filter select {
   padding: 8px 10px;
-  border: 1px solid #c8d6d6;
+  border: 1px solid #d5deea;
   border-radius: 7px;
-  background: #fbfdfd;
-  color: #21393a;
+  background: rgba(255, 255, 255, 0.75);
+  color: var(--psych-ink);
   cursor: pointer;
   font-size: 13px;
 }
 
 .status-filter select:focus {
   outline: none;
-  border-color: #2c7a7b;
+  border-color: var(--psych-primary);
 }
 
 .ghost-button {
@@ -891,18 +891,18 @@ onMounted(refreshAll)
   align-items: center;
   gap: 5px;
   padding: 8px 12px;
-  border: 1px solid #c8d6d6;
+  border: 1px solid #d5deea;
   border-radius: 7px;
   background: #ffffff;
-  color: #315d5e;
+  color: var(--psych-ink-secondary);
   cursor: pointer;
   font-size: 13px;
   transition: background-color 0.15s ease, border-color 0.15s ease;
 }
 
 .ghost-button:hover:not(:disabled) {
-  border-color: #2c7a7b;
-  background: #edf7f6;
+  border-color: var(--psych-primary);
+  background: var(--psych-primary-soft);
 }
 
 .ghost-button:disabled {
@@ -924,7 +924,7 @@ onMounted(refreshAll)
 
 .table-total {
   margin-left: auto;
-  color: #7c9090;
+  color: var(--psych-ink-muted);
   font-size: 12px;
 }
 
@@ -934,26 +934,26 @@ onMounted(refreshAll)
   align-items: center;
   gap: 12px;
   padding: 9px 16px;
-  border-bottom: 1px solid #e6ecec;
-  background: #eef6f5;
+  border-bottom: 1px solid #e3eaf4;
+  background: var(--psych-primary-soft);
 }
 
 .bulk-count {
-  color: #315d5e;
+  color: var(--psych-ink-secondary);
   font-size: 13px;
 }
 
 .bulk-count strong {
-  color: #1d3b3c;
+  color: var(--psych-ink);
   font-size: 15px;
 }
 
 .bulk-button {
   padding: 6px 12px;
-  border: 1px solid #2c7a7b;
+  border: 1px solid var(--psych-primary);
   border-radius: 6px;
   background: #ffffff;
-  color: #246667;
+  color: var(--psych-primary);
   cursor: pointer;
   font-size: 12px;
   font-weight: 600;
@@ -961,7 +961,7 @@ onMounted(refreshAll)
 }
 
 .bulk-button:hover:not(:disabled) {
-  background: #dff0ee;
+  background: var(--psych-primary-soft);
 }
 
 .bulk-button.danger {
@@ -1003,7 +1003,7 @@ onMounted(refreshAll)
 
 .user-table th {
   padding: 10px 14px;
-  border-bottom: 1px solid #e6ecec;
+  border-bottom: 1px solid #e3eaf4;
   background: #f7fbfb;
   color: #5d7374;
   font-size: 12px;
@@ -1029,7 +1029,7 @@ onMounted(refreshAll)
 }
 
 .user-table tbody tr.is-selected {
-  background: #e8f3f2;
+  background: var(--psych-primary-soft);
 }
 
 .user-table tbody tr.is-self {
@@ -1049,7 +1049,7 @@ onMounted(refreshAll)
   width: 15px;
   height: 15px;
   cursor: pointer;
-  accent-color: #2c7a7b;
+  accent-color: var(--psych-primary);
 }
 
 .user-table input[type='checkbox']:disabled {
@@ -1071,8 +1071,8 @@ onMounted(refreshAll)
   margin-left: 6px;
   padding: 1px 6px;
   border-radius: 9px;
-  background: #cde5e3;
-  color: #1f5f60;
+  background: rgba(37, 99, 235, 0.16);
+  color: var(--psych-primary);
   font-size: 10px;
   font-weight: 700;
 }
@@ -1106,7 +1106,7 @@ onMounted(refreshAll)
 }
 
 .role-admin {
-  background: #2c7a7b;
+  background: var(--psych-primary);
   color: #ffffff;
 }
 
@@ -1150,7 +1150,7 @@ onMounted(refreshAll)
   border: 0;
   border-radius: 5px;
   background: transparent;
-  color: #246667;
+  color: var(--psych-primary);
   cursor: pointer;
   font-size: 12px;
   font-weight: 600;
@@ -1188,7 +1188,7 @@ onMounted(refreshAll)
 
 .table-state {
   padding: 34px 14px;
-  color: #7c9090;
+  color: var(--psych-ink-muted);
   text-align: center;
 }
 
@@ -1199,11 +1199,11 @@ onMounted(refreshAll)
   justify-content: space-between;
   gap: 12px;
   padding: 12px 16px;
-  border-top: 1px solid #e6ecec;
+  border-top: 1px solid #e3eaf4;
 }
 
 .pager-info {
-  color: #7c9090;
+  color: var(--psych-ink-muted);
   font-size: 12px;
   font-variant-numeric: tabular-nums;
 }
@@ -1244,7 +1244,7 @@ onMounted(refreshAll)
 
 .modal-head h2 {
   margin: 0;
-  color: #1d3b3c;
+  color: var(--psych-ink);
   font-size: 17px;
   font-weight: 800;
 }
@@ -1254,7 +1254,7 @@ onMounted(refreshAll)
   border: 0;
   border-radius: 6px;
   background: transparent;
-  color: #71898a;
+  color: var(--psych-ink-muted);
   cursor: pointer;
   font-size: 19px;
   line-height: 1;
@@ -1294,16 +1294,16 @@ onMounted(refreshAll)
 
 .modal-field input {
   padding: 9px 11px;
-  border: 1px solid #c8d6d6;
+  border: 1px solid #d5deea;
   border-radius: 7px;
-  color: #21393a;
+  color: var(--psych-ink);
   font-size: 13px;
 }
 
 .modal-field input:focus {
   outline: none;
-  border-color: #2c7a7b;
-  box-shadow: 0 0 0 3px rgba(44, 122, 123, 0.14);
+  border-color: var(--psych-primary);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.14);
 }
 
 .modal-foot {
@@ -1316,7 +1316,7 @@ onMounted(refreshAll)
   padding: 9px 16px;
   border: 0;
   border-radius: 7px;
-  background: #2c7a7b;
+  background: var(--psych-primary);
   color: #ffffff;
   cursor: pointer;
   font-size: 13px;
@@ -1406,7 +1406,7 @@ onMounted(refreshAll)
 .toast {
   padding: 9px 18px;
   border-radius: 8px;
-  background: #1d3b3c;
+  background: var(--psych-ink);
   color: #f0f7f6;
   font-size: 13px;
   box-shadow: 0 10px 24px rgba(15, 40, 40, 0.24);
@@ -1432,7 +1432,7 @@ onMounted(refreshAll)
   padding: 0 4px;
   border: 0;
   background: transparent;
-  color: #2c7a7b;
+  color: var(--psych-primary);
   cursor: pointer;
   font-size: inherit;
   font-weight: 700;

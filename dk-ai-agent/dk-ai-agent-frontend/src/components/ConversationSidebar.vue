@@ -137,8 +137,9 @@ const formatMessageCount = (conversation) => {
 <style scoped>
 .history-shell {
   min-width: 0;
-  background: #ffffff;
-  border-right: 1px solid #dce5e5;
+  /* 玻璃面板：透出页面底色，与聊天区渐变连成一体 */
+  background: rgba(255, 255, 255, 0.5);
+  border-right: 1px solid var(--psych-glass-line);
 }
 
 .mobile-history-toggle {
@@ -160,19 +161,19 @@ const formatMessageCount = (conversation) => {
   justify-content: space-between;
   gap: 12px;
   padding: 0 4px 14px;
-  border-bottom: 1px solid #e6ecec;
+  border-bottom: 1px solid var(--psych-glass-line);
 }
 
 .history-heading h2 {
   margin: 0;
-  color: #213536;
+  color: var(--psych-ink);
   font-size: 16px;
   line-height: 1.4;
 }
 
 .history-heading p {
   margin: 4px 0 0;
-  color: #718080;
+  color: var(--psych-ink-muted);
   font-size: 12px;
 }
 
@@ -182,41 +183,46 @@ const formatMessageCount = (conversation) => {
   align-items: center;
   gap: 4px;
   min-height: 34px;
-  padding: 6px 10px;
-  border: 1px solid #2c7a7b;
-  border-radius: 6px;
-  background: #ffffff;
-  color: #246667;
+  padding: 6px 14px;
+  border: 1px solid rgba(37, 99, 235, 0.40);
+  border-radius: var(--psych-radius-pill);
+  background: var(--psych-primary-soft);
+  color: var(--psych-primary);
   cursor: pointer;
   font-size: 13px;
+  font-weight: 600;
+  transition: background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
 .new-conversation-button:hover:not(:disabled) {
-  background: #edf7f6;
+  background: #dbe7fd;
+  border-color: var(--psych-primary);
+  box-shadow: 0 3px 10px -3px var(--psych-primary-glow);
 }
 
 .conversation-list {
   min-height: 0;
-  padding-top: 8px;
+  padding-top: 10px;
   overflow-y: auto;
 }
 
+/* 圆角卡片条目：激活态用主色软底标出，不再用左侧硬边条 */
 .conversation-item {
   position: relative;
   display: flex;
   margin-bottom: 4px;
-  border-left: 3px solid transparent;
+  border-radius: 12px;
   background: transparent;
+  transition: background-color 0.15s ease;
 }
 
 .conversation-item:hover,
 .conversation-item:focus-within {
-  background: #f2f7f7;
+  background: rgba(255, 255, 255, 0.75);
 }
 
 .conversation-item.active {
-  border-left-color: #2c7a7b;
-  background: #e8f3f2;
+  background: var(--psych-primary-soft);
 }
 
 .conversation-select {
@@ -226,7 +232,7 @@ const formatMessageCount = (conversation) => {
   flex-direction: column;
   align-items: flex-start;
   gap: 3px;
-  padding: 10px 42px 10px 10px;
+  padding: 10px 42px 10px 12px;
   border: 0;
   background: transparent;
   color: inherit;
@@ -253,37 +259,41 @@ const formatMessageCount = (conversation) => {
   flex: 1;
   min-width: 0;
   overflow: hidden;
-  color: #243737;
+  color: var(--psych-ink);
   font-size: 14px;
   font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+.conversation-item.active .conversation-title {
+  color: var(--psych-primary);
+}
+
 .conversation-count {
   flex: 0 0 auto;
-  padding: 0 6px;
-  border-radius: 9px;
-  background: #e3eeee;
-  color: #496565;
+  padding: 0 7px;
+  border-radius: var(--psych-radius-pill);
+  background: rgba(37, 99, 235, 0.10);
+  color: var(--psych-ink-muted);
   font-size: 10px;
   font-variant-numeric: tabular-nums;
-  line-height: 16px;
+  line-height: 17px;
   white-space: nowrap;
 }
 
 .conversation-item.active .conversation-count {
-  background: #cde5e3;
-  color: #1f5f60;
+  background: rgba(37, 99, 235, 0.16);
+  color: var(--psych-primary);
 }
 
 .conversation-preview {
-  color: #647474;
+  color: var(--psych-ink-muted);
   font-size: 12px;
 }
 
 .conversation-time {
-  color: #8a9696;
+  color: #93a1b8;
   font-size: 11px;
 }
 
@@ -291,14 +301,15 @@ const formatMessageCount = (conversation) => {
   position: absolute;
   top: 8px;
   right: 6px;
-  padding: 5px 6px;
+  padding: 5px 8px;
   border: 0;
-  border-radius: 4px;
+  border-radius: var(--psych-radius-pill);
   background: transparent;
-  color: #8b5f5f;
+  color: #a06a6a;
   cursor: pointer;
   font-size: 11px;
   opacity: 0;
+  transition: background-color 0.15s ease, color 0.15s ease;
 }
 
 .conversation-item:hover .delete-conversation-button,
@@ -308,23 +319,24 @@ const formatMessageCount = (conversation) => {
 }
 
 .delete-conversation-button:hover:not(:disabled) {
-  background: #f8eaea;
-  color: #8d3434;
+  background: var(--psych-danger-soft);
+  color: var(--psych-danger);
 }
 
 .history-state,
 .history-error {
   margin: 16px 4px;
-  color: #788585;
+  color: var(--psych-ink-muted);
   font-size: 13px;
   line-height: 1.6;
 }
 
 .history-error {
-  padding: 8px;
-  border-left: 3px solid #b75c5c;
-  background: #fff4f4;
-  color: #8d3434;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid #f3c6c6;
+  background: var(--psych-danger-soft);
+  color: #b34242;
 }
 
 button:disabled {
@@ -335,7 +347,7 @@ button:disabled {
 @media (max-width: 768px) {
   .history-shell {
     border-right: 0;
-    border-bottom: 1px solid #dce5e5;
+    border-bottom: 1px solid var(--psych-glass-line);
   }
 
   .mobile-history-toggle {
@@ -347,8 +359,8 @@ button:disabled {
     gap: 10px;
     padding: 10px 14px;
     border: 0;
-    background: #ffffff;
-    color: #294344;
+    background: transparent;
+    color: var(--psych-ink);
     cursor: pointer;
     font-size: 14px;
   }
@@ -356,10 +368,10 @@ button:disabled {
   .history-count {
     min-width: 24px;
     margin-right: auto;
-    padding: 1px 6px;
-    border-radius: 10px;
-    background: #e3eeee;
-    color: #496565;
+    padding: 1px 7px;
+    border-radius: var(--psych-radius-pill);
+    background: rgba(37, 99, 235, 0.10);
+    color: var(--psych-ink-muted);
     text-align: center;
     font-size: 12px;
   }
@@ -369,7 +381,7 @@ button:disabled {
     height: auto;
     max-height: 300px;
     padding: 12px;
-    border-top: 1px solid #e6ecec;
+    border-top: 1px solid var(--psych-glass-line);
   }
 
   .history-panel.mobile-open {

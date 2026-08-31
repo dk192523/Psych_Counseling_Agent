@@ -1,0 +1,135 @@
+/* ============================================================
+   AI 心理咨询师 · 蓝色玻璃主题（设计令牌唯一来源）
+   ------------------------------------------------------------
+   设计语言取自 Hermes 参考实现的玻璃拟态方案，主色换为蓝色系：
+   - 玻璃 = 半透明填充 + 发丝边 + 柔投影，刻意不用 backdrop-filter：
+     气泡背后是一层平滑渐变，模糊它没有意义，而一屏几十个
+     backdrop-filter 层会拖垮滚动帧率（唯一例外是顶部玻璃条，仅一层）。
+   - 组件里优先引用这里的变量；新增颜色先加令牌再使用。
+   ============================================================ */
+
+:root {
+  /* ---------- 品牌色 ---------- */
+  --psych-primary: #2563eb;            /* 主色：按钮/选中态/链接 */
+  --psych-primary-hover: #3b82f6;      /* 主色悬停 */
+  --psych-primary-light: #7aa8f8;      /* 主色浅档：渐变末端/深底强调 */
+  --psych-primary-soft: #e8f0fe;       /* 主色淡底：选中项/悬停背景 */
+  --psych-primary-glow: rgba(37, 99, 235, 0.30);   /* 主色光晕：聚焦投影 */
+  --psych-accent: #0ea5e9;             /* 辅助色（天蓝）：渐变第二色/点缀 */
+  --psych-accent-soft: #e3f4fd;
+
+  /* ---------- 语义色 ---------- */
+  --psych-danger: #dc4b4b;
+  --psych-danger-soft: #fdeeee;
+  --psych-warning: #b45309;
+  --psych-warning-soft: #fef3c7;
+
+  /* ---------- 文本层级（墨色，落在浅蓝画布上） ---------- */
+  --psych-ink: #1f2937;
+  --psych-ink-secondary: #4b5563;
+  --psych-ink-muted: #6b7280;
+
+  /* ---------- 聊天画布：Gemini 式蓝色柔光渐变，中心偏上最亮 ----------
+     输入舱、气泡、卡片全部浮在它上面，玻璃的"透"就是透出这一层。 */
+  --psych-gradient-canvas: radial-gradient(
+    130% 90% at 50% 34%,
+    #d8e7fc 0%,
+    #e6f0fe 34%,
+    #f4f9ff 66%,
+    #fdfeff 100%
+  );
+  --psych-canvas-base: #f2f7fe;        /* 渐变之外的页面兜底色 */
+
+  /* ---------- 玻璃材质三档 + 描边 + 投影 ---------- */
+  --psych-glass: rgba(255, 255, 255, 0.58);         /* 常态：输入舱、面板 */
+  --psych-glass-strong: rgba(255, 255, 255, 0.78);  /* 激活/悬停/浮层 */
+  --psych-glass-raised: rgba(255, 255, 255, 0.72);  /* 气泡：边界要比输入舱明确 */
+  /* 用户气泡主色玻璃。透明度不是随手取的：这是白字对比度守住 4.5:1 的档位，
+     再透一档正文对比就不合格。 */
+  --psych-glass-primary: rgba(37, 99, 235, 0.88);
+  /* 浅色玻璃用极淡的深色发丝线：白边 + 白填充 + 近白底叠一起等于没有边界。 */
+  --psych-glass-line: rgba(15, 23, 42, 0.08);
+  --psych-glass-line-strong: rgba(15, 23, 42, 0.14);
+  --psych-glass-line-primary: rgba(255, 255, 255, 0.30);
+  --psych-shadow-glass: rgba(15, 23, 42, 0.14);
+
+  /* ---------- 圆角体系 ---------- */
+  --psych-radius-sm: 10px;
+  --psych-radius-md: 16px;
+  --psych-radius-lg: 22px;
+  --psych-radius-pill: 999px;
+
+  --psych-scrollbar: #b8c7dd;
+}
+
+/* ---------- 共享玻璃面 ---------- */
+
+/* 主要抬起面：气泡、卡片 */
+.psych-glass {
+  background: var(--psych-glass-raised);
+  border: 1px solid var(--psych-glass-line);
+  box-shadow: 0 2px 10px -4px var(--psych-shadow-glass);
+}
+
+/* 次级面：面板、嵌套块，不抢层次，无投影 */
+.psych-glass-subtle {
+  background: var(--psych-glass);
+  border: 1px solid var(--psych-glass-line);
+}
+
+/* 浮层：弹出/悬浮，填充更实、投影更重 */
+.psych-glass-pop {
+  background: var(--psych-glass-strong);
+  border: 1px solid var(--psych-glass-line);
+  box-shadow: 0 10px 30px -8px var(--psych-shadow-glass);
+}
+
+/* 渐变文字：问候语、品牌标题 */
+.psych-gradient-text {
+  background: linear-gradient(
+    96deg,
+    var(--psych-primary) 0%,
+    var(--psych-accent) 55%,
+    var(--psych-primary-light) 100%
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+}
+
+/* ---------- 消息入场动画 ---------- */
+@keyframes psych-fade-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.psych-message-enter {
+  animation: psych-fade-in 0.28s ease-out;
+}
+
+/* ---------- 全局滚动条（蓝灰） ---------- */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--psych-scrollbar);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #9db1d0;
+}
+
+/* ---------- 减弱动效：无障碍兜底 ---------- */
+@media (prefers-reduced-motion: reduce) {
+  .psych-message-enter {
+    animation: none;
+  }
+}

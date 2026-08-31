@@ -26,7 +26,7 @@ defineProps({
 }
 
 .psych {
-  background: linear-gradient(45deg, #2c7a7b, #4fd1c5);
+  background: linear-gradient(135deg, var(--psych-primary), var(--psych-accent));
 }
 
 .default {
