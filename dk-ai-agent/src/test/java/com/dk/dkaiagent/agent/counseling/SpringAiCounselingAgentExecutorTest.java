@@ -34,6 +34,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -54,23 +55,24 @@ class SpringAiCounselingAgentExecutorTest {
     }
 
     @Test
-    void disabledAgentPreparesOnceThenUsesJavaFallback() {
+    void disabledAgentFallsBackToStandardChainWithoutArchiving() {
         Fixture fixture = new Fixture();
         fixture.properties.setEnabled(false);
         when(fixture.counselingApp.doChatWithRagByStreamPrepared(OWNER_ID, "message", "chat-id"))
                 .thenReturn(Flux.just("answer", "[DONE]"));
 
         List<CounselingStreamEvent> events = fixture.executor()
-                .stream("message", "chat-id", OWNER_ID)
+                .prepareAndAnswer("message", "chat-id", OWNER_ID)
                 .collectList()
                 .block();
 
         assertEquals(List.of("fallback", "delta", "done"), eventTypes(events));
         assertTrue(events.get(0).fallback());
         assertEquals("standard", events.get(1).effectiveMode());
-        verify(fixture.counselingApp).prepareConversationTurn(OWNER_ID, "chat-id", "message");
+        // 归档已收口到 CounselingTurnPipeline：executor 绝不落库，防止重复归档回归。
+        verify(fixture.counselingApp, never()).prepareConversationTurn(
+                eq(OWNER_ID), eq("chat-id"), eq("message"), isNull());
         verify(fixture.counselingApp).doChatWithRagByStreamPrepared(OWNER_ID, "message", "chat-id");
-        verify(fixture.counselingApp, never()).doChatWithRagByStream(anyLong(), anyString(), anyString());
     }
 
     @Test
@@ -83,7 +85,7 @@ class SpringAiCounselingAgentExecutorTest {
                 .thenReturn(Flux.just("stable", "[DONE]"));
 
         List<CounselingStreamEvent> events = fixture.executor()
-                .stream("message", "chat-id", OWNER_ID)
+                .prepareAndAnswer("message", "chat-id", OWNER_ID)
                 .collectList()
                 .block();
 
@@ -91,7 +93,9 @@ class SpringAiCounselingAgentExecutorTest {
         assertEquals("planning", events.get(0).phase());
         assertEquals("fallback", events.get(1).phase());
         assertTrue(events.get(1).fallback());
-        verify(fixture.counselingApp).prepareConversationTurn(OWNER_ID, "chat-id", "message");
+        // 归档已收口到 CounselingTurnPipeline：executor 绝不落库，防止重复归档回归。
+        verify(fixture.counselingApp, never()).prepareConversationTurn(
+                eq(OWNER_ID), eq("chat-id"), eq("message"), isNull());
         verify(fixture.counselingApp).doChatWithRagByStreamPrepared(OWNER_ID, "message", "chat-id");
         verify(fixture.counselingApp, never()).doChatWithAgentContextByStreamPrepared(
                 anyLong(), anyString(), anyString(), anyString());
@@ -126,7 +130,7 @@ class SpringAiCounselingAgentExecutorTest {
                 .thenReturn(Flux.just("deep answer", "[DONE]"));
 
         List<CounselingStreamEvent> events = fixture.executor()
-                .stream("message", "chat-id", OWNER_ID)
+                .prepareAndAnswer("message", "chat-id", OWNER_ID)
                 .collectList()
                 .block();
 
@@ -137,7 +141,9 @@ class SpringAiCounselingAgentExecutorTest {
                 events.subList(0, 4).stream().map(CounselingStreamEvent::phase).toList());
         assertEquals("deep", events.get(4).effectiveMode());
         assertFalse(events.get(4).fallback());
-        verify(fixture.counselingApp).prepareConversationTurn(OWNER_ID, "chat-id", "message");
+        // 归档已收口到 CounselingTurnPipeline：executor 绝不落库，防止重复归档回归。
+        verify(fixture.counselingApp, never()).prepareConversationTurn(
+                eq(OWNER_ID), eq("chat-id"), eq("message"), isNull());
         verify(fixture.counselingApp).doChatWithAgentContextByStreamPrepared(
                 eq(OWNER_ID), eq("message"), eq("chat-id"), anyString());
         verify(fixture.counselingApp, never()).doChatWithRagByStreamPrepared(OWNER_ID, "message", "chat-id");
@@ -152,7 +158,7 @@ class SpringAiCounselingAgentExecutorTest {
                 new AiWorkerContracts.PlanResponse(
                         "1", "worker-request", "clarification", true,
                         "睡眠与学业压力", List.of("学业压力 失眠 现实影响"), List.of("持续时间"),
-                        "deepseek", false, List.of(), 5, List.of())));
+                        "deepseek", false, List.of(), 5, List.of(), "clarify", "失眠对上课状态的影响")));
         when(fixture.aiWorkerClient.refine(any())).thenReturn(Optional.of(
                 new AiWorkerContracts.RefineResponse(
                         "1", "worker-request",
@@ -174,7 +180,7 @@ class SpringAiCounselingAgentExecutorTest {
                 .thenReturn(Flux.just("worker answer", "[DONE]"));
 
         List<CounselingStreamEvent> events = fixture.executor()
-                .stream("message", "chat-id", OWNER_ID)
+                .prepareAndAnswer("message", "chat-id", OWNER_ID)
                 .collectList()
                 .block();
 
@@ -194,7 +200,8 @@ class SpringAiCounselingAgentExecutorTest {
                 new AiWorkerContracts.PlanResponse(
                         "1", "worker-request", "clarification", true,
                         "degraded", List.of("degraded query"), List.of(),
-                        "heuristic", true, List.of("llm_unavailable"), 1, List.of())));
+                        "heuristic", true, List.of("llm_unavailable"), 1, List.of(),
+                        "listen", "")));
         when(fixture.chatModel.call(any(Prompt.class))).thenReturn(response("""
                 {"shouldRetrieve":false,"stage":"clarification","focus":"继续澄清",
                  "retrievalQueries":[],"missingInformation":["具体经过"]}
@@ -204,13 +211,47 @@ class SpringAiCounselingAgentExecutorTest {
                 .thenReturn(Flux.just("java planner answer", "[DONE]"));
 
         List<CounselingStreamEvent> events = fixture.executor()
-                .stream("message", "chat-id", OWNER_ID)
+                .prepareAndAnswer("message", "chat-id", OWNER_ID)
                 .collectList()
                 .block();
 
         assertEquals("deep", events.get(4).effectiveMode());
         verify(fixture.chatModel).call(any(Prompt.class));
         verify(fixture.aiWorkerClient, never()).refine(any());
+    }
+
+    @Test
+    void workerListenModeInjectsResponseStrategyIntoDeepContext() {
+        // 回应策略：worker 判定 listen（用户在宣泄）→ 深度上下文必须携带
+        // "只反映与陪伴、不提问"的内部指令与选题方向，且标注为系统指令而非用户事实。
+        Fixture fixture = new Fixture();
+        when(fixture.aiWorkerClient.plan(any())).thenReturn(Optional.of(
+                new AiWorkerContracts.PlanResponse(
+                        "1", "worker-request", "clarification", false,
+                        "用户的情绪宣泄", List.of(), List.of(),
+                        "deepseek", false, List.of(), 4, List.of(),
+                        "listen", "这种疲惫持续了多久")));
+        when(fixture.counselingApp.doChatWithAgentContextByStreamPrepared(
+                eq(OWNER_ID), eq("message"), eq("chat-id"), anyString()))
+                .thenReturn(Flux.just("strategy answer", "[DONE]"));
+
+        List<CounselingStreamEvent> events = fixture.executor()
+                .prepareAndAnswer("message", "chat-id", OWNER_ID)
+                .collectList()
+                .block();
+
+        assertEquals(List.of("status", "status", "status", "status", "delta", "done"),
+                eventTypes(events));
+        var captor = org.mockito.ArgumentCaptor.forClass(String.class);
+        verify(fixture.counselingApp).doChatWithAgentContextByStreamPrepared(
+                eq(OWNER_ID), eq("message"), eq("chat-id"), captor.capture());
+        String context = captor.getValue();
+        assertTrue(context.contains("反映与陪伴"));
+        assertTrue(context.contains("不要提出任何问题"));
+        assertTrue(context.contains("这种疲惫持续了多久"));
+        assertTrue(context.contains("系统内部指令"));
+        // listen 模式下没有可靠案例时，不得伪装检索出了材料。
+        assertTrue(context.contains("没有筛选出足够可靠的相似案例"));
     }
 
     @Test
@@ -247,7 +288,7 @@ class SpringAiCounselingAgentExecutorTest {
                 .thenReturn(Flux.just("fallback answer", "[DONE]"));
 
         List<CounselingStreamEvent> events = fixture.executor()
-                .stream("message", "chat-id", OWNER_ID)
+                .prepareAndAnswer("message", "chat-id", OWNER_ID)
                 .collectList()
                 .block();
 

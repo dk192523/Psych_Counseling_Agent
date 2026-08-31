@@ -324,6 +324,21 @@ class ConversationMemoryServiceTest {
     }
 
     @Test
+    void heuristicRecallDoesNotFillWithZeroOverlapCandidates() {
+        List<ConversationMessage> candidates = List.of(
+                new ConversationMessage(10L, "user", "妈妈吵架后一直失眠", NOW),
+                new ConversationMessage(20L, "assistant", "今天吃了苹果", NOW));
+        when(historyService.searchRecallCandidates(eq(CHAT_ID), anyString(), eq(properties.getRecallCandidates())))
+                .thenReturn(candidates);
+        when(aiWorkerClient.recall(any())).thenReturn(Optional.empty());
+
+        List<ConversationMemoryService.RecallEpisodeView> result =
+                service.recallEpisodes(CHAT_ID, "失眠", List.of("失眠"));
+
+        assertEquals(List.of(10L), result.stream().map(ConversationMemoryService.RecallEpisodeView::id).toList());
+    }
+
+    @Test
     void recallFallsBackToHeuristicWhenWorkerResponseIsDegraded() {
         List<ConversationMessage> candidates = List.of(
                 new ConversationMessage(10L, "user", "和妈妈吵架后一直失眠", NOW),

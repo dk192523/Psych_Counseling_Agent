@@ -28,6 +28,15 @@ from .ranking import TranscriptRepository, rank_candidates, tokenize
 
 logger = logging.getLogger(__name__)
 
+# 回应策略白名单：LLM 给出越界值时归一为 clarify（最中性、最安全的默认姿态）。
+_RESPONSE_MODES = ("listen", "clarify", "explore")
+
+# 强情绪标记：启发式降级路径识别"正在宣泄"的最低保障，命中即 listen（只反映、零提问）。
+_DISTRESS_MARKERS = (
+    "撑不住", "崩溃", "被掏空", "熬不住", "活不下去", "受不了",
+    "绝望", "好累", "太累", "喘不过气", "撑不下去", "想哭",
+)
+
 _PLANNER_PROMPT = """
 你是心理疏导系统的检索规划 Agent，只输出 JSON，不直接回答用户，也不输出思维链。
 叙述可能是单方、片段化或情绪化的，不能把用户对他人动机和对错的判断当成事实。
@@ -37,7 +46,11 @@ stage 只能是 clarification、confirmation、analysis：画像不足时以澄�
 避免未经证实的诊断或动机。missing_information 只列仍需确认的事实，不写建议。
 association_hypotheses：结合长期摘要与当前输入，给出最多 3 条需要在历史原话中核实的隐性心理关联假设
 （如"核实用户是否提及过与父亲相关的失控经历"），不得把假设写成事实，没有可推导的关联时返回空数组。
-返回字段：stage、should_retrieve、focus、queries、missing_information、association_hypotheses。
+response_mode 只能是 listen、clarify、explore：用户正在倾泻细节、情绪很浓或回复极短时选 listen（只反映与陪伴，零提问）；
+画像有明确缺口、需要澄清时选 clarify（至多一个澄清问题）；用户已征询建议或明确同意梳理时选 explore（可以给内容）。
+next_probe 用不超过 40 个字写"本轮最值得了解的一个方向"（如"延期的具体原因"），是选题方向而不是问题原文，
+与当前叙述无关或判断不了时留空字符串。
+返回字段：stage、should_retrieve、focus、queries、missing_information、association_hypotheses、response_mode、next_probe。
 """.strip()
 
 _CONSOLIDATOR_PROMPT = """
@@ -123,6 +136,8 @@ class IntelligenceService:
             degraded_reasons=degraded_reasons,
             duration_ms=_elapsed_ms(started),
             association_hypotheses=hypotheses,
+            response_mode=_normalize_response_mode(draft.response_mode),
+            next_probe=_truncate(draft.next_probe, 120),
         )
 
     async def refine(self, request: RefineRequest) -> RefineResponse:
@@ -314,6 +329,12 @@ def _valid_grade_selection(grade: GradeDraft, allowed_ids: set[str], limit: int)
     )
 
 
+def _normalize_response_mode(value: str) -> str:
+    """回应策略白名单归一：LLM 给出越界值（或没给）时落回 clarify——
+    最中性、最安全的默认姿态，宁可少指令也不误指令。"""
+    return value if value in _RESPONSE_MODES else "clarify"
+
+
 def _heuristic_plan(request: PlanRequest) -> PlanDraft:
     current = re.sub(r"\s+", " ", request.current_message).strip()
     all_user_text = " ".join(
@@ -337,12 +358,23 @@ def _heuristic_plan(request: PlanRequest) -> PlanDraft:
     if keyword_query and keyword_query != current:
         queries.append(keyword_query)
     missing = [] if stage == "analysis" else ["事情发生的具体经过", "频率与持续时间", "对现实生活的影响"]
+    # 启发式的回应策略：同意梳理→explore；极短输入或带强情绪标记（可能正在宣泄）→listen；其余 clarify。
+    # 极短用长度判，宣泄用词面判——LLM 不可用时的降级路径尤其不能把高强度情绪当普通澄清处理。
+    emotional = any(marker in current for marker in _DISTRESS_MARKERS)
+    response_mode = (
+        "explore" if stage == "analysis"
+        else "listen" if (len(current) <= 6 or emotional)
+        else "clarify"
+    )
+    next_probe = "" if stage == "analysis" or not missing else missing[0]
     return PlanDraft(
         stage=stage,
         should_retrieve=should_retrieve,
         focus=_truncate(current, 160),
         queries=queries,
         missing_information=missing,
+        response_mode=response_mode,
+        next_probe=next_probe,
     )
 
 
@@ -469,9 +501,12 @@ def _bm25_rrf_scores(request: RecallRequest) -> tuple[dict[int, float], bool]:
 
 
 def _rrf_episodes(request: RecallRequest, rrf_scores: dict[int, float]) -> list[RecallEpisode]:
+    # A recency bonus may only reorder lexical hits; it must never turn a zero-hit
+    # message into a recalled episode merely to fill the response limit.
     scored = [
         (rrf_scores[candidate.id] + 0.1 * candidate.recency_score, candidate)
         for candidate in request.candidates
+        if rrf_scores.get(candidate.id, 0.0) > 0
     ]
     scored.sort(key=lambda item: (-item[0], item[1].id))
     return [

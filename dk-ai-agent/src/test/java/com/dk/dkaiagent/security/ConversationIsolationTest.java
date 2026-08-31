@@ -1,6 +1,7 @@
 package com.dk.dkaiagent.security;
 
 import com.dk.dkaiagent.agent.counseling.CounselingAgentExecutor;
+import com.dk.dkaiagent.agent.counseling.CounselingTurnPipeline;
 import com.dk.dkaiagent.app.CounselingApp;
 import com.dk.dkaiagent.controller.AiController;
 import com.dk.dkaiagent.history.ConversationHistoryService;
@@ -174,6 +175,10 @@ class ConversationIsolationTest {
             ReflectionTestUtils.setField(controller, "counselingApp", counselingApp);
             ReflectionTestUtils.setField(controller, "conversationHistoryService", historyService);
             ReflectionTestUtils.setField(controller, "counselingAgentExecutor", executor);
+            CounselingTurnPipeline pipeline = new CounselingTurnPipeline();
+            ReflectionTestUtils.setField(pipeline, "counselingApp", counselingApp);
+            ReflectionTestUtils.setField(pipeline, "counselingAgentExecutor", executor);
+            ReflectionTestUtils.setField(controller, "counselingTurnPipeline", pipeline);
             // 当前主体固定为用户 B。
             currentUser = mockStatic(CurrentUser.class);
             currentUser.when(CurrentUser::requireUserId).thenReturn(USER_B);
@@ -217,9 +222,10 @@ class ConversationIsolationTest {
             assertEquals(HttpStatus.NOT_FOUND, syncEx.getStatusCode());
             assertEquals(HttpStatus.NOT_FOUND, sseEx.getStatusCode());
             // 跨用户会话绝不开流/调用模型：下游全部未触达。
-            verify(counselingApp, never()).doChatWithRag(anyLong(), anyString(), anyString());
-            verify(counselingApp, never()).doChatWithRagByStream(anyLong(), anyString(), anyString());
-            verify(executor, never()).stream(anyString(), anyString(), anyLong());
+            verify(counselingApp, never()).doChatWithRag(anyLong(), anyString(), anyString(), any());
+            verify(counselingApp, never()).prepareConversationTurn(anyLong(), anyString(), anyString(), any());
+            verify(counselingApp, never()).doChatWithRagByStreamPrepared(anyLong(), anyString(), anyString());
+            verify(executor, never()).prepareAndAnswer(anyString(), anyString(), anyLong());
         }
 
         @Test

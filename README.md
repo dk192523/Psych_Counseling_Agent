@@ -104,7 +104,7 @@ npm.cmd run dev
 - `POST /api/users/me/password`
 - `GET /api/admin/users`、`/api/admin/stats` 等管理端点（仅 ADMIN）
 - `GET /api/ai/counseling/chat/sync`
-- `GET /api/ai/counseling/chat/sse`
+- `POST /api/ai/counseling/chat/sse`（正式前端链路；JSON body）
 - `POST /api/ai/conversations`
 - `GET /api/ai/conversations`
 - `GET /api/health`
@@ -154,8 +154,8 @@ set COUNSELING_TRANSCRIPT_DIRECTORY=D:\absolute\path\to\counseling-kb\raw
 
 仍存在的限制，如实保留：
 
-- 心理消息仍通过 GET query string 发送，可能进入浏览器历史或代理访问日志，不要输入真实身份信息、联系方式和其他敏感数据；迁移到 POST 仍在路线图上。
-- CSRF 防护已关闭：当前部分状态变更由 GET 承载，依赖 SameSite=Lax Cookie 与前端默认 `127.0.0.1` 绑定缓解，不构成对公网部署的完整防护。
+- 正式前端已通过 POST body 发送心理消息；为兼容旧客户端仍保留 GET 流式入口，旧入口会把消息暴露在浏览器历史或代理日志中，不应继续使用。
+- CSRF 防护仍关闭，当前依赖 SameSite=Lax Cookie 与默认本地绑定缓解，不构成对公网部署的完整防护。
 - 注册默认开放且无邀请码，仅适合本地部署；进程内限流与会话注册表不支持多副本，暴露公网前必须收敛注册入口并补齐审计。
 - 尚无隐私数据自助删除（用户侧只能删除自己的会话）与完整内容审核。
 - DeepSeek、向量检索和自动转录都可能出错，案例和时间戳需要人工核对。
@@ -165,6 +165,7 @@ set COUNSELING_TRANSCRIPT_DIRECTORY=D:\absolute\path\to\counseling-kb\raw
 ## 文档
 
 - [功能说明](docs/FUNCTIONAL_SPEC.md)——产品功能与使用：账号体系、咨询对话、长期记忆、管理后台、页面与路由清单
-- [技术设计](docs/TECHNICAL_DESIGN.md)——唯一技术文档：架构、认证与数据隔离、分层记忆、RAG、API 合约、部署与启动、测试与 E2E 复现
+- [技术设计](docs/TECHNICAL_DESIGN.md)——架构、认证与数据隔离、分层记忆、RAG、API 合约、部署与启动、测试与 E2E 复现
+- [服务器旧版本增量升级](docs/SERVER_INCREMENTAL_UPGRADE.md)——本轮审计修复的变更清单、备份换版、验收与回滚
 
 项目统一使用 UTF-8。编辑器、Maven、Python、容器和生成文件的编码约束见 `.editorconfig` 与 `.gitattributes`。

@@ -14,5 +14,7 @@ services:
       SESSION_TIMEOUT: ${SESSION_TIMEOUT:-24h}
 
   ai-worker:
+    # 开发档把 worker 端口发布到宿主 loopback 方便直连调试——正因如此这里不放行未鉴权：
+    # 主文件的 AI_WORKER_SHARED_SECRET（必填）与 ALLOW_UNAUTHENTICATED=false 一并继承。
     ports:
       - "${DEV_BIND_ADDRESS:-127.0.0.1}:${AI_WORKER_PORT:-8001}:8000"

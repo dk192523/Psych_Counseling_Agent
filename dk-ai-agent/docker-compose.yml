@@ -80,7 +80,9 @@ services:
       AI_WORKER_MAX_CONCURRENCY: ${AI_WORKER_MAX_CONCURRENCY:-4}
       AI_WORKER_FAILURE_THRESHOLD: ${AI_WORKER_FAILURE_THRESHOLD:-3}
       AI_WORKER_CIRCUIT_OPEN_SECONDS: ${AI_WORKER_CIRCUIT_OPEN_SECONDS:-30}
-      AI_WORKER_SHARED_SECRET: ${AI_WORKER_SHARED_SECRET:-}
+      # 必填。`:?` 让缺失在 `docker compose up` 当场报错，而不是拉起一个鉴权失效
+      # （旧行为）或反复 RuntimeError 重启（新行为）的 worker——后者要翻容器日志才看得出来。
+      AI_WORKER_SHARED_SECRET: ${AI_WORKER_SHARED_SECRET:?set AI_WORKER_SHARED_SECRET in .env (openssl rand -base64 32)}
       ADMIN_INITIAL_PASSWORD: ${ADMIN_INITIAL_PASSWORD:-}
       # 生产同源反代无需 CORS：缺省透传空值 → 后端不注册任何跨域放行。
       # 若生产前后端分域，显式设置生产前端 Origin（逗号分隔，严禁 "*"）。
@@ -118,7 +120,10 @@ services:
       AI_WORKER_LLM_ENABLED: ${AI_WORKER_LLM_ENABLED:-true}
       AI_WORKER_MODEL_TIMEOUT_SECONDS: ${AI_WORKER_MODEL_TIMEOUT_SECONDS:-20}
       AI_WORKER_MODEL_MAX_CONCURRENCY: ${AI_WORKER_MODEL_MAX_CONCURRENCY:-4}
-      AI_WORKER_SHARED_SECRET: ${AI_WORKER_SHARED_SECRET:-}
+      AI_WORKER_SHARED_SECRET: ${AI_WORKER_SHARED_SECRET:?set AI_WORKER_SHARED_SECRET in .env (openssl rand -base64 32)}
+      # 生产编排里不放行未鉴权：worker 只 expose 不 publish，但同网段的任何容器都能直连它，
+      # 而 recall 决定哪些"用户过往原话"进模型上下文。
+      AI_WORKER_ALLOW_UNAUTHENTICATED: "false"
       COUNSELING_TRANSCRIPT_DIRECTORY: /data/transcripts
     volumes:
       - ../counseling-kb/raw:/data/transcripts:ro

@@ -35,7 +35,7 @@ Psych_Counseling_Agent/
 │   ├── src/main/java/com/dk/dkaiagent/
 │   │   ├── controller/                REST/SSE 入口：AiController(聊天+会话CRUD) AuthController MeController AdminUserController HealthController
 │   │   ├── app/CounselingApp          系统提示词、快速 RAG advisor 链、进程内模型窗口水合、消息归档
-│   │   ├── agent/counseling/          深度准备状态机：SpringAiCounselingAgentExecutor、DeepThinkingProperties、CounselingStreamEvent、CounselingAgentExecutor(接口)
+│   │   ├── agent/counseling/          聊天编排与深度准备状态机：CounselingTurnPipeline(快速/深度汇合+归档收口)、SpringAiCounselingAgentExecutor、DeepThinkingProperties、CounselingStreamEvent、CounselingAgentExecutor(接口)
 │   │   ├── orchestration/             AgentRequestContext(deadline/requestId)、ExecutionContextScope(ScopedValue)
 │   │   ├── history/                   ConversationHistoryService(建表/读写/守卫/墓碑/CAS) + 4 个 record + MemoryStats
 │   │   ├── memory/                    ConversationMemoryService(整合编排/召回)、DefaultCounselingMemoryAgent(双引擎)、SafetyTerms、MemoryProperties、DigestAdvancedEvent
@@ -229,13 +229,14 @@ Psych_Counseling_Agent/
 ### 4.1 快速路径（端到端）
 
 ```text
-Browser POST /api/ai/counseling/chat/sse  body={message, chatId, deepThinking:false}
+Browser POST /api/ai/counseling/chat/sse  body={message, chatId, deepThinking:false, clientMsgId?}
  → AiController.doChatWithCounselingSSE(ChatRequest)
- → AiController.streamCounselingChat
      · requireConversationOwner(chatId)：CurrentUser.requireUserId() + ConversationHistoryService.getConversation(chatId, ownerId)
        —— 跨用户/不存在同形 404，在任何下游之前完成（ownerId 在请求线程取出，见 §4.4）
- → CounselingApp.doChatWithRagByStream(ownerId, message, chatId)
-     · prepareConversation = hydrateConversation(chatId) + ConversationHistoryService.appendUserMessage(ownerId,…)
+ → CounselingTurnPipeline.run(CounselingTurnRequest)          ← 快速/深度两条链路唯一汇合点
+     · prepareConversationTurn(ownerId, chatId, message, clientMsgId)：归档每轮恰好一次
+       = hydrateConversation(chatId) + ConversationHistoryService.appendUserMessage(ownerId, …, clientMsgId)
+       （clientMsgId 唯一索引 + ON CONFLICT DO NOTHING：SSE 中断重发同一幂等键不重复归档）
  → CounselingApp.doChatWithRagByStreamPrepared(ownerId, message, chatId)   ← 深度回退也复用此方法（Prepared 变体不二次保存用户消息）
      · system = SYSTEM_PROMPT + "\n\n" + digestForContext(chatId)（框架语 + 最新 digest，每轮从库读，幂等零残留）
      · advisor 链：MessageChatMemoryAdvisor（近期原文窗口 ≤30）+ MyLoggerAdvisor（order 0，仅记 requestId）
@@ -244,34 +245,34 @@ Browser POST /api/ai/counseling/chat/sse  body={message, chatId, deepThinking:fa
      · stream().content() → doOnNext 累积 → doOnComplete persistAssistantMessage → concatWithValues("[DONE]")
  → persistAssistantMessage
      · appendAssistantMessage 返回 0（流式期间会话被并发删除）→ 记 info，跳过归档与整合
-     · 归属守卫 IllegalStateException → catch 记 error，不破坏主响应
-     · 成功后 ConversationMemoryService.onTurnArchived(chatId)（异步，§5.1）
- → AiController 把 "[DONE]" 映射为 done 事件，其余为 delta 事件，封 ServerSentEvent<ChatStreamEvent>
+     · ConversationUnavailableException（生成期间删除/归属变化）→ 跳过归档，不复活或越权写入
+     · 其他持久化异常向上传播并使 SSE 失败，禁止客户端收到 done 后刷新丢回答的虚假成功
+     · 成功后 ConversationMemoryService.onTurnArchived(chatId)（异步，§5.1；触发失败只记日志）
+ → Pipeline 把 "[DONE]" 映射为 done 事件、其余为 delta 事件（CounselingStreamEvent），控制器封 ServerSentEvent<ChatStreamEvent>
 ```
 
 **hydration（`CounselingApp.hydrateConversation`）**：`synchronized (hydratedConversationIds)` 内判定 `rehydrate = !hydratedConversationIds.contains(chatId) || dirtyDigestIds.remove(chatId)`；需要时 `chatMemory.clear` 后从库回填最近 `context-window-messages`（默认 30）条原文。digest 不走水合——注入已解耦为每轮 system prompt，天然看到最新摘要；`DigestAdvancedEvent`（整合剪枝后发布）经 `@EventListener onDigestAdvanced` 标脏，下一轮丢弃旧窗口重建，避免进程内模型永久看着已剪枝的原文。
 
-**为什么流式链路不做 query rewrite**：`QueryRewriter.doQueryRewrite`（Spring AI `RewriteQueryTransformer`）是一次阻塞 LLM 前置调用，放在首字路径上直接抬高 TTFB。因此只有同步接口 `GET /api/ai/counseling/chat/sync → CounselingApp.doChatWithRag` 做重写，并以重写文本同时作为 user 消息与 `TranscriptProvenanceAdvisor.ORIGINAL_QUERY`（advisor 参数键 `"transcript_original_query"`）；流式链路直接把原始 message 传给 `ORIGINAL_QUERY`。
+**为什么流式链路不做 query rewrite**：`QueryRewriter.doQueryRewrite`（Spring AI `RewriteQueryTransformer`）是一次阻塞 LLM 前置调用，放在首字路径上直接抬高 TTFB。因此只有同步接口 `POST /api/ai/counseling/chat/sync → CounselingApp.doChatWithRag` 做重写，并以重写文本同时作为 user 消息与 `TranscriptProvenanceAdvisor.ORIGINAL_QUERY`（advisor 参数键 `"transcript_original_query"`）；流式链路直接把原始 message 传给 `ORIGINAL_QUERY`。
 
 ### 4.2 深度路径（端到端）
 
-入口 `agent/counseling/SpringAiCounselingAgentExecutor.stream(message, chatId, ownerId)`：
+归档由 `CounselingTurnPipeline.run` 统一完成后，入口 `agent/counseling/SpringAiCounselingAgentExecutor.prepareAndAnswer(message, chatId, ownerId)`：
 
 ```text
 Flux.defer:
  1. requestContext = AgentRequestContext.deep(chatId, stepTimeout × 3)     // 整轮 deadline
- 2. counselingApp.prepareConversationTurn(ownerId, chatId, message)        // 用户消息只在此保存一次
- 3. !properties.isEnabled()          → fallbackToStandard(phase="fallback", "深度模式暂时未启用，正在切换到稳妥模式…")
- 4. requiresImmediateSafetyResponse  → fallbackToStandard(phase="safety",  "这段话可能涉及现实安全，我先优先回应你…")
+ 2. !properties.isEnabled()          → fallbackToStandard(phase="fallback", STANDARD_PATH_NOTICE)
+ 3. requiresImmediateSafetyResponse  → fallbackToStandard(phase="safety",  "这段话可能涉及现实安全，我先优先回应你…")
        // SafetyTerms.containsAny，与记忆层安全打标共用单一词表（§5.1）
- 5. preparation = Flux.generate(PreparationState, advancePreparation)      // 五阶段状态机
+ 4. preparation = Flux.generate(PreparationState, advancePreparation)      // 五阶段状态机
         .subscribeOn(agentVirtualThreadScheduler)
         .timeout(stepTimeout)                                              // 准备流总超时
-        .onErrorResume → useFallback=true + fallback 事件 "深度检索暂时没有完成，正在切换到稳妥模式…"
- 6. answer = useFallback ? doChatWithRagByStreamPrepared(standard, fallback=true)
-          : deepContext==null ? fallbackToStandard("fallback", 同上文案)
+        .onErrorResume → useFallback=true + fallback 事件 STANDARD_PATH_NOTICE（"这轮改用常规方式回应你，内容不受影响…"）
+ 5. answer = useFallback ? doChatWithRagByStreamPrepared(standard, fallback=true)
+          : deepContext==null ? fallbackToStandard("fallback", STANDARD_PATH_NOTICE)
           : doChatWithAgentContextByStreamPrepared(deep, fallback=false)   // 深度 system prompt + 仅两个工具
- 7. preparation.concatWith(answer)
+ 6. preparation.concatWith(answer)
 ```
 
 **五阶段状态机**（`advancePreparation`，每阶段进入先 `ExecutionContextScope.call(requestContext, …)` 重绑上下文）：
@@ -281,10 +282,10 @@ Flux.defer:
 | `ANNOUNCE_PLANNING` | `status(planning)` “正在梳理问题与检索方向…” | 仅推进状态 |
 | `PLAN` | `status(retrieving)` “正在从案例摘要中查找真正相关的材料…” | `createPlan`（见下） |
 | `RETRIEVE` | `status(grading)` “正在排除表面相似、核对可用依据…” | 情景召回 Future **先提交** → 本线程执行 `retrieveCandidates`（内部按 query 再扇出）→ `awaitEpisodes` 收召回（失败仅降级空列表 + warn，不触发整链回退） |
-| `GRADE` | `status(answering)` “依据已经整理好，正在组织回应…” | `createDeepContext` → 写入 `deepContext` AtomicReference |
+| `GRADE` | `status(answering)` `retrievalSummary(context)`（“核对了 N 个相关案例，其中 N 段逐字稿可直接对照，正在组织回应…”——首字等待期间给出可判断的进度；无可靠材料时如实说“这轮按你说的内容本身回应”） | `createDeepContext` → 写入 `deepContext` AtomicReference |
 | `COMPLETE` | `sink.complete()` | 结束准备流，进入 answer |
 
-**`createPlan`**：`getRecentMessages(chatId, historyMessages=12)` 每条截断 1200 字 + `longTermDigest = truncate(getDigest, 3000)` + `message ≤ 4000`，`PlanLimits(maxQueries, 180, 5)` → `AiWorkerClient.plan`；Worker 不可达/熔断/`degraded=true` → **Java planner 回退**（`PLANNER_PROMPT` + `agentClient.entity(RetrievalPlan.class)`，同一 ChatModel）。`normalizePlan` 收口：`queries ≤ maxQueries 条 ×180 字`（`shouldRetrieve && queries 空` → `[truncate(message,180)]`）；stage 白名单 `clarification|confirmation|analysis`，非法归一 `clarification`；`focus = truncate(原值 或 默认"当前困扰与需要澄清的事实", 240)`；`missingInformation ≤5×100`；`associationHypotheses ≤ associationHypotheses配置 ×120`。
+**`createPlan`**：`getRecentMessages(chatId, historyMessages=12 + 1)` **多读一条再剥离当前轮**（`prepareConversationTurn` 已把当前消息落库，末尾就是它本身；`historyExcludingCurrentTurn` 只剥掉内容一致的末尾 `UserMessage`，planner 契约里当前消息显式单传，不再依赖"读即得"）每条截断 1200 字 + `longTermDigest = truncate(getDigest, 3000)` + `message ≤ 4000`，`PlanLimits(maxQueries, 180, 5)` → `AiWorkerClient.plan`；Worker 不可达/熔断/`degraded=true` → **Java planner 回退**（`PLANNER_PROMPT` + `agentClient.entity(RetrievalPlan.class)`，同一 ChatModel）。`normalizePlan` 收口：`queries ≤ maxQueries 条 ×180 字`（`shouldRetrieve && queries 空` → `[truncate(message,180)]`）；stage 白名单 `clarification|confirmation|analysis`，非法归一 `clarification`；`focus = truncate(原值 或 默认"当前困扰与需要澄清的事实", 240)`；`missingInformation ≤5×100`；`associationHypotheses ≤ associationHypotheses配置 ×120`；新增回应策略信号 `responseMode ∈ {listen,clarify,explore}`（白名单外归一 clarify，本地 planner 与 worker `_PLANNER_PROMPT` 同义）与 `nextProbe ≤120`（本轮最值得了解的选题方向，非问题原文）。worker `PlanResponse` 侧为带默认值的增量字段（pydantic default），向后兼容；策略经 `buildResponseStrategy` 注入深度上下文头部（内部指令，截断免疫），快速/深度/降级三条链路的提问节奏另由 `RhythmDirectives`（确定性限速器：连续 2 轮问句收尾强制纯反映；用户 ≤3 code point 短答且前一条 assistant 含问句时触发回避退让）经 `systemPromptWithDigest` 统一注入。
 
 **`retrieveCandidates`**：`shouldRetrieve=false` → 空。每 query 一个 Future（`ExecutionContextScope.call` 重绑）跑 `retrieveQuery`：`vectorBulkhead.tryAcquire(max(1, context.remaining().toMillis()), MS)` → `SearchRequest(topK=candidateTopK, similarityThreshold, filterExpression="knowledgeBase == 'psych-counseling'")`；中断/异常 → 空 + warn。合并去重 `candidateKey = extractSlug(document)`（metadata `slug` 键优先、回退正则 `案例编号\s+(\d{4}-\d{2}-\d{2}-call-\d{2})`；无 slug 退 `document.getId()` 或文本哈希），**同 key 保留 score 高者**；按 score 降序取 `candidateLimit` 条，编号 `C1..Cn`。
 
@@ -316,7 +317,7 @@ Flux.defer:
 | `delta` | `null` | `deep`/`standard` | 视链路 | 回答分片 |
 | `done` | `null` | 同上 | 同上 | `[DONE]` 映射，`content=""` |
 
-快速链路的事件由 `ChatStreamEvent` 二参构造生成：`phase=null, effectiveMode="standard", fallback=false`。事件只携带用户可见阶段与文本；requestId 可入日志，消息正文/Prompt/候选全文/Key 不入应用日志。`fallback=true` 只能由后端设置。兼容端点 `GET /ai/counseling/chat/server_sent_event`（纯文本流）与 `GET /ai/counseling/chat/sse_emitter`（`SseEmitter`，180s 超时）只转发文本块，**前端正式链路不使用**；`GET /ai/counseling/chat/sse` 是旧客户端兼容入口，正式链路是**同路径 POST**（`@RequestBody ChatRequest`，见 §8.3）。
+快速链路的事件由 `CounselingStreamEvent.delta/done("standard", false)` 生成：`phase=null, effectiveMode="standard", fallback=false`。事件只携带用户可见阶段与文本；requestId 可入日志，消息正文/Prompt/候选全文/Key 不入应用日志。`fallback=true` 只能由后端设置。历史 GET 兼容入口（`/ai/counseling/chat/sse`、`/server_sent_event`、`/sse_emitter`）已全部移除，正式链路是**同路径 POST**（`@RequestBody ChatRequest`，见 §8.3）。
 
 ### 4.4 线程与作用域模型
 
@@ -333,7 +334,7 @@ Flux.defer:
 | 表 | 关键字段 | 说明 |
 |---|---|---|
 | `psych_conversation` | `id VARCHAR(64) PK`（客户端 UUID）、`title(120)`、`owner_id BIGINT → psych_user(id)`（ALTER 追加）、`created_at/updated_at` | 会话主表；索引 `(owner_id, updated_at DESC)`、`(updated_at DESC)` |
-| `psych_chat_message` | `id BIGSERIAL PK`、`conversation_id FK ON DELETE CASCADE`、`role(16)`、`content TEXT`、`created_at` | 原文档案，只追加；索引 `(conversation_id, id)` |
+| `psych_chat_message` | `id BIGSERIAL PK`、`conversation_id FK ON DELETE CASCADE`、`role(16)`、`content TEXT`、`client_msg_id(64)`（ALTER 追加，幂等键）、`created_at` | 原文档案，只追加；索引 `(conversation_id, id)` + 唯一索引 `(conversation_id, client_msg_id)`（NULL 互不冲突，无幂等键的写入不受约束） |
 | `psych_conversation_memory` | `conversation_id PK FK CASCADE`、`digest TEXT`、`covered_until_message_id BIGINT`（水位）、`covered_message_count`、`digest_chars`、`updated_at` | 每会话一行，CAS upsert |
 | `psych_conversation_tombstone` | `conversation_id PK`、`owner_id`、`deleted_at` | 删除墓碑，**无 FK**；UUID 永不复用故无需清理 |
 | `psych_user` | `id BIGSERIAL`、`username(64) UNIQUE`、`password_hash(100)`、`role(16)`、`status(16)`、`created_at/updated_at/last_login_at/disabled_at/disabled_reason(200)` | 账号表（§6） |
@@ -346,8 +347,8 @@ Flux.defer:
 
 ```pseudo
 consolidateIfNeeded(chatId):                       // 跑在 agentVirtualThreadExecutor 虚拟线程
-  lock = conversationLocks.computeIfAbsent(chatId, ReentrantLock)
-  if !lock.tryLock(): return                       // 非阻塞：在途整合未结束则跳过本轮（幂等，下轮重试）
+  if !consolidationsInFlight.add(chatId): return   // 非阻塞：在途整合未结束则跳过本轮（幂等，下轮重试）
+                                                   // finally 中 remove：集合严格有界，不会随会话数无界增长
   try:
     count = historyService.countMessages(chatId)
     eviction = count > maxMessagesPerConversation
@@ -458,7 +459,7 @@ recallEpisodes(chatId, currentMessage, queries):
                   RecallLimits(recallMaxEpisodes=4, recallSnippetChars=300))
     → POST /internal/v1/memory/recall
     Worker: jieba 分词 + BM25Okapi，每 query 对 score>0 的候选累加 1/(60+rank)（k=60）；
-            终分 = rrf + 0.1×recencyScore；sort (−score, id)；取 maxEpisodes；engine="bm25+rrf"
+            仅保留 rrf>0 的真实词法命中，再以 rrf + 0.1×recencyScore 排序；绝不以零命中消息补满 maxEpisodes；engine="bm25+rrf"
             无命中 → engine="keyword"（token 集合交叠计数，sort (−overlap, −recency, id)）+ degraded "no_bm25_hits"
             排序异常 → degraded "bm25_error:<类型>" 再走 keyword
   Java 消毒 sanitizeWorkerEpisodes（Worker 的贡献只限于选择/排序/分数）:
@@ -467,7 +468,7 @@ recallEpisodes(chatId, currentMessage, queries):
     取满 recallMaxEpisodes 停
   回退 heuristicEpisodes（worker 空/degraded/异常）:
     units = CJK 二元切分 + 拉丁小写（keywordUnits）
-    score = keywordOverlap(按字符长度加权的重叠) + 0.1×recency；降序取 recallMaxEpisodes
+    仅保留 keywordOverlap>0 的真实命中；score = overlap + 0.1×recency，降序取 recallMaxEpisodes，禁止用纯新近性制造相关性
   任何异常 → 空列表 + warn，绝不抛入主对话流
 ```
 
@@ -621,7 +622,7 @@ tryBeginCheck(username):                    // 单次 ConcurrentHashMap.compute 
 ### 6.7 数据隔离不变量
 
 - `ConversationHistoryService` 全部对外读写签名携带 `ownerId`；跨用户与“不存在”同形：`getConversation` 空 Optional、`delete` 返 false、`clear` 静默 no-op，控制器统一 404，**不以 403 泄露存在性**。
-- `AiController.requireConversationOwner`：`CurrentUser.requireUserId()` + `getConversation(chatId, ownerId)` 空即 404，在任何下游之前完成。服务层归属守卫/并发删除复核抛 `IllegalStateException`，控制器 `@ExceptionHandler` 转**裸 404**（与 delete 同形）。
+- `AiController.requireConversationOwner`：`CurrentUser.requireUserId()` + `getConversation(chatId, ownerId)` 空即 404，在任何下游之前完成。服务层归属守卫/并发删除复核只抛专用 `ConversationUnavailableException`，控制器 `@ExceptionHandler` 转**裸 404**（与 delete 同形）；其他 `IllegalStateException` 保持 500，避免掩盖程序故障。
 
 ```pseudo
 appendMessage 用户路径（合法 bootstrap：直连聊天可能没有先 POST /ai/conversations）:
@@ -870,7 +871,7 @@ SSE delta → markdown-it({html:false, breaks:true, linkify:true, typographer:fa
 ### 10.1 加一个 REST 端点
 
 1. `controller/<域>Controller` 加方法；需要认证的路由自动落入 `anyRequest().authenticated()`，无需动 SecurityConfig（除非要 permitAll 或 ADMIN）。
-2. 会话相关端点：**先 `CurrentUser.requireUserId()` 再 owner 校验，再进任何下游**（照抄 `AiController.requireConversationOwner`）；服务层抛 `IllegalStateException` 由 `@ExceptionHandler` 转裸 404。
+2. 会话相关端点：**先 `CurrentUser.requireUserId()` 再 owner 校验，再进任何下游**（照抄 `AiController.requireConversationOwner`）；仅服务层专用 `ConversationUnavailableException` 由 `@ExceptionHandler` 转裸 404。
 3. 入参 record 放 `security/dto/`；非法 JSON 要映射 `400 VALIDATION`（加 `HttpMessageNotReadableException` handler，照抄 `AuthController`）。
 4. 出参 DTO **严禁携带 `password_hash`**——`DtoLeakGuardTest` 会反射扫 record 组件名，新 DTO 加进它的扫描清单。
 5. 前端：`src/api/index.js` 加导出函数（走 axios，别用 connectSSE）；受保护页面加路由 meta（§10.8）。
@@ -935,10 +936,10 @@ SSE delta → markdown-it({html:false, breaks:true, linkify:true, typographer:fa
 | account | `LoginAttemptServiceTest`（32 线程**真并发**：并行爆发准入数严格 = 5）、`RegisterThrottleServiceTest`（双键独立）、`AuthValidationTest`（72 字节上限含 30 汉字 90 字节）、`AdminBootstrapTest`（真 BCrypt；抢注裁决：admin 被非管理员占用 → **绝不收养孤儿**）、`UserAccountServiceTest`（36 例：时序拉平/DISABLED 不计失败只释放名额/改密轮换/批量四码/分页钳位）、`UserRepositoryTest`（SQL 注入探针只作绑定参数；deleteById 墓碑→级联→删行 InOrder） |
 | security | `SecurityFilterChainTest`（17，`@WebMvcTest` + `@Import(真 SecurityConfig)` + 7 个 `@MockitoBean`：白名单/错误码映射/角色门控/passwordHash doesNotExist）、`ActiveSessionServiceTest`（只杀目标用户、重复 sessionId 先摘旧、已失效会话容错）、`ConversationIsolationTest`（9：服务层 argThat 验 SQL owner 过滤 + 控制器层 mockStatic(CurrentUser) 验 404 先于下游）、`CurrentUserTest`、`DtoLeakGuardTest`（反射 record 组件 + Jackson 序列化双扫 6 个出参 DTO）、`AdminUserControllerTest`（self 保护先于副作用） |
 | agent/orchestration | `SpringAiCounselingAgentExecutorTest`（7：真虚拟线程执行器 + block() 收敛；禁用回退/planner 失败回退/四阶段 deep 成功/worker 全权/worker 降级还本地/危机语快通道 5 正 1 负/向量检索超时中断）、`DeepThinkingPropertiesTest`（七种越界逐一拒绝）、`ExecutionContextScopeTest`（绑定不泄漏 + wrap 跨虚拟线程传播） |
-| history/controller | `ConversationHistoryServiceTest`（28：墓碑零窗口复核、assistant WHERE EXISTS 返回 0 不 upsert 父行、CAS upsert 返 0 不剪枝、recall SQL `(content ILIKE ?) DESC, id DESC`）、`AiControllerTest`（POST body 契约、deep 走 executor、他人会话 sync+SSE 双路径 404 且三下游 never） |
+| history/controller | `ConversationHistoryServiceTest`（墓碑零窗口复核、assistant WHERE EXISTS 返回 0 不 upsert 父行、CAS upsert 返 0 不剪枝、recall SQL `(content ILIKE ?) DESC, id DESC`）、`AiControllerTest`（POST body 契约、deep 走 executor、他人会话 sync+SSE 双路径 404、相同消息仍作为独立会话轮次生成） |
 | rag/integration | `AiWorkerClientTest`（10：JDK 内嵌 HttpServer 镜像 worker 契约；UTF-8 中文 body 无损、X-Request-Id 取 body（未绑定 scope 回归）、shared-secret、503/degraded 熔断、envelope 不匹配计失败）、`TranscriptSearchServiceTest`（@TempDir 真 JSON：路径穿越拒绝、≤3 段 ≤420 字、`?t=` 定位）、`TranscriptProvenanceAdvisorTest`、`PgVectorVectorStoreConfigUnitTest`（版本哈希与顺序/随机 id 无关、内容/embedding 变更触发）、`KnowledgeBaseLinkageTest`（810 slug 与文档正文案例编号集合相等，assumeTrue 门控）、`ApplicationYamlTest`（yml 无重复键）、`CounselingDocumentLoaderTest`/`PgVectorVectorStoreConfigTest`/`CounselingAppTest`/`DkAiAgentApplicationTests`（门控集成） |
 
-Python：`test_api.py`（13，FastAPI TestClient 真路由：无 key 降级、auth 401 / request-id 400、extra 字段 422、consolidate 安全段逐字重建 + 继承、recall bm25+rrf 与 keyword 降级序）、`test_ranking.py`（2：中文词组 + n-gram 并存、RRF 反超）、`test_service.py`（6：grade 选择校验三拒、`_fit_digest` 救画像/超硬顶不截断、安全行提取/合并去重）。
+Python：`test_api.py`（FastAPI TestClient 真路由：无 key 降级、auth 401 / request-id 400、extra 字段 422、consolidate 安全段逐字重建 + 继承、recall bm25+rrf 与 keyword 降级序）、`test_ranking.py`（中文词组 + n-gram 并存、RRF 反超）、`test_service.py`（grade 选择校验、RRF 不夹带零命中候选、`_fit_digest` 安全段边界、安全行提取/合并去重）。
 
 ### 11.2 三管线命令
 

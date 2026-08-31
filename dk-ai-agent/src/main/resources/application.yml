@@ -123,12 +123,6 @@ management:
       show-details: when_authorized
 
 app:
-  chat:
-    # 聊天回答缓存：同一会话同一输入且上下文未变时，TTL 内回放上次回答，整条管线不执行，省 token。
-    answer-cache:
-      enabled: ${CHAT_ANSWER_CACHE_ENABLED:true}
-      ttl-seconds: ${CHAT_ANSWER_CACHE_TTL_SECONDS:600}
-      max-entries: ${CHAT_ANSWER_CACHE_MAX_ENTRIES:1000}
   admin:
     # 初始超管口令（compose 透传 ADMIN_INITIAL_PASSWORD）；为空则首次启动随机生成 12 位并仅 WARN 日志输出一次
     initial-password: ${ADMIN_INITIAL_PASSWORD:}
@@ -182,6 +176,9 @@ app:
     max-concurrency: ${AI_WORKER_MAX_CONCURRENCY:4}
     failure-threshold: ${AI_WORKER_FAILURE_THRESHOLD:3}
     circuit-open-seconds: ${AI_WORKER_CIRCUIT_OPEN_SECONDS:30}
+    # 默认留空是有意的：worker 是可选增强，Java 侧不能因为缺这个值就起不来（本地开发与单测
+    # 都不跑 worker）。但 worker 自身已是 fail-closed——留空意味着调用被 401 挡回、静默退到
+    # Java 兜底，而不是"免鉴权放行"。启动日志里那条 WARN 是唯一提示。
     shared-secret: ${AI_WORKER_SHARED_SECRET:}
   rag:
     # 默认从 dk-ai-agent 工作目录读取兄弟目录中的 799 份 raw 逐字稿

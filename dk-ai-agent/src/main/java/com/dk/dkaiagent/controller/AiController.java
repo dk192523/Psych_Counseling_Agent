@@ -2,11 +2,12 @@ package com.dk.dkaiagent.controller;
 
 import com.dk.dkaiagent.agent.counseling.CounselingAgentExecutor;
 import com.dk.dkaiagent.agent.counseling.CounselingStreamEvent;
+import com.dk.dkaiagent.agent.counseling.CounselingTurnPipeline;
 import com.dk.dkaiagent.app.CounselingApp;
-import com.dk.dkaiagent.cache.AnswerCache;
 import com.dk.dkaiagent.history.ConversationDetail;
 import com.dk.dkaiagent.history.ConversationHistoryService;
 import com.dk.dkaiagent.history.ConversationSummary;
+import com.dk.dkaiagent.history.ConversationUnavailableException;
 import com.dk.dkaiagent.security.CurrentUser;
 import jakarta.annotation.Resource;
 import org.springframework.http.HttpStatus;
@@ -19,18 +20,12 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
-import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import reactor.core.publisher.Flux;
 
-import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
-import java.util.Optional;
 
 @RestController
 @RequestMapping("/ai")
@@ -46,7 +41,7 @@ public class AiController {
     private CounselingAgentExecutor counselingAgentExecutor;
 
     @Resource
-    private AnswerCache answerCache;
+    private CounselingTurnPipeline counselingTurnPipeline;
 
     @PostMapping("/conversations")
     @ResponseStatus(HttpStatus.CREATED)
@@ -82,88 +77,67 @@ public class AiController {
     }
 
     /**
-     * 同步调用 AI 心理咨询师应用
+     * 同步调用 AI 心理咨询师应用（POST：正文走请求体）。
      *
-     * @param message
-     * @param chatId
-     * @return
+     * <p>原 GET 形式已移除。咨询正文一旦进入 URL query，就会被 nginx access log、浏览器历史、
+     * 中间代理与 CDN 日志留档——这类文本恰恰是本系统里最敏感的数据，且这些日志的留存周期
+     * 和访问权限都不在应用控制范围内。</p>
      */
-    @GetMapping("/counseling/chat/sync")
+    @PostMapping("/counseling/chat/sync")
+    public String doChatWithCounselingSync(@RequestBody ChatRequest request) {
+        return doChatWithCounselingSync(request.message(), request.chatId(), request.clientMsgId());
+    }
+
+    /** 无映射注解的 Java 入口：供进程内调用与单测，不对外暴露 HTTP 形式。 */
     public String doChatWithCounselingSync(String message, String chatId) {
+        return doChatWithCounselingSync(message, chatId, null);
+    }
+
+    public String doChatWithCounselingSync(String message, String chatId, String clientMsgId) {
         long ownerId = requireConversationOwner(chatId);
-        return counselingApp.doChatWithRag(ownerId, message, chatId);
+        return counselingApp.doChatWithRag(ownerId, message, chatId, clientMsgId);
     }
 
     /** 主页面使用 POST 传输咨询内容，避免敏感文本出现在 URL 与代理访问日志中。 */
     @PostMapping(value = "/counseling/chat/sse", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public Flux<ServerSentEvent<ChatStreamEvent>> doChatWithCounselingSSE(@RequestBody ChatRequest request) {
-        return streamCounselingChat(request.message(), request.chatId(), request.deepThinking());
+        return doChatWithCounselingSSE(request.message(), request.chatId(), request.deepThinking(),
+                request.clientMsgId());
     }
 
     /**
-     * 兼容旧客户端的 GET 流式入口。新客户端应调用同路径的 POST 接口。
+     * 无映射注解的 Java 入口：供进程内调用与单测。
+     *
+     * <p>同路径的 GET 兼容入口连同 {@code server_sent_event}、{@code sse_emitter} 两个旧端点
+     * 一并移除：它们与本方法功能完全重合，唯一区别就是把咨询正文放进 URL。前端正式链路是
+     * POST + fetch 流式读取（见 {@code api/index.js} 的 connectSSE），没有仍依赖 GET 的客户端。</p>
      */
-    @GetMapping(value = "/counseling/chat/sse", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public Flux<ServerSentEvent<ChatStreamEvent>> doChatWithCounselingSSE(
             String message,
             String chatId,
-            @RequestParam(defaultValue = "false") boolean deepThinking) {
-        return streamCounselingChat(message, chatId, deepThinking);
+            boolean deepThinking) {
+        return doChatWithCounselingSSE(message, chatId, deepThinking, null);
     }
 
-    private Flux<ServerSentEvent<ChatStreamEvent>> streamCounselingChat(
+    /** {@code clientMsgId} 为前端为本轮生成的幂等键：SSE 中断重发时后端不会重复归档用户消息。 */
+    public Flux<ServerSentEvent<ChatStreamEvent>> doChatWithCounselingSSE(
             String message,
             String chatId,
-            boolean deepThinking) {
+            boolean deepThinking,
+            String clientMsgId) {
         // 开流前完成所有权校验：跨用户与不存在一律 404，绝不带着他人主体进入下游。
         long ownerId = requireConversationOwner(chatId);
 
-        if (!answerCache.enabled()) {
-            return buildChatEvents(ownerId, message, chatId, deepThinking)
-                    .map(this::toServerSentEvent);
-        }
-
-        // 历史指纹取当前消息数：中间插入新轮次即变化，保证只缓存"完全相同的重复请求"。
-        long fingerprint = conversationHistoryService.countMessages(chatId);
-        String cacheKey = answerCache.key(chatId, deepThinking, message, fingerprint);
-        Optional<List<AnswerCache.CachedEvent>> hit = answerCache.get(cacheKey);
-        if (hit.isPresent()) {
-            // 命中：重复请求视为同一轮，直接回放且不重复落库。
-            return Flux.fromIterable(hit.get())
-                    .map(AiController::toStreamEvent)
-                    .map(this::toServerSentEvent);
-        }
-
-        List<AnswerCache.CachedEvent> buffer = Collections.synchronizedList(new ArrayList<>());
-        return buildChatEvents(ownerId, message, chatId, deepThinking)
-                .doOnNext(event -> buffer.add(toCachedEvent(event)))
-                .doOnComplete(() -> answerCache.put(cacheKey, buffer))
+        // 归档、快速/深度分流与事件映射统一收口在 pipeline，控制器只保留 HTTP 契约。
+        return counselingTurnPipeline
+                .run(new CounselingTurnPipeline.CounselingTurnRequest(
+                        ownerId, chatId, message, clientMsgId, deepThinking))
+                .map(ChatStreamEvent::from)
                 .map(this::toServerSentEvent);
-    }
-
-    /** 快速/深度两条分支汇合点；缓存包在其外，两种模式都覆盖。 */
-    private Flux<ChatStreamEvent> buildChatEvents(
-            long ownerId, String message, String chatId, boolean deepThinking) {
-        return deepThinking
-                ? counselingAgentExecutor.stream(message, chatId, ownerId).map(ChatStreamEvent::from)
-                : counselingApp.doChatWithRagByStream(ownerId, message, chatId)
-                .map(chunk -> "[DONE]".equals(chunk)
-                        ? new ChatStreamEvent("done", "")
-                        : new ChatStreamEvent("delta", chunk));
     }
 
     private ServerSentEvent<ChatStreamEvent> toServerSentEvent(ChatStreamEvent event) {
         return ServerSentEvent.<ChatStreamEvent>builder().data(event).build();
-    }
-
-    private static AnswerCache.CachedEvent toCachedEvent(ChatStreamEvent event) {
-        return new AnswerCache.CachedEvent(
-                event.type(), event.content(), event.phase(), event.effectiveMode(), event.fallback());
-    }
-
-    private static ChatStreamEvent toStreamEvent(AnswerCache.CachedEvent cached) {
-        return new ChatStreamEvent(
-                cached.type(), cached.content(), cached.phase(), cached.effectiveMode(), cached.fallback());
     }
 
     /** Backwards-compatible overload used by existing Java callers and tests. */
@@ -193,48 +167,12 @@ public class AiController {
         }
     }
 
-    public record ChatRequest(String message, String chatId, boolean deepThinking) {
-    }
+    /** {@code clientMsgId} 可空：旧客户端不携带时后端不做幂等去重，行为与历史版本一致。 */
+    public record ChatRequest(String message, String chatId, boolean deepThinking, String clientMsgId) {
 
-    /**
-     * SSE 流式调用 AI 心理咨询师应用
-     *
-     * @param message
-     * @param chatId
-     * @return
-     */
-    @GetMapping(value = "/counseling/chat/server_sent_event")
-    public Flux<ServerSentEvent<String>> doChatWithCounselingServerSentEvent(String message, String chatId) {
-        long ownerId = requireConversationOwner(chatId);
-        return counselingApp.doChatWithRagByStream(ownerId, message, chatId)
-                .map(chunk -> ServerSentEvent.<String>builder()
-                        .data(chunk)
-                        .build());
-    }
-
-    /**
-     * SSE 流式调用 AI 心理咨询师应用
-     *
-     * @param message
-     * @param chatId
-     * @return
-     */
-    @GetMapping(value = "/counseling/chat/sse_emitter")
-    public SseEmitter doChatWithCounselingServerSseEmitter(String message, String chatId) {
-        long ownerId = requireConversationOwner(chatId);
-        // 创建一个超时时间较长的 SseEmitter
-        SseEmitter sseEmitter = new SseEmitter(180000L); // 3 分钟超时
-        // 获取 Flux 响应式数据流并且直接通过订阅推送给 SseEmitter
-        counselingApp.doChatWithRagByStream(ownerId, message, chatId)
-                .subscribe(chunk -> {
-                    try {
-                        sseEmitter.send(chunk);
-                    } catch (IOException e) {
-                        sseEmitter.completeWithError(e);
-                    }
-                }, sseEmitter::completeWithError, sseEmitter::complete);
-        // 返回
-        return sseEmitter;
+        public ChatRequest(String message, String chatId, boolean deepThinking) {
+            this(message, chatId, deepThinking, null);
+        }
     }
 
     /**
@@ -250,13 +188,13 @@ public class AiController {
     }
 
     /**
-     * 会话历史服务层的归属守卫与并发删除复核统一抛 IllegalStateException，语义都是
-     * "该会话对当前调用方不可用"（跨用户 / 校验后被并发删除）：转 404 与本控制器其余端点
-     * 的"跨用户与不存在同形"语义对齐，避免守卫命中被误读为 500 故障。
+     * 会话历史服务层的归属守卫与并发删除复核统一抛专用异常，语义都是
+     * “该会话对当前调用方不可用”（跨用户 / 校验后被并发删除）：转 404 与本控制器其余端点
+     * 的“跨用户与不存在同形”语义对齐。其他 IllegalStateException 保持 500，避免掩盖程序故障。
      */
-    @ExceptionHandler(IllegalStateException.class)
+    @ExceptionHandler(ConversationUnavailableException.class)
     @ResponseStatus(HttpStatus.NOT_FOUND)
-    public void handleConversationGuard(IllegalStateException exception) {
+    public void handleConversationGuard(ConversationUnavailableException exception) {
         // 无响应体：与 deleteConversation 的裸 404 同形；异常信息保留在服务端日志。
     }
 

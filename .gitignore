@@ -24,3 +24,6 @@ release/
 .idea/
 *.log
 *.err.log
+
+# ZCode CLI 会话目录
+.zcode/

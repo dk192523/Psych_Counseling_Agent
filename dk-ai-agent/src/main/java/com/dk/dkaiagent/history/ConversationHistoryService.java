@@ -23,6 +23,9 @@ public class ConversationHistoryService {
 
     private static final String DEFAULT_TITLE = "新会话";
     private static final int MAX_CONVERSATION_LIST_SIZE = 50;
+    /** 单条消息入库上限（code point）。与前端 ChatRoom.vue 的 MAX_INPUT_CHARS 保持一致。 */
+    private static final int MAX_MESSAGE_CONTENT_CODE_POINTS = 4000;
+    private static final String CONTENT_TRUNCATION_NOTICE = "…（超出长度限制，后续内容已截断）";
 
     private static final RowMapper<ConversationMessage> MESSAGE_ROW_MAPPER = (rs, rowNum) -> new ConversationMessage(
             rs.getLong("id"),
@@ -74,8 +77,15 @@ public class ConversationHistoryService {
                         REFERENCES psych_conversation(id) ON DELETE CASCADE,
                     role VARCHAR(16) NOT NULL,
                     content TEXT NOT NULL,
+                    client_msg_id VARCHAR(64),
                     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
                 )
+                """);
+        // 幂等键：前端为每轮发送生成 UUID，流中断后重发同一 clientMsgId 不会重复归档。
+        // 旧写入 client_msg_id 为 NULL——PostgreSQL 唯一索引中 NULL 互不冲突，历史数据与
+        // 不带幂等键的调用路径完全不受约束。
+        jdbcTemplate.execute("""
+                ALTER TABLE psych_chat_message ADD COLUMN IF NOT EXISTS client_msg_id VARCHAR(64)
                 """);
         jdbcTemplate.execute("""
                 CREATE TABLE IF NOT EXISTS psych_conversation_memory (
@@ -90,6 +100,10 @@ public class ConversationHistoryService {
         jdbcTemplate.execute("""
                 CREATE INDEX IF NOT EXISTS idx_psych_chat_message_conversation_id_id
                 ON psych_chat_message (conversation_id, id)
+                """);
+        jdbcTemplate.execute("""
+                CREATE UNIQUE INDEX IF NOT EXISTS uk_psych_chat_message_client_msg
+                ON psych_chat_message (conversation_id, client_msg_id)
                 """);
         jdbcTemplate.execute("""
                 CREATE INDEX IF NOT EXISTS idx_psych_conversation_updated_at
@@ -178,19 +192,29 @@ public class ConversationHistoryService {
 
     @Transactional
     public void appendUserMessage(long ownerId, String chatId, String content) {
-        appendMessage(ownerId, chatId, "user", content, true);
+        appendUserMessage(ownerId, chatId, content, null);
+    }
+
+    /**
+     * 带幂等键的用户消息归档。{@code clientMsgId} 为前端为本轮生成的 UUID：SSE 中断后重发
+     * 同一消息时，唯一索引令第二次 INSERT 原子地不落行，返回 {@code false}。
+     * {@code null} 表示不带幂等键（旧调用方与单测），行为与历史版本完全一致。
+     */
+    @Transactional
+    public boolean appendUserMessage(long ownerId, String chatId, String content, String clientMsgId) {
+        return appendMessage(ownerId, chatId, "user", content, true, clientMsgId) > 0;
     }
 
     /**
      * Appends an assistant reply. Returns the number of inserted messages: {@code 0} means the
      * conversation was deleted (cascade commit landed) while the reply was still streaming, so the
      * caller must skip memory consolidation. Never resurrects the parent conversation row.
-     * Throws {@link IllegalStateException} when the conversation exists but belongs to another
+     * Throws {@link ConversationUnavailableException} when the conversation exists but belongs to another
      * owner, so a stream can never write into someone else's conversation.
      */
     @Transactional
     public int appendAssistantMessage(long ownerId, String chatId, String content) {
-        return appendMessage(ownerId, chatId, "assistant", content, false);
+        return appendMessage(ownerId, chatId, "assistant", content, false, null);
     }
 
     public List<Message> getRecentMessages(String chatId, int limit) {
@@ -354,7 +378,8 @@ public class ConversationHistoryService {
         return deleted;
     }
 
-    private int appendMessage(long ownerId, String chatId, String role, String content, boolean updateTitle) {
+    private int appendMessage(long ownerId, String chatId, String role, String content,
+                              boolean updateTitle, String clientMsgId) {
         // 原文档案只做追加，不再滑动窗口硬删除；淘汰由记忆服务整合成功后调用 replaceMemoryAndPrune 触发。
         String normalizedChatId = requireText(chatId, "chatId");
         String normalizedContent = requireContent(content);
@@ -384,10 +409,10 @@ public class ConversationHistoryService {
             // 而 delete() 与 deleteById 两条删除路径都在提交前同事务写入墓碑，故实体化瞬间墓碑已提交；
             // 本复核是新语句、新快照，必见该墓碑。DO NOTHING 分支未落行、不持锁，随后
             // requireConversationOwnedBy 已覆盖"更晚提交的删除"（行消失 -> 抛异常 -> 回滚）。
-            // 抛出的 IllegalStateException 由 @Transactional 回滚投机插入的行，已删会话绝不复活，
+            // 抛出的 ConversationUnavailableException 由 @Transactional 回滚投机插入的行，已删会话绝不复活，
             // 并由控制器统一转 404（与"不存在"同形）。
             if (tombstoneExists(normalizedChatId)) {
-                throw new IllegalStateException("Conversation was deleted concurrently");
+                throw new ConversationUnavailableException("Conversation was deleted concurrently");
             }
             // 会话已存在但归属他人：抛异常由控制器转 404，堵住跨用户写入与幽灵复活路径。
             requireConversationOwnedBy(normalizedChatId, ownerId);
@@ -401,10 +426,13 @@ public class ConversationHistoryService {
                           WHERE m.conversation_id = c.id AND m.role = 'user'
                       )
                     """, initialTitle, normalizedChatId, DEFAULT_TITLE);
+            // client_msg_id 唯一索引 + ON CONFLICT DO NOTHING：重发轮次在此原子去重，不落重复行。
+            // NULL 键在 PostgreSQL 唯一索引中互不冲突，不带幂等键的写入永不触发 DO NOTHING 分支。
             inserted = jdbcTemplate.update("""
-                    INSERT INTO psych_chat_message (conversation_id, role, content, created_at)
-                    VALUES (?, ?, ?, CURRENT_TIMESTAMP)
-                    """, normalizedChatId, role, normalizedContent);
+                    INSERT INTO psych_chat_message (conversation_id, role, content, client_msg_id, created_at)
+                    VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    ON CONFLICT (conversation_id, client_msg_id) DO NOTHING
+                    """, normalizedChatId, role, normalizedContent, clientMsgId);
         } else {
             // 助手路径绝不 upsert 父行：用户删会话后仍在收尾的流式回答若盲写，会把已删会话
             // 以"新会话"复活并留下孤儿消息。单语句 EXISTS 守卫与 DELETE 提交原子——删除先提交
@@ -427,13 +455,13 @@ public class ConversationHistoryService {
     }
 
     /**
-     * 归属守卫（用户路径）：会话不存在或不属于 ownerId 一律抛 {@link IllegalStateException}，
+     * 归属守卫（用户路径）：会话不存在或不属于 ownerId 一律抛 {@link ConversationUnavailableException}，
      * 由控制器转 404，与"不存在"同形。
      */
     private void requireConversationOwnedBy(String chatId, long ownerId) {
         Long currentOwner = findConversationOwner(chatId).orElse(null);
         if (currentOwner == null || currentOwner.longValue() != ownerId) {
-            throw new IllegalStateException("Conversation is not owned by the current user");
+            throw new ConversationUnavailableException("Conversation is not owned by the current user");
         }
     }
 
@@ -444,7 +472,7 @@ public class ConversationHistoryService {
     private void requireConversationOwnedByIfExists(String chatId, long ownerId) {
         findConversationOwner(chatId).ifPresent(currentOwner -> {
             if (currentOwner.longValue() != ownerId) {
-                throw new IllegalStateException("Conversation is not owned by the current user");
+                throw new ConversationUnavailableException("Conversation is not owned by the current user");
             }
         });
     }
@@ -549,7 +577,26 @@ public class ConversationHistoryService {
         if (value == null || value.isBlank()) {
             throw new IllegalArgumentException("content must not be blank");
         }
-        return value;
+        return truncateContent(value);
+    }
+
+    /**
+     * 入口截断：粘贴数千字会直接吃掉上下文窗口，也可能触发模型侧拒绝。前端有 maxlength 做即时
+     * 反馈，但那只是提示——浏览器端的限制随时能被绕过，真正的边界必须在服务端。
+     *
+     * <p>按 code point 而非 {@code length()} 计数：一个 emoji 或部分生僻汉字占两个 char，
+     * 按 char 切会把代理对劈成两半，落库就是一个乱码替换符。</p>
+     *
+     * <p>截断而不是报错，是因为这条路径上用户已经把话说完了：为超长而拒收整轮，等于让人白打一遍。
+     * 尾部追加提示让模型知道内容被截断，不会把半截句子当成用户的完整表达。</p>
+     */
+    private static String truncateContent(String value) {
+        int codePointCount = value.codePointCount(0, value.length());
+        if (codePointCount <= MAX_MESSAGE_CONTENT_CODE_POINTS) {
+            return value;
+        }
+        int end = value.offsetByCodePoints(0, MAX_MESSAGE_CONTENT_CODE_POINTS);
+        return value.substring(0, end) + CONTENT_TRUNCATION_NOTICE;
     }
 
     private static int requirePositive(int value, String propertyName) {

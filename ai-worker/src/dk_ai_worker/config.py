@@ -23,6 +23,11 @@ class Settings(BaseSettings):
     )
     llm_enabled: bool = Field(default=True, alias="AI_WORKER_LLM_ENABLED")
     shared_secret: SecretStr | None = Field(default=None, alias="AI_WORKER_SHARED_SECRET")
+    # 唯一放行未认证访问的开关，必须显式设置（本地裸跑/调试用）。
+    # 之所以要显式：空密钥自动放行会让"忘配环境变量"这个最常见的部署失误静默变成零鉴权。
+    allow_unauthenticated: bool = Field(
+        default=False, alias="AI_WORKER_ALLOW_UNAUTHENTICATED"
+    )
     transcript_directory: Path = Field(
         default=Path("../counseling-kb/raw"), alias="COUNSELING_TRANSCRIPT_DIRECTORY"
     )
@@ -32,4 +37,15 @@ class Settings(BaseSettings):
 
     def shared_secret_value(self) -> str:
         return self.shared_secret.get_secret_value() if self.shared_secret else ""
+
+    def require_auth(self) -> bool:
+        """Whether callers must present a valid X-AI-Worker-Token.
+
+        Only an explicit ``AI_WORKER_ALLOW_UNAUTHENTICATED=true`` waives it. A blank secret used
+        to waive it implicitly, which meant the single most likely deployment mistake — forgetting
+        the env var — silently produced a worker that authorized everyone. The worker's recall
+        endpoint shapes what past "user quotes" reach the model, so an unauthenticated worker is
+        a prompt-injection channel, not just an open API.
+        """
+        return not self.allow_unauthenticated
 

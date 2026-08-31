@@ -1,4 +1,5 @@
 import hmac
+import logging
 from contextlib import asynccontextmanager
 from typing import Annotated
 
@@ -20,6 +21,20 @@ from .service import IntelligenceService
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     runtime_settings = settings or Settings()
+    auth_required = runtime_settings.require_auth()
+    configured_secret = runtime_settings.shared_secret_value()
+    if auth_required and not configured_secret:
+        # 启动即失败，而不是带着零鉴权跑起来：worker 的 recall 决定哪些"用户过往原话"进模型上下文，
+        # 无鉴权的 sidecar 等于给任何能连上该端口的进程开了一条提示注入通道。
+        raise RuntimeError(
+            "AI_WORKER_SHARED_SECRET is required. "
+            "Set it, or set AI_WORKER_ALLOW_UNAUTHENTICATED=true to explicitly run without auth."
+        )
+    if not auth_required:
+        logging.getLogger(__name__).warning(
+            "AI worker is running WITHOUT authentication "
+            "(AI_WORKER_ALLOW_UNAUTHENTICATED=true). Never use this outside local development."
+        )
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -40,10 +55,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return app.state.intelligence
 
     def authorize(token: str | None) -> None:
-        expected = runtime_settings.shared_secret_value()
-        if expected and not token:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="unauthorized")
-        if expected and not hmac.compare_digest(token or "", expected):
+        # fail-closed：鉴权是否生效由启动期的 auth_required 决定，绝不由"密钥是否为空"决定。
+        # 原实现每个分支都挂在 `if expected` 后面，空密钥时整个函数退化为空操作。
+        if not auth_required:
+            return
+        if not token or not hmac.compare_digest(token, configured_secret):
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="unauthorized")
 
     def validate_request_id(request_id: str, header_request_id: str | None) -> None:
@@ -105,5 +121,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     return app
 
 
-app = create_app()
+# 不在模块级构造 app：鉴权配置的 fail-closed 校验在 create_app 内，模块级实例化会把这道校验
+# 提前到 import 期，导致"导入本模块"就依赖完整环境变量（测试首当其冲）。
+# 入口统一走 uvicorn --factory dk_ai_worker.main:create_app（见 Dockerfile）。
 

@@ -52,6 +52,13 @@ class PlanResponse(ContractModel):
     association_hypotheses: list[Annotated[str, Field(max_length=120)]] = Field(
         default_factory=list, max_length=3
     )
+    # 回应策略信号（v1 增量字段，带默认值故向后兼容）：
+    # response_mode 告诉回答模型这一轮的对话姿态——listen 只反映与陪伴、零提问；
+    # clarify 画像有缺口，至多一个澄清问题；explore 用户已征询，可给内容。
+    # next_probe 是"本轮最值得了解的一个方向"，是选题方向不是问题原文，
+    # 措辞交给回答模型（它才看得到语气），严禁照抄成一句审问。
+    response_mode: Literal["listen", "clarify", "explore"] = "clarify"
+    next_probe: Annotated[str, Field(max_length=120)] = ""
 
 
 class Candidate(ContractModel):
@@ -183,6 +190,9 @@ class PlanDraft(BaseModel):
     queries: list[str]
     missing_information: list[str]
     association_hypotheses: list[str] = Field(default_factory=list)
+    # LLM 可能给出越界值，这里只收原始字符串，白名单归一交给 service 层。
+    response_mode: str = "clarify"
+    next_probe: str = Field(default="", max_length=200)
 
 
 class GradeDraft(BaseModel):

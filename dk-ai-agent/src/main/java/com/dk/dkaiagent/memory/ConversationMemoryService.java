@@ -24,7 +24,6 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.locks.ReentrantLock;
 import java.util.regex.Pattern;
 
 /**
@@ -57,7 +56,12 @@ public class ConversationMemoryService {
     private final ExecutorService agentExecutor;
     private final ApplicationEventPublisher eventPublisher;
     private final int maxMessagesPerConversation;
-    private final ConcurrentHashMap<String, ReentrantLock> conversationLocks = new ConcurrentHashMap<>();
+    // 在途整合去重：只需"同一 chatId 是否已有整合在跑"这一个比特，不需要可重入锁对象。
+    // 用锁 map 会无界增长（每个历史 chatId 永久留一个 ReentrantLock）；而"整合完就 remove 锁"
+    // 的直觉修法是错的——computeIfAbsent 与 remove 交错会把两个线程发到不同锁实例上，互斥直接失效。
+    // 换成自清理的 in-flight 集合：add 返回 false 即已有在途，语义与原 tryLock() 跳过完全一致
+    // （consolidateIfNeeded 不存在重入调用），且 finally 里 remove 使内存严格有界。
+    private final Set<String> consolidationsInFlight = ConcurrentHashMap.newKeySet();
 
     public ConversationMemoryService(
             ConversationHistoryService historyService,
@@ -153,15 +157,17 @@ public class ConversationMemoryService {
         }
     }
 
+    private record ScoredRecallCandidate(ConversationMessage candidate, double overlap, double score) {
+    }
+
     public record RecallEpisodeView(long id, String role, String snippet, double score) {
     }
 
     private void consolidateIfNeeded(String chatId) {
-        ReentrantLock lock = conversationLocks.computeIfAbsent(chatId, ignored -> new ReentrantLock());
-        // 非阻塞抢锁：LLM 调用可能长时间挂起（读超时兜底前仍可能持锁数十秒），阻塞排队会让
+        // 非阻塞去重：LLM 调用可能长时间挂起（读超时兜底前仍可能占用数十秒），阻塞排队会让
         // 每个后续归档轮次都堆积一个卡死的虚拟线程。整合按设计是失败保留原文、下轮重试的，
         // 已有整合在途时直接跳过本轮即可，语义与幂等重试完全兼容。
-        if (!lock.tryLock()) {
+        if (!consolidationsInFlight.add(chatId)) {
             log.debug("Memory consolidation already in flight; skipping this trigger; chatId={}", chatId);
             return;
         }
@@ -231,7 +237,7 @@ public class ConversationMemoryService {
             log.debug("Memory consolidated; chatId={}, consolidated={}, prunedUpTo={}",
                     chatId, gap.size(), pruneUpTo);
         } finally {
-            lock.unlock();
+            consolidationsInFlight.remove(chatId);
         }
     }
 
@@ -295,14 +301,17 @@ public class ConversationMemoryService {
         Set<String> units = keywordUnits(queries);
         return candidates.stream()
                 .map(candidate -> {
-                    double score = keywordOverlap(candidate.content(), units)
-                            + 0.1 * recencyScores.getOrDefault(candidate.id(), 0.0);
-                    return new RecallEpisodeView(
-                            candidate.id(),
-                            candidate.role(),
-                            truncate(candidate.content(), properties.getRecallSnippetChars()),
-                            score);
+                    double overlap = keywordOverlap(candidate.content(), units);
+                    double score = overlap + 0.1 * recencyScores.getOrDefault(candidate.id(), 0.0);
+                    return new ScoredRecallCandidate(candidate, overlap, score);
                 })
+                // Recency may reorder lexical matches, but must not manufacture relevance.
+                .filter(scored -> scored.overlap() > 0)
+                .map(scored -> new RecallEpisodeView(
+                        scored.candidate().id(),
+                        scored.candidate().role(),
+                        truncate(scored.candidate().content(), properties.getRecallSnippetChars()),
+                        scored.score()))
                 .sorted(Comparator.comparingDouble(RecallEpisodeView::score).reversed())
                 .limit(properties.getRecallMaxEpisodes())
                 .toList();

@@ -133,6 +133,19 @@ foreach ($directory in $GeneratedDirectories) {
     Remove-Item -LiteralPath $directory.FullName -Recurse -Force
 }
 
+# Never ship developer-only Spring configuration. It is intentionally ignored by
+# Git and may contain local API keys even when the current checkout only has examples.
+$LocalConfigFiles = @(
+    (Join-Path $PackageRoot "dk-ai-agent\src\main\resources\application-local.yml"),
+    (Join-Path $PackageRoot "dk-ai-agent\src\main\resources\application-local.yaml")
+)
+foreach ($file in $LocalConfigFiles) {
+    if (Test-Path -LiteralPath $file) {
+        Assert-ChildPath -Child $file -Parent $PackageRoot
+        Remove-Item -LiteralPath $file -Force
+    }
+}
+
 $GeneratedFiles = @(Get-ChildItem -LiteralPath $PackageRoot -Recurse -Force -File |
     Where-Object {
         $_.Name -like "*.pyc" -or
@@ -154,7 +167,8 @@ if ($UnexpectedEnvFiles.Count -gt 0) {
 $TextExtensions = @(".conf", ".env", ".example", ".java", ".js", ".json", ".md", ".properties", ".ps1", ".py", ".sh", ".toml", ".txt", ".vue", ".xml", ".yml", ".yaml")
 $SecretCandidates = @(Get-ChildItem -LiteralPath $PackageRoot -Recurse -Force -File |
     Where-Object { $TextExtensions -contains $_.Extension.ToLowerInvariant() } |
-    Select-String -Pattern 'sk-[A-Za-z0-9._-]{20,}' -Encoding UTF8)
+    Select-String -Pattern 'sk-[A-Za-z0-9._-]{20,}' -Encoding UTF8 |
+    Where-Object { $_.Line -notmatch '(?i)sk-replace-with-your-deepseek-key' })
 if ($SecretCandidates.Count -gt 0) {
     $CandidateFiles = $SecretCandidates | ForEach-Object { $_.Path } | Sort-Object -Unique
     throw "Possible API key detected in package input: $($CandidateFiles -join ', ')"

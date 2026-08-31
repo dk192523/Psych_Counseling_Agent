@@ -64,6 +64,18 @@ public class SpringAiCounselingAgentExecutor implements CounselingAgentExecutor 
             "案例编号\\s+(\\d{4}-\\d{2}-\\d{2}-call-\\d{2})"
     );
 
+    /** Emitted once when blocks are dropped for length, so the model sees withheld ≠ never retrieved. */
+    private static final String OMISSION_NOTICE = "（其余材料因长度限制略去）\n";
+
+    /**
+     * Copy for every deep→standard transition (U3 in the review). Deliberately states what happens
+     * next instead of what failed: the previous wording ("深度检索暂时没有完成") reads as an error the
+     * user caused or must act on, when in fact the turn completes normally through the standard
+     * chain. The indicator already renders this phase as a calm amber state with "不会丢失本轮内容",
+     * so the copy must not contradict it.
+     */
+    private static final String STANDARD_PATH_NOTICE = "这轮改用常规方式回应你，内容不受影响…";
+
     private static final String PLANNER_PROMPT = """
             你是心理疏导知识库的检索规划 Agent。你只负责生成结构化检索计划，不直接回答用户，也不输出思维链。
             当前叙述可能是单方、片段化或情绪化的；不得把用户对他人动机和对错的判断直接改写成事实。
@@ -73,6 +85,10 @@ public class SpringAiCounselingAgentExecutor implements CounselingAgentExecutor 
             missingInformation 只列仍需确认的关键信息，不要写建议。
             associationHypotheses 最多给出 3 条关于历史会话主题与当前诉求之间可能关联的假设，仅用于检索过往原话，
             是猜测性方向而非已发生的事实；没有可写空列表。
+            responseMode 只能是 listen、clarify、explore：用户正在倾泻细节、情绪很浓或回复极短时 listen（只反映与陪伴，零提问）；
+            画像有明确缺口时 clarify（至多一个澄清问题）；用户已征询建议或同意梳理时 explore（可以给内容）。
+            nextProbe 用不超过 40 个字写"本轮最值得了解的一个方向"（如"延期的具体原因"），是选题方向而不是问题原文，
+            与当前叙述无关或判断不了时留空字符串。
             """;
 
     private static final String GRADER_PROMPT = """
@@ -121,14 +137,14 @@ public class SpringAiCounselingAgentExecutor implements CounselingAgentExecutor 
     }
 
     @Override
-    public Flux<CounselingStreamEvent> stream(String message, String chatId, long ownerId) {
+    public Flux<CounselingStreamEvent> prepareAndAnswer(String message, String chatId, long ownerId) {
         return Flux.defer(() -> {
             AgentRequestContext requestContext = AgentRequestContext.deep(
                     chatId, Duration.ofSeconds(properties.getStepTimeoutSeconds() * 3L));
-            counselingApp.prepareConversationTurn(ownerId, chatId, message);
+            // 归档由 CounselingTurnPipeline 收口完成，此处不再落库，降级路径因此只需 Prepared 变体。
 
             if (!properties.isEnabled()) {
-                return fallbackToStandard(ownerId, message, chatId, "fallback", "深度模式暂时未启用，正在切换到稳妥模式…");
+                return fallbackToStandard(ownerId, message, chatId, "fallback", STANDARD_PATH_NOTICE);
             }
             if (requiresImmediateSafetyResponse(message)) {
                 return fallbackToStandard(ownerId, message, chatId, "safety", "这段话可能涉及现实安全，我先优先回应你…");
@@ -149,7 +165,7 @@ public class SpringAiCounselingAgentExecutor implements CounselingAgentExecutor 
                                         + "using Java RAG fallback, errorType={}",
                                 requestContext.requestId(), error.getClass().getSimpleName());
                         return Flux.just(CounselingStreamEvent.fallback(
-                                "fallback", "深度检索暂时没有完成，正在切换到稳妥模式…"));
+                                "fallback", STANDARD_PATH_NOTICE));
                     });
 
             Flux<CounselingStreamEvent> answer = Flux.defer(() -> {
@@ -159,7 +175,7 @@ public class SpringAiCounselingAgentExecutor implements CounselingAgentExecutor 
                 }
                 DeepContext context = deepContext.get();
                 if (context == null) {
-                    return fallbackToStandard(ownerId, message, chatId, "fallback", "深度检索暂时没有完成，正在切换到稳妥模式…");
+                    return fallbackToStandard(ownerId, message, chatId, "fallback", STANDARD_PATH_NOTICE);
                 }
                 return mapAnswer(
                         counselingApp.doChatWithAgentContextByStreamPrepared(ownerId, message, chatId, context.text()),
@@ -208,7 +224,9 @@ public class SpringAiCounselingAgentExecutor implements CounselingAgentExecutor 
                             state.plan, state.candidates, state.episodes, state.message);
                     contextReference.set(context);
                     state.stage = PreparationStage.COMPLETE;
-                    sink.next(CounselingStreamEvent.status("answering", "依据已经整理好，正在组织回应…"));
+                    // 事件序列与 phase 名不变（前端与测试都按 answering 处理），只把文案换成
+                    // 真正的检索结果摘要：深度模式首字前的等待因此有了可判断的进度信息。
+                    sink.next(CounselingStreamEvent.status("answering", retrievalSummary(context)));
                 }
                 case COMPLETE -> sink.complete();
             }
@@ -217,8 +235,11 @@ public class SpringAiCounselingAgentExecutor implements CounselingAgentExecutor 
     }
 
     private RetrievalPlan createPlan(String message, String chatId) {
-        List<Message> recentMessages = historyService.getRecentMessages(
-                chatId, properties.getHistoryMessages());
+        // 多读一条再剥掉当前轮：prepareConversationTurn 已把当前用户消息落库，
+        // getRecentMessages 的末尾就是它本身，直接用会让同一句话在「最近会话」和
+        // 「当前用户输入」里各出现一次（worker 契约的 history 字段同理）。
+        List<Message> recentMessages = historyExcludingCurrentTurn(
+                historyService.getRecentMessages(chatId, properties.getHistoryMessages() + 1), message);
         String longTermDigest = truncate(historyService.getDigest(chatId), 3_000);
         AgentRequestContext context = ExecutionContextScope.requireCurrent();
         AiWorkerContracts.PlanRequest workerRequest = new AiWorkerContracts.PlanRequest(
@@ -238,7 +259,9 @@ public class SpringAiCounselingAgentExecutor implements CounselingAgentExecutor 
                     response.focus(),
                     response.queries(),
                     response.missingInformation(),
-                    response.associationHypotheses()), message);
+                    response.associationHypotheses(),
+                    response.responseMode(),
+                    response.nextProbe()), message);
         }
 
         String history = formatHistory(recentMessages);
@@ -265,6 +288,30 @@ public class SpringAiCounselingAgentExecutor implements CounselingAgentExecutor 
         return normalizePlan(rawPlan, message);
     }
 
+    /**
+     * Drops the trailing message when it is the just-archived current turn. The planner receives the
+     * current message explicitly (its own {@code 当前用户输入} section and the worker contract's
+     * dedicated field), so leaving it in the history window states it twice — wasted tokens plus a
+     * misleading "the user said this twice" signal.
+     *
+     * <p>Only an exact-content trailing {@link UserMessage} is dropped, and only one: a user who
+     * genuinely sends the same sentence twice still sees the earlier copy in history.</p>
+     */
+    private static List<Message> historyExcludingCurrentTurn(List<Message> recentMessages, String currentMessage) {
+        if (recentMessages == null || recentMessages.isEmpty()) {
+            return List.of();
+        }
+        Message last = recentMessages.get(recentMessages.size() - 1);
+        if (last instanceof UserMessage
+                && Objects.toString(last.getText(), "").equals(Objects.toString(currentMessage, ""))) {
+            return List.copyOf(recentMessages.subList(0, recentMessages.size() - 1));
+        }
+        return List.copyOf(recentMessages);
+    }
+
+    /** 回应策略白名单：LLM/worker 给出越界值时归一为 clarify（最中性、最安全的默认姿态）。 */
+    private static final Set<String> RESPONSE_MODES = Set.of("listen", "clarify", "explore");
+
     private RetrievalPlan normalizePlan(RetrievalPlan rawPlan, String message) {
         List<String> queries = normalizeTextList(rawPlan.retrievalQueries(), properties.getMaxQueries(), 180);
         boolean shouldRetrieve = rawPlan.shouldRetrieve();
@@ -276,7 +323,12 @@ public class SpringAiCounselingAgentExecutor implements CounselingAgentExecutor 
         List<String> missing = normalizeTextList(rawPlan.missingInformation(), 5, 100);
         List<String> hypotheses = normalizeTextList(
                 rawPlan.associationHypotheses(), properties.getAssociationHypotheses(), 120);
-        return new RetrievalPlan(shouldRetrieve, stage, focus, queries, missing, hypotheses);
+        String responseMode = rawPlan.responseMode() != null && RESPONSE_MODES.contains(rawPlan.responseMode())
+                ? rawPlan.responseMode()
+                : "clarify";
+        String nextProbe = truncate(Objects.toString(rawPlan.nextProbe(), ""), 120);
+        return new RetrievalPlan(
+                shouldRetrieve, stage, focus, queries, missing, hypotheses, responseMode, nextProbe);
     }
 
     private List<AiWorkerContracts.HistoryMessage> toWorkerHistory(List<Message> messages) {
@@ -390,7 +442,8 @@ public class SpringAiCounselingAgentExecutor implements CounselingAgentExecutor 
             List<ConversationMemoryService.RecallEpisodeView> episodes,
             String message) {
         if (candidates.isEmpty()) {
-            return new DeepContext(buildContext(plan, List.of(), List.of(), List.of(), episodes), episodes);
+            return new DeepContext(
+                    buildContext(plan, List.of(), List.of(), List.of(), episodes), episodes, 0, 0);
         }
 
         Optional<DeepContext> workerContext = createWorkerDeepContext(plan, candidates, episodes, message);
@@ -429,7 +482,11 @@ public class SpringAiCounselingAgentExecutor implements CounselingAgentExecutor 
         List<TranscriptSearchService.TranscriptSource> sources = retrieveTranscripts(
                 selected, plan.focus() + " " + message);
         List<String> gaps = normalizeTextList(decision.evidenceGaps(), 5, 120);
-        return new DeepContext(buildContext(plan, selected, sources, gaps, episodes), episodes);
+        return new DeepContext(
+                buildContext(plan, selected, sources, gaps, episodes),
+                episodes,
+                selected.size(),
+                countSnippets(sources));
     }
 
     private Optional<DeepContext> createWorkerDeepContext(
@@ -526,7 +583,48 @@ public class SpringAiCounselingAgentExecutor implements CounselingAgentExecutor 
             }
         }
         List<String> gaps = normalizeTextList(response.evidenceGaps(), 5, 120);
-        return Optional.of(new DeepContext(buildContext(plan, selected, sources, gaps, episodes), episodes));
+        return Optional.of(new DeepContext(
+                buildContext(plan, selected, sources, gaps, episodes),
+                episodes,
+                selected.size(),
+                countSnippets(sources)));
+    }
+
+    private static int countSnippets(List<TranscriptSearchService.TranscriptSource> sources) {
+        return sources.stream()
+                .mapToInt(source -> source.snippets() == null ? 0 : source.snippets().size())
+                .sum();
+    }
+
+    /**
+     * User-facing progress line for the last preparation step (U2 in the review). The deep path can
+     * spend 10–30 s before the first answer token; four generic "still working" lines give the user
+     * nothing to judge progress by. Naming what was actually found makes the wait legible — and it
+     * is honest about finding nothing, because claiming a hit that does not exist would be worse
+     * than the generic copy it replaces.
+     *
+     * <p>Only counts are exposed. Case titles and transcript text stay out of the status line: they
+     * are retrieval internals, and the system prompt forbids volunteering case provenance.</p>
+     */
+    private static String retrievalSummary(DeepContext context) {
+        if (context == null) {
+            return "依据已经整理好，正在组织回应…";
+        }
+        List<String> parts = new ArrayList<>(3);
+        if (context.caseCount() > 0) {
+            parts.add("核对了 " + context.caseCount() + " 个相关案例");
+        }
+        if (context.transcriptSnippetCount() > 0) {
+            parts.add("其中 " + context.transcriptSnippetCount() + " 段逐字稿可直接对照");
+        }
+        if (!context.episodes().isEmpty()) {
+            parts.add("回看了 " + context.episodes().size() + " 处你此前说过的话");
+        }
+        if (parts.isEmpty()) {
+            // 没筛出可靠材料时不能假装有：说清楚"这轮靠对话本身回应"，用户才知道后面的回答依据在哪。
+            return "这次没有筛出足够贴近你情况的案例，我按你说的内容本身来回应…";
+        }
+        return String.join("，", parts) + "，正在组织回应…";
     }
 
     private List<TranscriptSearchService.TranscriptSource> retrieveTranscripts(
@@ -604,6 +702,28 @@ public class SpringAiCounselingAgentExecutor implements CounselingAgentExecutor 
         }
     }
 
+    /**
+     * 回应策略块：planner 每轮给出的对话姿态信号（listen/clarify/explore + 选题方向）。
+     * 放在上下文头部——尾部 appendLimited 截断只会砍到后面的案例/片段，策略永远完整落盘。
+     * 这是给回答模型的内部指令，不是用户事实；措辞上明确"方向不是问题原文"，
+     * 防止模型把 next_probe 照抄成一句审问。
+     */
+    private static String buildResponseStrategy(RetrievalPlan plan) {
+        String posture = switch (plan.responseMode()) {
+            case "listen" -> "本轮以反映与陪伴为主，不要提出任何问题，让用户把话说完";
+            case "explore" -> "用户已征询内容或同意梳理，可以给出实质内容，但仍遵守阶段与长度规则";
+            default -> "至多提出一个澄清问题，问题要贴着用户最后一句话";
+        };
+        StringBuilder strategy = new StringBuilder()
+                .append("本轮回应策略（系统内部指令，不是用户事实）：")
+                .append(posture).append("。\n");
+        if (!plan.nextProbe().isBlank()) {
+            strategy.append("可考虑了解的方向：").append(plan.nextProbe())
+                    .append("（仅在贴合用户最后发言时自然使用，不得照抄为问句）。");
+        }
+        return strategy.append('\n').toString();
+    }
+
     private static String safeSourceUrl(String value) {
         String url = Objects.toString(value, "").trim();
         return url.startsWith("https://") || url.startsWith("http://") ? truncate(url, 600) : "";
@@ -618,7 +738,8 @@ public class SpringAiCounselingAgentExecutor implements CounselingAgentExecutor 
         StringBuilder builder = new StringBuilder()
                 .append("【Agent 检索结果】\n")
                 .append("当前咨询阶段：").append(plan.stage()).append('\n')
-                .append("检索焦点：").append(plan.focus()).append('\n');
+                .append("检索焦点：").append(plan.focus()).append('\n')
+                .append(buildResponseStrategy(plan));
 
         // 关联假设约束放在上下文头部直接 append：尾部 truncate 只会砍到后面的案例/片段，
         // 该约束永远完整落盘；同样的约束也固化在 DEEP_AGENT_CONTEXT_PROMPT 静态段，双重免疫截断。
@@ -658,15 +779,48 @@ public class SpringAiCounselingAgentExecutor implements CounselingAgentExecutor 
                         + "（消息 id=" + episode.id() + "）\n");
             }
         }
-        return truncate(builder.toString().trim(), properties.getContextMaxChars());
+        return truncateAtBlockBoundary(builder.toString().trim(), properties.getContextMaxChars());
     }
 
+    /**
+     * Appends a whole block or nothing at all. Cutting mid-block used to leave the model a case
+     * summary that ends mid-sentence — worse than omitting it, because a half-quoted case reads as
+     * a complete one and invites the model to "finish" it. When the first block is dropped a single
+     * notice is emitted so the model knows material was withheld rather than never retrieved.
+     */
     private void appendLimited(StringBuilder builder, String text) {
         int remaining = properties.getContextMaxChars() - builder.length();
-        if (remaining <= 0) {
+        if (remaining >= text.length()) {
+            builder.append(text);
             return;
         }
-        builder.append(text, 0, Math.min(remaining, text.length()));
+        if (remaining >= OMISSION_NOTICE.length() && builder.indexOf(OMISSION_NOTICE) < 0) {
+            builder.append(OMISSION_NOTICE);
+        }
+    }
+
+    /**
+     * Final safety net for the head sections, which are appended unconditionally. Prefers the last
+     * block boundary (blank line, then newline) inside the budget so the context never ends
+     * mid-sentence; falls back to a hard cut only when no boundary exists at all.
+     */
+    private static String truncateAtBlockBoundary(String text, int maxChars) {
+        if (maxChars <= 0) {
+            return "";
+        }
+        if (text.length() <= maxChars) {
+            return text;
+        }
+        String window = text.substring(0, maxChars);
+        int cut = window.lastIndexOf("\n\n");
+        if (cut < 0) {
+            cut = window.lastIndexOf('\n');
+        }
+        // 边界太靠前（不足预算一半）说明没有可用的自然分界，退回硬截断，至少保住信息量。
+        if (cut < maxChars / 2) {
+            return truncate(text, maxChars);
+        }
+        return window.substring(0, cut).stripTrailing() + "\n" + OMISSION_NOTICE.strip();
     }
 
     private String formatCandidates(List<Candidate> candidates) {
@@ -779,7 +933,9 @@ public class SpringAiCounselingAgentExecutor implements CounselingAgentExecutor 
             String focus,
             List<String> retrievalQueries,
             List<String> missingInformation,
-            List<String> associationHypotheses) {
+            List<String> associationHypotheses,
+            String responseMode,
+            String nextProbe) {
     }
 
     public record EvidenceDecision(List<String> selectedIds, List<String> evidenceGaps) {
@@ -788,7 +944,15 @@ public class SpringAiCounselingAgentExecutor implements CounselingAgentExecutor 
     private record Candidate(String id, Document document) {
     }
 
-    private record DeepContext(String text, List<ConversationMemoryService.RecallEpisodeView> episodes) {
+    /**
+     * Selected context plus the counts behind it. The counts exist only to build the user-facing
+     * retrieval summary (see {@link #retrievalSummary}); they are never sent to the model.
+     */
+    private record DeepContext(
+            String text,
+            List<ConversationMemoryService.RecallEpisodeView> episodes,
+            int caseCount,
+            int transcriptSnippetCount) {
     }
 
     private enum PreparationStage {

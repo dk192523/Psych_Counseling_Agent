@@ -33,7 +33,9 @@ public final class AiWorkerContracts {
             boolean degraded,
             List<String> degradedReasons,
             long durationMs,
-            List<String> associationHypotheses) {}
+            List<String> associationHypotheses,
+            String responseMode,
+            String nextProbe) {}
 
     public record Candidate(
             String id,

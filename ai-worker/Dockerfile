@@ -16,4 +16,7 @@ RUN useradd --create-home --uid 10001 appuser
 USER appuser
 
 EXPOSE 8000
-CMD ["uvicorn", "dk_ai_worker.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# --factory：应用在 uvicorn 调用 create_app() 时才构造，鉴权配置的 fail-closed 校验因此发生在
+# 服务启动时，而不是模块导入时。模块级 `app = create_app()` 会让"导入 main"这个动作本身带上
+# 环境依赖——测试与任何工具链导入该模块都会直接抛错。
+CMD ["uvicorn", "--factory", "dk_ai_worker.main:create_app", "--host", "0.0.0.0", "--port", "8000"]

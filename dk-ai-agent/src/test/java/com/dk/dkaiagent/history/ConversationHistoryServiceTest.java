@@ -18,14 +18,18 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -52,7 +56,8 @@ class ConversationHistoryServiceTest {
     void initializesTablesAndIndexes() {
         service.initializeSchema();
 
-        verify(jdbcTemplate, times(6)).execute(anyString());
+        // 3 张业务表 + 墓碑表 + 2 个普通索引 + client_msg_id 列（ALTER）+ 幂等唯一索引 = 8 条 DDL。
+        verify(jdbcTemplate, times(8)).execute(anyString());
         verify(jdbcTemplate).execute(argThat((String sql) -> sql != null
                 && sql.contains("psych_conversation_memory")
                 && sql.contains("covered_message_count")
@@ -62,6 +67,12 @@ class ConversationHistoryServiceTest {
                 && sql.contains("CREATE TABLE IF NOT EXISTS psych_conversation_tombstone")
                 && sql.contains("conversation_id VARCHAR(64) PRIMARY KEY")
                 && sql.contains("owner_id BIGINT NOT NULL")));
+        // 幂等键：可重复执行的 ADD COLUMN + (conversation_id, client_msg_id) 唯一索引。
+        verify(jdbcTemplate).execute(argThat((String sql) -> sql != null
+                && sql.contains("ADD COLUMN IF NOT EXISTS client_msg_id")));
+        verify(jdbcTemplate).execute(argThat((String sql) -> sql != null
+                && sql.contains("CREATE UNIQUE INDEX IF NOT EXISTS uk_psych_chat_message_client_msg")
+                && sql.contains("ON psych_chat_message (conversation_id, client_msg_id)")));
     }
 
     @Test
@@ -115,13 +126,51 @@ class ConversationHistoryServiceTest {
                 argThat(sql -> sql != null && sql.contains("INSERT INTO psych_chat_message")),
                 eq("chat-id"),
                 eq("user"),
-                eq(content)
+                eq(content),
+                isNull()
         );
         // 原文档案只追加：追加路径不再有滑动窗口硬删除，淘汰交给 replaceMemoryAndPrune。
         verify(jdbcTemplate, times(4)).update(anyString(), any(Object[].class));
         verify(jdbcTemplate, never()).update(
                 argThat(sql -> sql != null && sql.contains("DELETE FROM psych_chat_message")),
                 (Object[]) any());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void clientMsgIdRetryIsDeduplicatedByIdempotentInsert() {
+        // 带幂等键的用户消息：INSERT 携带 client_msg_id 与 ON CONFLICT DO NOTHING。
+        when(jdbcTemplate.query(
+                argThat(sql -> sql != null && sql.contains("SELECT owner_id")),
+                any(RowMapper.class),
+                eq("chat-id")))
+                .thenReturn(List.of(OWNER_ID));
+        // lenient：同一路径还会发起 bootstrap/title/updated_at 三次 update，均无桩，
+        // 严格桩模式下不希望它们触发 PotentialStubbingProblem。
+        lenient().when(jdbcTemplate.update(
+                argThat(sql -> sql != null && sql.contains("INSERT INTO psych_chat_message")),
+                any(Object[].class)))
+                .thenReturn(1);
+
+        assertTrue(service.appendUserMessage(OWNER_ID, "chat-id", "你好", "client-msg-1"));
+
+        verify(jdbcTemplate).update(
+                argThat(sql -> sql != null
+                        && sql.contains("client_msg_id")
+                        && sql.contains("ON CONFLICT (conversation_id, client_msg_id) DO NOTHING")),
+                eq("chat-id"),
+                eq("user"),
+                eq("你好"),
+                eq("client-msg-1"));
+
+        // SSE 中断后重发同一 clientMsgId：唯一索引令 INSERT 原子地不落行（update 返回 0），
+        // 服务层折算为 false，调用方据此知道这是一次重放而非新消息。
+        lenient().when(jdbcTemplate.update(
+                argThat(sql -> sql != null && sql.contains("INSERT INTO psych_chat_message")),
+                any(Object[].class)))
+                .thenReturn(0);
+
+        assertFalse(service.appendUserMessage(OWNER_ID, "chat-id", "你好", "client-msg-1"));
     }
 
     @Test

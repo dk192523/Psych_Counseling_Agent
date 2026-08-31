@@ -47,9 +47,12 @@ public class AiWorkerClient {
         this.httpClient = httpClient;
         this.bulkhead = new Semaphore(properties.getMaxConcurrency(), true);
         if (properties.isEnabled() && properties.getSharedSecret().isBlank()) {
-            // 空密钥时 worker 端鉴权为空操作，任何能绑定 sidecar 端口的进程都可伪造召回片段。
-            log.warn("AI worker shared secret is blank; worker calls are unauthenticated. "
-                    + "Set AI_WORKER_SHARED_SECRET in any non-local deployment.");
+            // Worker 已改为 fail-closed：空密钥不再是"调用免鉴权通过"，而是每次调用被 401 挡回，
+            // 于是整个 Python 智能面静默退到 Java 兜底——功能看着还在，质量降级却不报错。
+            // 这条 WARN 是唯一的线索，措辞必须指向真实症状，否则运维会去查网络而不是查配置。
+            log.warn("AI worker shared secret is blank; every worker call will be rejected with 401 "
+                    + "and the intelligence plane will silently fall back to the Java path. "
+                    + "Set AI_WORKER_SHARED_SECRET to match the worker's own value.");
         }
     }
 

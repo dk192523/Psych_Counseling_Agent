@@ -5,8 +5,8 @@ import com.dk.dkaiagent.account.RegisterThrottleService;
 import com.dk.dkaiagent.account.UserAccountService;
 import com.dk.dkaiagent.account.UserRepository;
 import com.dk.dkaiagent.app.CounselingApp;
-import com.dk.dkaiagent.cache.AnswerCache;
 import com.dk.dkaiagent.agent.counseling.CounselingAgentExecutor;
+import com.dk.dkaiagent.agent.counseling.CounselingTurnPipeline;
 import com.dk.dkaiagent.history.ConversationHistoryService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -70,8 +70,9 @@ class SecurityFilterChainTest {
     @MockitoBean
     private CounselingAgentExecutor counselingAgentExecutor;
 
+    // 控制器的流式入口统一委托给 pipeline；Web 层切片里以 mock 提供该依赖。
     @MockitoBean
-    private AnswerCache answerCache;
+    private CounselingTurnPipeline counselingTurnPipeline;
 
     private static PsychUser activeUser(long id, String username) {
         return new PsychUser(id, username, "$2a$10$hash", "USER", "ACTIVE", NOW, NOW, null, null, null);
@@ -226,14 +227,38 @@ class SecurityFilterChainTest {
 
     @Test
     void aiRequiresAuthenticationAndBlocksDownstream() throws Exception {
-        mockMvc.perform(get("/ai/counseling/chat/sync")
-                        .param("message", "你好")
-                        .param("chatId", "chat-id"))
+        // 咨询正文一律走请求体（GET query 形式已移除，避免敏感文本进入访问日志）。
+        mockMvc.perform(post("/ai/counseling/chat/sync")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"message\":\"你好\",\"chatId\":\"chat-id\"}"))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.error").value("UNAUTHORIZED"));
 
         // 未认证请求被过滤链拦在控制器之前，绝不进入聊天下游。
-        verify(counselingApp, never()).doChatWithRag(anyLong(), anyString(), anyString());
+        verify(counselingApp, never()).doChatWithRag(anyLong(), anyString(), anyString(), any());
+        verify(counselingTurnPipeline, never()).run(any());
+    }
+
+    @Test
+    void counselingTextNeverAcceptedOnGetEndpoints() throws Exception {
+        // C8 回归：三个把咨询正文放进 URL query 的旧 GET 入口已移除。
+        // 认证态下断言 4xx 才有意义——否则未认证的 401 会掩盖"端点其实还活着"。
+        for (String path : List.of(
+                "/ai/counseling/chat/sync",
+                "/ai/counseling/chat/sse",
+                "/ai/counseling/chat/server_sent_event",
+                "/ai/counseling/chat/sse_emitter")) {
+            mockMvc.perform(get(path)
+                            .param("message", "涉及隐私的咨询正文")
+                            .param("chatId", "chat-id")
+                            .with(user("bob").roles("USER")))
+                    .andExpect(status().is4xxClientError());
+        }
+        verify(counselingApp, never()).doChatWithRag(anyLong(), anyString(), anyString(), any());
+        verify(counselingApp, never()).prepareConversationTurn(anyLong(), anyString(), anyString(), any());
+        verify(counselingApp, never()).doChatWithRagByStreamPrepared(anyLong(), anyString(), anyString());
+        verify(counselingAgentExecutor, never()).prepareAndAnswer(anyString(), anyString(), anyLong());
+        verify(counselingTurnPipeline, never()).run(any());
     }
 
     // ---------------------------------------------------------------- 角色授权

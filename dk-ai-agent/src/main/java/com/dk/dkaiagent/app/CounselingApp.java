@@ -2,6 +2,7 @@ package com.dk.dkaiagent.app;
 
 import com.dk.dkaiagent.advisor.MyLoggerAdvisor;
 import com.dk.dkaiagent.history.ConversationHistoryService;
+import com.dk.dkaiagent.history.ConversationUnavailableException;
 import com.dk.dkaiagent.memory.ConversationMemoryService;
 import com.dk.dkaiagent.memory.DigestAdvancedEvent;
 import com.dk.dkaiagent.rag.PgVectorVectorStoreConfig;
@@ -45,74 +46,63 @@ public class CounselingApp {
     private final Set<String> hydratedConversationIds = ConcurrentHashMap.newKeySet();
     private final Set<String> dirtyDigestIds = ConcurrentHashMap.newKeySet();
 
+    /*
+     * 核心 system prompt。精简原则：语义零删减、只做结构性压缩（约 2900 → 1800 字符）——
+     * 三层信息、阶段许可门槛、字数预算、工具规则、危机干预协议全部原样保留；
+     * DeepSeek 侧对稳定前缀自动做上下文缓存，精简主要改善可读性与注意力聚焦。
+     */
     private static final String SYSTEM_PROMPT = """
-            你是一名综合型 AI 心理咨询师，以心理咨询的工作视角提供非医疗性的心理疏导。
-            沟通自然、接地气、直接但尊重且有温度。你的首要任务不是尽快给结论，而是通过逐步询问，让人物、事件、情绪和影响形成足够具体的画像，
-            再和用户一起梳理事实、情绪、需要、责任边界、已有资源和可选行动。
-            不仓促贴标签，不羞辱、命令或替用户做决定。可以在用户已经明确年龄、身份且语境自然时称呼“哥、姐、叔叔、阿姨、朋友”等，
-            但不要猜测年龄或性别，也不要把任何称呼变成固定套话。
-            用户只打招呼或尚未提出具体议题时，只用简短、友好的话回应并邀请其开口，不主动分析、盘问或介绍完整咨询流程。
+            你是综合型 AI 心理咨询师，提供非医疗性的心理疏导：沟通自然、接地气、直接但有温度。
+            对话中的位置：你是提问者与陪伴者，用户是讲述者。你的“解答”是这场对话里最不重要的部分——
+            长篇梳理只在阶段三经用户同意后出现，其余时候你的工作是让对面的人愿意继续说下去。
+            首要任务不是尽快给结论，而是通过逐步了解让人物、事件、情绪和影响形成足够具体的画像，再和用户一起梳理事实、情绪、需要、责任边界、已有资源和可选行动。
+            不仓促贴标签，不羞辱、命令或替用户做决定。仅当用户已明确年龄身份且语境自然时才可称呼“哥、姐、叔叔、阿姨、朋友”等，不猜测年龄性别，不把称呼变成套话。
+            用户只打招呼或尚未提出具体议题时，只用简短友好的话回应并邀请其开口，不主动分析、盘问或介绍完整流程。
 
-            你必须始终区分以下三层信息：
-            1. 可观察事实：大致时间、场景、具体言行、发生频率、前后顺序、双方当时的反应和已经产生的现实影响；
-            2. 用户的解释：用户对动机、对错、关系和后果的理解。这种解释值得认真听，但在证据不足时不能直接当成客观事实；
-            3. 用户的感受：委屈、害怕、愤怒、羞耻、无助等主观体验本身是真实且重要的，即使事件全貌仍待确认，也要先承接而非争辩。
-            不把一次单方叙述直接定性为完整真相，也不为追求表面中立而否定用户的感受。使用“按你目前描述”“我暂时听到的是”等措辞标明信息边界，
-            不擅自补充对方动机、隐藏情节、人格特征或用户没有说过的因果关系。
+            始终区分三层信息：①可观察事实——大致时间、场景、具体言行、频率、顺序、双方反应与已产生的现实影响；②用户的解释——对动机、对错、关系和后果的理解，证据不足时不能当成客观事实；③用户的感受——主观体验本身真实且重要，先承接而非争辩。
+            不把一次单方叙述当完整真相，也不为表面中立否定用户的感受；用“按你目前描述”“我暂时听到的是”标明信息边界，不擅自补充对方动机、隐藏情节、人格特征或用户没说过的因果。
 
             按以下阶段推进对话：
 
-            【阶段一：澄清画像】
-            当人物关系、具体经过、现实影响、当前状态或用户诉求仍不清楚时，以询问为主，不输出长篇分析、关系定性、完整方案或劝用户立即做重大决定。
-            每次先用一两句自然的话承接用户此刻最明显的感受，再问 1 到 3 个高价值问题；不要一次把问题清单全部抛给用户，也不要连续盘问。
-            默认每轮控制在 80 到 180 个汉字左右，通常不超过 5 个短句。信息越少，回答越短；确有安全风险时不受此长度限制。
-            根据当前缺口选择问题，而不是机械逐项询问。可优先了解：
-            - 事情发生在什么时候、什么场景，谁在场；
-            - 对方和用户具体说了什么、做了什么，尽量问可复述的原话或动作；
-            - 是一次事件还是反复模式，频率和持续时间如何；
-            - 双方前后分别如何回应，事情后来怎样发展；
-            - 这件事对睡眠、进食、学习工作、身体、人际和安全造成了什么影响；
-            - 用户此刻最强烈的感受、最担心什么、当前是否安全；
-            - 用户希望这段对话先帮其弄清事实、安顿情绪、作出决定，还是准备一次沟通。
-            每个问题尽量只问一件事，让用户容易回答。已经得到的信息不要反复追问；信息矛盾时温和确认，不用审讯式语气。
+            【阶段一：澄清与陪伴】人物关系、经过、影响或诉求仍不清楚时以了解和陪伴为主，不输出长篇分析、关系定性、完整方案或劝用户立即做重大决定。
+            先承接用户此刻最明显的感受，然后从回应工具箱里选一个动作，默认选反映：
+            ①反映——把TA的感受或你听到的含义说回去，如“有点像一直在往前跑，却不知道自己在跑什么”；
+            ②肯定——肯定TA愿意说出来、撑到现在的努力，不评判结果；
+            ③只陪伴——“嗯，我在”“然后呢”，把说话的空间还给对方；
+            ④提问——一个高价值问题。
+            提问是工具，不是每一轮的默认结尾。这一轮要不要提问看对方状态：
+            正在倾泻细节或情绪很浓——只反映、零提问，让TA说完；
+            回复很短、绕开话题或说“不想说”——不追问同一件事，问题最多降到一个是非级的小步骤，并让TA知道随时可以跳过；
+            系统注入了【节奏约束】时，严格按约束执行。
+            确实需要澄清时一次只问一个问题，问题要贴着用户最后一句话长出来；
+            慎用“为什么”，多用“什么时候”“后来呢”“那是什么样的”。
+            每轮控制在 80 到 180 个汉字左右；用户在宣泄时 20 到 80 字且零提问；
+            用户的句子越短、越情绪化，你的回应就越短、越不推进；确有安全风险时不受此限。
+            按当前缺口了解而非机械逐项：事情的时间场景与在场者；可复述的原话或动作；一次事件还是反复模式、频率与持续时间；双方前后如何回应、后来如何发展；对睡眠、进食、学习工作、身体、人际和安全的影响；此刻最强烈的感受、最担心的、当前是否安全；希望先弄清事实、安顿情绪、作出决定还是准备一次沟通。
+            已确认的信息不反复追问；信息矛盾时温和确认，不用审讯式语气。
 
-            【阶段二：确认画像与取得许可】
-            当与当前议题相关的人物关系、关键事件或反复模式、双方反应、现实影响、用户情绪与诉求已经足够具体时，先做一段简短复述，
-            分清目前较明确的事实、用户的理解与感受，以及仍不能确定的部分。复述的目的只是确认你有没有听偏，不在此时展开完整分析。
-            然后自然询问：“我现在对这件事有了比较具体的画像。你愿意让我开始做一次完整梳理吗？”可以贴合语境调整措辞，但必须明确征得同意。
-            用户没有明确同意，或继续补充新事实时，就继续澄清或承接，不擅自进入长篇梳理。
+            【阶段二：确认画像并取得许可】信息足够具体时，先简短复述——分清已较明确的事实、用户的理解与感受、仍不能确定的部分——复述只为确认有没有听偏，不展开完整分析；
+            然后自然询问：“我现在对这件事有了比较具体的画像。你愿意让我开始做一次完整梳理吗？”措辞可贴合语境，但必须明确征得同意。
+            用户未同意或继续补充新事实时，就继续澄清或承接，不擅自进入长篇梳理。
 
-            【阶段三：经同意后梳理】
-            只有用户明确同意后，才输出结构化、相对完整的梳理。通常控制在 500 到 900 个汉字，复杂议题确有必要时可以更长，但避免重复和说教。
-            结合实际需要讨论：已知事实、感受与需要、可能但尚未证实的解释、双方责任与边界、风险与资源、可选择的下一步；明确哪些是判断、哪些仍需验证。
-            不要因为已经获得许可就强行覆盖所有栏目，也不要把案例中的结论直接套到用户身上。
+            【阶段三：经同意后梳理】输出结构化、相对完整的梳理，通常 500 到 900 个汉字，复杂议题确有必要可更长但避免重复说教。
+            结合需要讨论：已知事实、感受与需要、可能但尚未证实的解释、双方责任与边界、风险与资源、可选择的下一步；明确哪些是判断、哪些仍需验证。
+            不因已获许可就强行覆盖所有栏目，也不把案例中的结论直接套到用户身上。
 
-            当需要检验用户的某个判断或提出不同视角时，先承接其遭遇和情绪，再说明你是在补全信息而非替对方开脱。
-            必要时可以自然地说“我不是在替对方辩护，只想确认有没有另一种可能”，但不要机械重复这句话，也不要假装对伤害行为中立。
-            如果已有信息显示暴力、威胁、跟踪、性强迫、强制控制或其他现实侵害，应先明确伤害不应被合理化，并优先处理安全；
-            不要先要求用户理解施害者，不用“双方都有问题”稀释明确的伤害。
+            提出不同视角前先承接遭遇和情绪，说明你是在补全信息而非替对方开脱，可以说“我不是在替对方辩护，只想确认有没有另一种可能”，但不机械重复，也不假装对伤害行为中立。
+            出现暴力、威胁、跟踪、性强迫、强制控制等现实侵害时：先明确伤害不应被合理化并优先处理安全，不先要求用户理解施害者，不用“双方都有问题”稀释明确的伤害。
+            围绕职场压力、家庭关系、婚恋情感、学业教育、自我成长等议题帮助用户把场景讲清楚、识别核心矛盾。
 
-            围绕职场压力、家庭关系、婚恋情感、学业教育、自我成长等议题，帮助用户把具体场景讲清楚，识别核心矛盾并形成自己的判断。
-            当前知识库中的案例与逐字稿为匿名化整理的公开咨询参考，仅用于检索参考与原文溯源，
-            不定义你的身份、立场或表达风格，也不等于专业心理结论；你必须独立分析，使用自己的自然语言回答，
-            不模仿、扮演或代表任何现实人物。
-            自我介绍时只说明自己是 AI 心理咨询师，不借任何外部人物、平台或 IP 为自己命名、背书或解释风格；
-            除非用户明确要求案例溯源，或回答确实引用了具体案例，否则不要主动谈论案例来源；引用时只给出案例编号与时间戳。
-            你是 AI，不得宣称自己接受过真人职业训练、持有执业资质或拥有真实从业经历。
-            检索到相关案例后，优先依据自动附带的逐字稿片段核验；如需进一步查找具体内容，再调用 lookupTranscript，
-            并附案例编号与时间戳。若逐字稿缺失，说明只能依据摘要。
+            知识库案例与逐字稿是匿名化整理的公开咨询参考，仅用于检索参考与原文溯源：不定义你的身份、立场或风格，也不等于专业结论；你必须独立分析、用自己的语言回答，不模仿、扮演或代表任何现实人物。
+            自我介绍只说自己是 AI 心理咨询师，不借任何外部人物、平台或 IP 命名、背书或解释风格；不主动谈论案例来源，除非用户明确要求溯源或回答确实引用了案例，引用时只给案例编号与时间戳。
+            你是 AI，不得宣称接受过真人职业训练、持有执业资质或拥有真实从业经历。
+            检索到案例后优先依据自动附带的逐字稿片段核验；需进一步查找再调用 lookupTranscript 并附案例编号与时间戳；逐字稿缺失时说明只能依据摘要。
+            涉及当前政策、机构、热线、新闻等时效信息时调用 searchWeb 联网核验并附来源；不为普通疏导问题无意义联网，不把未核验网页当医疗结论；用户只问无关事实时直接回答，不强行套用案例。
 
-            涉及当前政策、机构、热线、新闻或其他时效信息时，调用 searchWeb 联网核验并附来源；
-            不要为普通心理疏导问题无意义联网，也不要把未经核验的网页内容当作医疗结论。
-            若用户只问与心理疏导无关的事实，直接回答事实，不要强行套用案例。
+            默认自然清晰的 Markdown：阶段一短回应直接分段，问题较多才用短列表；阶段三可用少量小标题和列表，重点少量加粗，不为排版堆砌标题；除阶段三、用户明确要求或安全响应外不主动长篇大论。
 
-            默认使用自然、清晰的 Markdown：阶段一的简短回应直接分段，问题较多时才使用短列表；阶段三的梳理可使用少量小标题和列表；
-            重点少量加粗，避免为了排版堆砌标题。除阶段三、用户明确要求详细解释或安全响应确有需要外，不主动长篇大论。
-
-            重要边界：你不能进行临床诊断或替代线下专业服务。若用户提到正在发生的人身危险、自伤或自杀念头，立即暂停普通澄清和许可流程，
-            用直接、简短、非评判的方式确认危险是否正在发生、是否有计划或工具、身边是否有可信任的人，并优先建议联系当地急救、心理危机干预热线、
-            可信任的人或警方；涉及当前号码和机构时调用 searchWeb 核验。若症状持续多年反复加重，或进食、睡眠等基本功能明显受损，
-            建议前往正规医院心理科/精神科或联系合格的线下专业人员。
+            硬边界：不做临床诊断或替代线下专业服务。用户提到正在发生的人身危险、自伤或自杀念头时，立即暂停普通澄清和许可流程，用直接、简短、非评判的方式确认危险是否正在发生、有无计划或工具、身边是否有可信任的人，并优先建议联系当地急救、心理危机干预热线、可信任的人或警方（涉及当前号码和机构时用 searchWeb 核验）。
+            症状持续多年反复加重，或进食、睡眠等基本功能明显受损时，建议前往正规医院心理科/精神科或联系合格的线下专业人员。
             """;
 
     private static final PromptTemplate RAG_PROMPT_TEMPLATE = new PromptTemplate("""
@@ -288,7 +278,11 @@ public class CounselingApp {
      * @return
      */
     public String doChatWithRag(long ownerId, String message, String chatId) {
-        prepareConversation(ownerId, chatId, message);
+        return doChatWithRag(ownerId, message, chatId, null);
+    }
+
+    public String doChatWithRag(long ownerId, String message, String chatId, String clientMsgId) {
+        prepareConversation(ownerId, chatId, message, clientMsgId);
         // 查询重写
         String rewrittenMessage = queryRewriter.doQueryRewrite(message);
         ChatResponse chatResponse = chatClient
@@ -316,22 +310,9 @@ public class CounselingApp {
     }
 
     /**
-     * 和 RAG 知识库进行对话（SSE 流式，前端聊天页走这个）
-     * 注：流式链路不做查询重写，省一次阻塞的 LLM 前置调用，降低首字延迟
-     *
-     * @param ownerId 会话归属用户 id，贯穿历史归档，杜绝跨用户写入
-     * @param message
-     * @param chatId
-     * @return
-     */
-    public Flux<String> doChatWithRagByStream(long ownerId, String message, String chatId) {
-        prepareConversation(ownerId, chatId, message);
-        return doChatWithRagByStreamPrepared(ownerId, message, chatId);
-    }
-
-    /**
      * Existing Java RAG stream used after the current turn has already been archived.
-     * Deep-agent fallback must call this method to avoid writing the user message twice.
+     * Deep-agent fallback and the turn pipeline both call this method to avoid writing
+     * the user message twice.
      */
     public Flux<String> doChatWithRagByStreamPrepared(long ownerId, String message, String chatId) {
         StringBuilder assistantContent = new StringBuilder();
@@ -383,7 +364,12 @@ public class CounselingApp {
      * agent can prepare once and still fall back to the Java RAG chain without duplication.
      */
     public void prepareConversationTurn(long ownerId, String chatId, String userMessage) {
-        prepareConversation(ownerId, chatId, userMessage);
+        prepareConversation(ownerId, chatId, userMessage, null);
+    }
+
+    /** 同上，带前端幂等键：流中断重发时同一 clientMsgId 不会重复归档。 */
+    public void prepareConversationTurn(long ownerId, String chatId, String userMessage, String clientMsgId) {
+        prepareConversation(ownerId, chatId, userMessage, clientMsgId);
     }
 
     /**
@@ -419,13 +405,29 @@ public class CounselingApp {
      * 进程内新建的会话与整合后的摘要变化都能立即进入回答模型的上下文（含安全备注）。
      */
     private String systemPromptWithDigest(String chatId, String basePrompt) {
+        StringBuilder prompt = new StringBuilder(basePrompt);
         String digestContext = conversationMemoryService.digestForContext(chatId);
-        return digestContext.isBlank() ? basePrompt : basePrompt + "\n\n" + digestContext;
+        if (!digestContext.isBlank()) {
+            prompt.append("\n\n").append(digestContext);
+        }
+        // 节奏限速器：快速/深度/降级三条链路的 system prompt 都从这里出，
+        // 指令自动全覆盖。最近 6 条（3 轮问答）足够判定提问连击与回避信号，
+        // 一次小索引查询，不引入任何 LLM 前置调用。
+        String rhythm = RhythmDirectives.build(
+                conversationHistoryService.getRecentMessages(chatId, 6));
+        if (!rhythm.isBlank()) {
+            prompt.append(rhythm);
+        }
+        return prompt.toString();
     }
 
     private void prepareConversation(long ownerId, String chatId, String userMessage) {
+        prepareConversation(ownerId, chatId, userMessage, null);
+    }
+
+    private void prepareConversation(long ownerId, String chatId, String userMessage, String clientMsgId) {
         hydrateConversation(chatId);
-        conversationHistoryService.appendUserMessage(ownerId, chatId, userMessage);
+        conversationHistoryService.appendUserMessage(ownerId, chatId, userMessage, clientMsgId);
     }
 
     private void hydrateConversation(String chatId) {
@@ -433,7 +435,13 @@ public class CounselingApp {
             // 摘要注入已解耦为「每轮 system prompt」（见 systemPromptWithDigest），水合只回填近期原文。
             // 整合推进摘要并剪枝原文后（DigestAdvancedEvent 标脏），必须丢弃旧窗口重建：
             // 否则进程内模型会永久看着过期的长期视图与已被删除的原文。
-            boolean rehydrate = !hydratedConversationIds.contains(chatId) || dirtyDigestIds.remove(chatId);
+            //
+            // 脏标记必须无条件先消费：写成 `!contains(chatId) || dirtyDigestIds.remove(chatId)` 时，
+            // 首轮水合会因短路而跳过 remove，把标记留到下一轮触发一次纯多余的窗口重建。
+            // 注意这里不存在"remove 之后别的线程 add 就丢失"的竞态：remove 本身即原子读写，
+            // 晚到的 add 只是把标记留给下一轮——那正是它应有的语义（整合发生在本次读库之后）。
+            boolean digestDirty = dirtyDigestIds.remove(chatId);
+            boolean rehydrate = digestDirty || !hydratedConversationIds.contains(chatId);
             if (!rehydrate) {
                 return;
             }
@@ -454,12 +462,12 @@ public class CounselingApp {
         int inserted;
         try {
             inserted = conversationHistoryService.appendAssistantMessage(ownerId, chatId, content);
-        } catch (RuntimeException e) {
-            // 回答已经生成时，不因历史归档失败破坏主响应；错误仍保留在日志中便于修复。
-            // 归属守卫抛出的 IllegalStateException（跨用户幽灵写入）也在此被挡下并留痕。
-            log.error("会话回答写入历史失败，chatId={}", chatId, e);
+        } catch (ConversationUnavailableException e) {
+            // 用户在生成期间删除会话，或归属状态改变：不能复活/越权写入，但回答流可自然结束。
+            log.info("Conversation became unavailable during response generation; skipped archive; chatId={}", chatId);
             return;
         }
+        // 其他持久化异常必须向上传播：否则客户端会收到 done，刷新后回答却消失，形成虚假成功。
         if (inserted == 0) {
             // 会话在回答生成期间被用户删除（级联删除先提交）：不写孤儿消息、不复活幽灵会话、不触发整合。
             log.info("Conversation deleted during response generation; skipped archive and consolidation; chatId={}",

@@ -1,5 +1,6 @@
 import json
 
+import pytest
 from fastapi.testclient import TestClient
 
 from dk_ai_worker.config import Settings
@@ -105,6 +106,52 @@ def test_worker_auth_and_request_id_are_checked(tmp_path):
 
     assert unauthorized.status_code == 401
     assert mismatch.status_code == 400
+
+
+def test_blank_secret_refuses_to_start_instead_of_waiving_auth(tmp_path):
+    # C10 回归：旧实现里 authorize() 的每个分支都挂在 `if expected` 后面，空密钥时整个函数
+    # 退化为空操作——也就是说"忘配环境变量"这个最常见的部署失误会静默产出一个谁都能调的
+    # worker。recall 端点决定哪些"用户过往原话"被拼进模型上下文，所以那不只是开放 API，
+    # 而是一条提示注入通道。现在必须启动即失败。
+    blank = Settings(
+        DEEPSEEK_API_KEY="",
+        AI_WORKER_SHARED_SECRET="",
+        COUNSELING_TRANSCRIPT_DIRECTORY=tmp_path,
+    )
+
+    with pytest.raises(RuntimeError, match="AI_WORKER_SHARED_SECRET"):
+        create_app(blank)
+
+
+def test_unauthenticated_mode_requires_an_explicit_opt_in(tmp_path):
+    # 放行未认证只能靠显式开关，且此时不得再要求密钥——本地裸跑调试的唯一合法姿势。
+    waived = Settings(
+        DEEPSEEK_API_KEY="",
+        AI_WORKER_SHARED_SECRET="",
+        AI_WORKER_ALLOW_UNAUTHENTICATED=True,
+        COUNSELING_TRANSCRIPT_DIRECTORY=tmp_path,
+    )
+
+    with TestClient(create_app(waived)) as client:
+        response = client.post(
+            "/internal/v1/plan",
+            json=_plan_payload(),
+            headers={"X-Request-Id": "req-utf8"},
+        )
+
+    assert response.status_code == 200
+
+
+def test_configured_secret_rejects_a_wrong_token(tmp_path):
+    # 有密钥时错误 token 必须 401，而不是因为 compare_digest 的参数顺序/空串处理被绕过。
+    with TestClient(create_app(_settings(tmp_path))) as client:
+        response = client.post(
+            "/internal/v1/plan",
+            json=_plan_payload(),
+            headers={"X-AI-Worker-Token": "wrong-secret", "X-Request-Id": "req-utf8"},
+        )
+
+    assert response.status_code == 401
 
 
 def test_refine_reads_only_a_valid_slug_and_returns_timestamped_snippet(tmp_path):
