@@ -5,6 +5,7 @@ import com.dk.dkaiagent.history.ConversationHistoryService;
 import com.dk.dkaiagent.integration.aiworker.AiWorkerClient;
 import com.dk.dkaiagent.integration.aiworker.AiWorkerContracts;
 import com.dk.dkaiagent.memory.ConversationMemoryService;
+import com.dk.dkaiagent.memory.RiskTier;
 import com.dk.dkaiagent.memory.SafetyTerms;
 import com.dk.dkaiagent.orchestration.AgentRequestContext;
 import com.dk.dkaiagent.orchestration.ExecutionContextScope;
@@ -868,8 +869,11 @@ public class SpringAiCounselingAgentExecutor implements CounselingAgentExecutor 
     }
 
     static boolean requiresImmediateSafetyResponse(String message) {
-        // 词表单一事实源：与记忆层的安全打标共用 SafetyTerms，避免两份词表漂移。
-        return SafetyTerms.containsAny(message);
+        // 词表单一事实源：与记忆层的安全打标共用 SafetyTerms。
+        // v2 起只拦 IMMINENT（手段/计划/进行中）——PASSIVE 级不再切换链路，
+        // 而是由 systemPromptWithDigest 注入安全姿态后照常走深度链（pipeline 已拦 IMMINENT，
+        // 此处是防御性复查，防绕过 pipeline 的进程内调用）。
+        return SafetyTerms.assess(message) == RiskTier.IMMINENT;
     }
 
     private static String normalizeStage(String stage) {

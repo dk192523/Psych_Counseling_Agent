@@ -33,7 +33,10 @@ _RESPONSE_MODES = ("listen", "clarify", "explore")
 
 # 强情绪标记：启发式降级路径识别"正在宣泄"的最低保障，命中即 listen（只反映、零提问）。
 _DISTRESS_MARKERS = (
-    "撑不住", "崩溃", "被掏空", "熬不住", "活不下去", "受不了",
+    # 与 Java `SafetyTerms.DISTRESS_TERMS` 保持同步（tests/test_service.py 有一致性测试）。
+    # 刻意不含"活不下去"：Java 侧将其归 PASSIVE（意念级，触发安全姿态），本表只驱动
+    # listen 姿态——两侧都不要加它。
+    "撑不住", "崩溃", "被掏空", "熬不住", "受不了",
     "绝望", "好累", "太累", "喘不过气", "撑不下去", "想哭",
 )
 

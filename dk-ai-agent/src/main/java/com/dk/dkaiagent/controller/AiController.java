@@ -43,6 +43,9 @@ public class AiController {
     @Resource
     private CounselingTurnPipeline counselingTurnPipeline;
 
+    @Resource
+    private com.dk.dkaiagent.app.ChatRateLimitService chatRateLimitService;
+
     @PostMapping("/conversations")
     @ResponseStatus(HttpStatus.CREATED)
     public ConversationSummary createConversation() {
@@ -127,6 +130,11 @@ public class AiController {
             String clientMsgId) {
         // 开流前完成所有权校验：跨用户与不存在一律 404，绝不带着他人主体进入下游。
         long ownerId = requireConversationOwner(chatId);
+        // A4 成本护栏：单用户滑动窗口限频，超限 429（前端有专属文案）。
+        if (!chatRateLimitService.tryAcquire(ownerId)) {
+            throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS,
+                    "发送太频繁了，休息几秒再说");
+        }
 
         // 归档、快速/深度分流与事件映射统一收口在 pipeline，控制器只保留 HTTP 契约。
         return counselingTurnPipeline

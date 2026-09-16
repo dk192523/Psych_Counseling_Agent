@@ -62,7 +62,14 @@ class AiControllerTest {
         CounselingTurnPipeline pipeline = new CounselingTurnPipeline();
         ReflectionTestUtils.setField(pipeline, "counselingApp", counselingApp);
         ReflectionTestUtils.setField(pipeline, "counselingAgentExecutor", counselingAgentExecutor);
+        ReflectionTestUtils.setField(pipeline, "crisisResponse",
+                new com.dk.dkaiagent.app.CrisisResponse(new com.dk.dkaiagent.memory.SafetyProperties()));
+        ReflectionTestUtils.setField(pipeline, "safetyProperties",
+                new com.dk.dkaiagent.memory.SafetyProperties());
         ReflectionTestUtils.setField(controller, "counselingTurnPipeline", pipeline);
+        // A4 限频：测试用宽松额度，避免用例连发触发 429
+        ReflectionTestUtils.setField(controller, "chatRateLimitService",
+                new com.dk.dkaiagent.app.ChatRateLimitService(10_000, 60));
         // 认证主体由 B2 的 CurrentUser 从安全上下文读取；单测中以静态桩固定主体 id。
         currentUser = mockStatic(CurrentUser.class);
         currentUser.when(CurrentUser::requireUserId).thenReturn(OWNER_ID);

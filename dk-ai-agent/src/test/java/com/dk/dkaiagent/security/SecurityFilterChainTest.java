@@ -74,6 +74,10 @@ class SecurityFilterChainTest {
     @MockitoBean
     private CounselingTurnPipeline counselingTurnPipeline;
 
+    // A4 聊天限频服务同样由控制器直接依赖；切片内 mock。
+    @MockitoBean
+    private com.dk.dkaiagent.app.ChatRateLimitService chatRateLimitService;
+
     private static PsychUser activeUser(long id, String username) {
         return new PsychUser(id, username, "$2a$10$hash", "USER", "ACTIVE", NOW, NOW, null, null, null);
     }

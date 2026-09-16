@@ -179,6 +179,8 @@ class ConversationIsolationTest {
             ReflectionTestUtils.setField(pipeline, "counselingApp", counselingApp);
             ReflectionTestUtils.setField(pipeline, "counselingAgentExecutor", executor);
             ReflectionTestUtils.setField(controller, "counselingTurnPipeline", pipeline);
+            ReflectionTestUtils.setField(controller, "chatRateLimitService",
+                    new com.dk.dkaiagent.app.ChatRateLimitService(10_000, 60));
             // 当前主体固定为用户 B。
             currentUser = mockStatic(CurrentUser.class);
             currentUser.when(CurrentUser::requireUserId).thenReturn(USER_B);

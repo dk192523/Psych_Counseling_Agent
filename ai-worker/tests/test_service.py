@@ -145,3 +145,19 @@ def test_normalize_response_mode_falls_back_to_clarify():
     # LLM 幻觉出的越界值 → 最中性的 clarify
     assert _normalize_response_mode("aggressive") == "clarify"
     assert _normalize_response_mode("") == "clarify"
+
+
+def test_distress_markers_stay_in_sync_with_java_side():
+    """A3 单一事实源契约：两侧词表必须一致，改动任一侧必须同步另一侧。
+
+    语义差异（刻意为之，两侧都不要加"活不下去"）：Java `SafetyTerms.DISTRESS_TERMS`
+    把"活不下去"归 PASSIVE（意念级、分级更重，触发安全姿态）；worker `_DISTRESS_MARKERS`
+    只驱动 deep 规划的 listen 姿态，不需要意念级区分。
+    """
+    java_distress_terms = {
+        "撑不住", "崩溃", "被掏空", "熬不住", "受不了", "绝望",
+        "好累", "太累", "喘不过气", "撑不下去", "想哭",
+    }
+    from dk_ai_worker.service import _DISTRESS_MARKERS
+
+    assert set(_DISTRESS_MARKERS) == java_distress_terms

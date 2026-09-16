@@ -5,6 +5,8 @@ import com.dk.dkaiagent.history.ConversationHistoryService;
 import com.dk.dkaiagent.integration.aiworker.AiWorkerClient;
 import com.dk.dkaiagent.integration.aiworker.AiWorkerContracts;
 import com.dk.dkaiagent.memory.ConversationMemoryService;
+import com.dk.dkaiagent.memory.RiskTier;
+import com.dk.dkaiagent.memory.SafetyTerms;
 import com.dk.dkaiagent.rag.TranscriptSearchService;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Test;
@@ -255,13 +257,25 @@ class SpringAiCounselingAgentExecutorTest {
     }
 
     @Test
-    void explicitCrisisLanguageIsRecognizedForFastPath() {
-        assertTrue(SpringAiCounselingAgentExecutor.requiresImmediateSafetyResponse("我现在真的不想活了"));
-        assertTrue(SpringAiCounselingAgentExecutor.requiresImmediateSafetyResponse("我决定了,这周就自杀"));
-        assertTrue(SpringAiCounselingAgentExecutor.requiresImmediateSafetyResponse("真的活不下去了"));
-        assertTrue(SpringAiCounselingAgentExecutor.requiresImmediateSafetyResponse("死了算了"));
+    void immediateSafetyGateOnlyFiresForImminentRisk() {
+        // v2 四级分级：手段/计划/进行中 → IMMINENT（拦截）；被动意念 → PASSIVE（安全姿态注入，
+        // 不再切换链路）；日常抱怨 → DISTRESS/NONE。
         assertTrue(SpringAiCounselingAgentExecutor.requiresImmediateSafetyResponse("我吞了一整瓶药"));
+        assertTrue(SpringAiCounselingAgentExecutor.requiresImmediateSafetyResponse("我决定了,这周就自杀"));
+        assertTrue(SpringAiCounselingAgentExecutor.requiresImmediateSafetyResponse("我决定了，今晚就自杀"));
+        assertTrue(SpringAiCounselingAgentExecutor.requiresImmediateSafetyResponse("正在被打，救救我"));
+
+        assertFalse(SpringAiCounselingAgentExecutor.requiresImmediateSafetyResponse("我现在真的不想活了"));
+        assertFalse(SpringAiCounselingAgentExecutor.requiresImmediateSafetyResponse("真的活不下去了"));
+        assertFalse(SpringAiCounselingAgentExecutor.requiresImmediateSafetyResponse("死了算了"));
         assertFalse(SpringAiCounselingAgentExecutor.requiresImmediateSafetyResponse("我最近只是作业有点拖延"));
+
+        assertEquals(RiskTier.PASSIVE, SafetyTerms.assess("我现在真的不想活了"));
+        assertEquals(RiskTier.PASSIVE, SafetyTerms.assess("死了算了"));
+        // 负向断言边界：日常抱怨与昵称不误判
+        assertEquals(RiskTier.NONE, SafetyTerms.assess("不想活得这么累"));
+        assertEquals(RiskTier.NONE, SafetyTerms.assess("我想死你了"));
+        assertEquals(RiskTier.DISTRESS, SafetyTerms.assess("我真的快撑不住了"));
     }
 
     @Test

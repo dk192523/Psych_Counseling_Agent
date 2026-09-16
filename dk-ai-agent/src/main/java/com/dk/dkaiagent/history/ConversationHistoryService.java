@@ -255,6 +255,24 @@ public class ConversationHistoryService {
         return countRawMessages(normalizedChatId);
     }
 
+    /**
+     * 距上一轮对话的小时数：取第二新消息的创建时间（最新一条是本轮刚落库的当前消息，
+     * 它的年龄恒为 0）。会话不足两轮时返回正无穷——首次对话视同"久未谋面"，
+     * 让回访判定只取决于摘要里有没有可回访的内容。
+     */
+    public double hoursSincePreviousTurn(String chatId) {
+        String normalizedChatId = requireText(chatId, "chatId");
+        List<Double> rows = jdbcTemplate.query("""
+                SELECT EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - created_at)) / 3600.0 AS hours
+                FROM psych_chat_message
+                WHERE conversation_id = ?
+                ORDER BY id DESC
+                OFFSET 1
+                LIMIT 1
+                """, (rs, rowNum) -> rs.getDouble("hours"), normalizedChatId);
+        return rows.isEmpty() ? Double.POSITIVE_INFINITY : rows.getFirst();
+    }
+
     public List<ConversationMessage> getUncoveredMessages(String chatId, int limit) {
         String normalizedChatId = requireText(chatId, "chatId");
         if (limit <= 0) {

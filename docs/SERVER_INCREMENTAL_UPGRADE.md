@@ -428,3 +428,34 @@ cd "$CURRENT_DIR"
 - **深度链路**：`buildContext` 头部注入"本轮回应策略"块（内部指令、截断免疫）。
 - **评测**：新增 `docs/EVAL_DIALOG_CASES.md`（16 个 golden 对话案例 + 人工评测协议）。
 - **升级注意**：本轮必须同时重建 `backend` 与 `ai-worker` 两个镜像（只换 backend 会因 shared secret 不匹配而 401；只换 worker 则新字段不被消费）。`.env` 需提供 `DEEPSEEK_API_KEY` 与 `AI_WORKER_SHARED_SECRET`。
+
+## 10. 第四轮增量（2026-09-02：风险分级 + 记忆回访 + 自动评测）
+
+- **四级风险分层**：`RiskTier`（NONE/DISTRESS/PASSIVE/IMMINENT），`SafetyTerms.assess` 确定性判定。
+  IMMINENT（手段/计划/进行中）由 `CounselingTurnPipeline` 统一拦截——**快速模式由此补上了
+  此前完全缺失的危机前置检查**——返回 `CrisisResponse` 专用模板（不经 LLM，资源表
+  `app.safety.hotlines` 可配置）。PASSIVE 走普通链 + `SafetyDirectives` 安全姿态注入。
+- **输出侧检查**：`SafetyOutputGuard` 在 PASSIVE/IMMINENT 轮校验禁忌应和与资源缺失，流尾自动补求助资源。
+- **记忆回访**：`MemoryFollowUp` 在"隔 ≥6 小时回来 + 摘要有待确认事项"时注入回访指令（零延迟）；
+  快速模式回访轮额外做一次情景召回（原话级回访）。
+- **自动评测**：`eval/run_eval.py + cases.yaml`，对运行栈跑 7 个对话用例，确定性断言 + LLM-as-judge，
+  报告写 `eval/report.md`（需评测账号密码与 DEEPSEEK_API_KEY）。
+- **升级注意**：本轮需重建 `backend` 镜像；无数据库迁移；`app.safety.*` 有默认值，无需改 `.env`。
+
+## 11. 第五轮增量（2026-09-02：真洞修复 + 成本护栏 + 持续关注）
+
+- **流式中断不丢回答**：两个流式方法的归档从 `doOnComplete` 改为 `doFinally`——用户关标签页/
+  切会话/点停止时，已生成的部分内容照常归档（CANCEL 与 COMPLETE 均落库；ERROR 保守跳过）。
+  前端新增"停止生成"按钮（生成中替换发送按钮）。
+- **危机事件审计**：IMMINENT=WARN / PASSIVE=INFO 结构化日志（pipeline 与 SafetyDirectives），
+  只记分级/会话/主体，正文绝不入日志。
+- **词表单一事实源**：worker `_DISTRESS_MARKERS` 与 Java `SafetyTerms.DISTRESS_TERMS` 对齐
+  （移除"活不下去"、补"熬不住"），worker 一致性测试锁定；语义差异见两侧注释。
+- **成本护栏**：chat `max-tokens: 2000`；新增 `ChatRateLimitService`（单用户 60s/12 条，429 拒绝），
+  前端对 429 显示专属文案且不自动重发。
+- **持续关注**：`SafetyDirectives` 扫描最近 user 消息取最高分级——历史有消极意念而本轮缓和时，
+  注入持续关注指令（确认状态、不当过去、不重提施压）。
+- **prompt few-shot**：SYSTEM_PROMPT 增三组"好/不要这样"对照示例（宣泄反映、短答回避退让、求建议先澄清）。
+- **前端**：导出当前会话为 .md（纯前端）；`connectSSE` 错误携带 HTTP 状态码。
+- **评估沉淀**：新增 `docs/IMPROVEMENT_BACKLOG.md`（安全加固包/可观测性/RAG 升级/数据治理/单副本检查单）。
+- **升级注意**：重建 backend 镜像；`app.chat-rate-limit.*` 有默认值，无需改 `.env`。

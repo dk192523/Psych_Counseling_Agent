@@ -255,6 +255,26 @@ Browser POST /api/ai/counseling/chat/sse  body={message, chatId, deepThinking:fa
 
 **为什么流式链路不做 query rewrite**：`QueryRewriter.doQueryRewrite`（Spring AI `RewriteQueryTransformer`）是一次阻塞 LLM 前置调用，放在首字路径上直接抬高 TTFB。因此只有同步接口 `POST /api/ai/counseling/chat/sync → CounselingApp.doChatWithRag` 做重写，并以重写文本同时作为 user 消息与 `TranscriptProvenanceAdvisor.ORIGINAL_QUERY`（advisor 参数键 `"transcript_original_query"`）；流式链路直接把原始 message 传给 `ORIGINAL_QUERY`。
 
+### 4.1b 风险分级与危机响应（内核 v2）
+
+**四级分层**（`memory/RiskTier`，`SafetyTerms.assess` 词面确定性判定，IMMINENT > PASSIVE > DISTRESS > NONE）：
+- **IMMINENT**（手段/计划/进行中：割腕、跳楼、吞药 patterns、"决定…自杀"、"正在被打"）——
+  `CounselingTurnPipeline.run` 开头拦截，**绕过一切 LLM 聊天链**，返回 `app/CrisisResponse` 的
+  专用模板（三变体轮换，资源表 `app.safety.hotlines` 可配置）；用户消息与模板回答照常归档；
+- **PASSIVE**（被动意念：不想活/想死/轻生…，负向断言排除"不想活得""我想死你了"）——普通链继续，
+  `SafetyDirectives` 经 `systemPromptWithDigest` 注入安全姿态（确认被听见 + 温和安全询问 + 资源提示）；
+- **DISTRESS**（撑不住/崩溃/好累…）——仅注入"以反映与陪伴为主、不提问"的姿态约束
+  （与 worker `_DISTRESS_MARKERS` 同源，驱动 response_mode=listen）。
+
+**输出侧检查**（`app/SafetyOutputGuard`，tier≥PASSIVE 时武装）：累积回复后校验
+①禁忌应和（"尊重你的决定"等 7 模式）②资源缺失（无 热线/120/110/12356/急救 标记）——
+命中即在流尾 concat 一条温和的求助资源 delta（fallback=true），done 恒为末事件。
+不做 LLM 复核：误报代价是多一段资源提醒，clinically 可接受。
+
+**记忆回访**（`memory/MemoryFollowUp`）：距上一轮 ≥6h 且 digest「## 待确认问题」段有具体事项时，
+注入回访指令（只回访一个、语气轻、不接就放下）；快速模式在回访轮额外做一次情景召回
+（`revisitEpisodes`，原话级"上次你说…"，非回访轮零开销）。
+
 ### 4.2 深度路径（端到端）
 
 归档由 `CounselingTurnPipeline.run` 统一完成后，入口 `agent/counseling/SpringAiCounselingAgentExecutor.prepareAndAnswer(message, chatId, ownerId)`：
