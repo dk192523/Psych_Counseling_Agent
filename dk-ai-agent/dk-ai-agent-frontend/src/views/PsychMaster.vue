@@ -19,6 +19,9 @@
           <router-link v-if="isAdmin" class="account-link admin-entry" to="/admin" title="进入管理后台">
             管理后台
           </router-link>
+          <button type="button" class="account-link" title="把当前会话导出为 Markdown 文件" @click="exportConversation">
+            导出
+          </button>
           <button type="button" class="account-link" title="修改当前账号密码" @click="openPasswordModal">
             修改密码
           </button>
@@ -77,6 +80,7 @@
           ai-type="psych"
           @send-message="sendMessage"
           @retry-send="retryFailedTurn"
+          @stop-stream="stopGeneration"
         />
       </main>
     </div>
@@ -694,7 +698,7 @@ const openChatStream = ({ message, mode, chatId: turnChatId, aiMessageIndex, cli
     eventSource = null
 
     const receivedAnyDelta = Boolean(messages.value[aiMessageIndex]?.content)
-    if (!receivedAnyDelta && retryCount < 1) {
+    if (!receivedAnyDelta && retryCount < 1 && error?.status !== 429) {
       connectionStatus.value = 'connecting'
       openChatStream({
         message,
@@ -710,11 +714,40 @@ const openChatStream = ({ message, mode, chatId: turnChatId, aiMessageIndex, cli
     connectionStatus.value = 'error'
     thinkingState.value = null
     if (!messages.value[aiMessageIndex]?.content) {
-      messages.value[aiMessageIndex].content = '连接中断了，请稍后再试。'
+      // 429 是限频（A4 护栏），专属文案比"连接中断"更能让人理解发生了什么。
+      messages.value[aiMessageIndex].content = error?.status === 429
+        ? '发得太快了，歇几秒再告诉我。'
+        : '连接中断了，请稍后再试。'
     }
     retryableTurn.value = { message, mode, chatId: turnChatId, aiMessageIndex, clientMsgId, retryCount }
     refreshConversations({ silent: true })
   }
+}
+
+// B3：用户主动停止生成。已显示的半截内容保留在界面上；
+// 后端（doFinally 归档）会把已生成的部分落库，刷新后不丢。
+const stopGeneration = () => {
+  stopStream()
+  connectionStatus.value = 'disconnected'
+}
+
+// B3：导出当前会话为 Markdown（纯前端，不经过后端）。
+const exportConversation = () => {
+  if (messages.value.length === 0) return
+  const lines = [`# ${currentConversationTitle.value}`, '']
+  const visible = messages.value.filter(m => !String(m.id || '').startsWith('welcome-'))
+  for (const message of visible) {
+    const who = message.isUser ? '**我**' : '**咨询师**'
+    const time = new Date(message.time).toLocaleString('zh-CN', { hour12: false })
+    lines.push(`### ${who} · ${time}`, '', message.content, '')
+  }
+  const blob = new Blob([lines.join('\n')], { type: 'text/markdown;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = `${currentConversationTitle.value || '会话'}-${new Date().toISOString().slice(0, 10)}.md`
+  anchor.click()
+  URL.revokeObjectURL(url)
 }
 
 const initializeConversations = async () => {

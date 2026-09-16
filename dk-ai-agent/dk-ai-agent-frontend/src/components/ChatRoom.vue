@@ -76,10 +76,22 @@
             :disabled="inputDisabled || connectionStatus === 'connecting'"
           ></textarea>
           <button
+            v-if="connectionStatus === 'connecting'"
+            class="composer-stop"
+            aria-label="停止生成"
+            title="停止生成"
+            @click="emit('stop-stream')"
+          >
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true">
+              <rect x="6" y="6" width="12" height="12" rx="2" />
+            </svg>
+          </button>
+          <button
+            v-else
             @click="sendMessage"
             class="composer-send"
-            :class="{ 'is-ready': inputMessage.trim() && !(inputDisabled || connectionStatus === 'connecting') }"
-            :disabled="inputDisabled || connectionStatus === 'connecting' || !inputMessage.trim()"
+            :class="{ 'is-ready': inputMessage.trim() && !inputDisabled }"
+            :disabled="inputDisabled || !inputMessage.trim()"
             aria-label="发送"
           >
             <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -147,7 +159,7 @@ const props = defineProps({
   }
 })
 
-const emit = defineEmits(['send-message', 'retry-send'])
+const emit = defineEmits(['send-message', 'retry-send', 'stop-stream'])
 
 // 与后端 ConversationHistoryService 的入口截断上限保持一致。前端 maxlength 只是即时反馈，
 // 真正的边界在后端——浏览器端的限制随时能被绕过。
@@ -709,6 +721,30 @@ onMounted(() => {
 
 .composer-send:disabled {
   opacity: 0.75;
+}
+
+/* 停止生成：生成中的琥珀色方块按钮，与发送按钮同位替换 */
+.composer-stop {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 40px;
+  height: 40px;
+  border: 0;
+  border-radius: var(--psych-radius-pill);
+  background: #fdf0d9;
+  color: #b45309;
+  cursor: pointer;
+  transition: background 0.25s ease, transform 0.15s ease;
+}
+
+.composer-stop:hover {
+  background: #fde3b8;
+}
+
+.composer-stop:active {
+  transform: scale(0.93);
 }
 
 .input-counter {

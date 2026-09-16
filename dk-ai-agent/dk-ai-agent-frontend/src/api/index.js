@@ -103,7 +103,12 @@ export const connectSSE = (url, payload) => {
         if (response.status === 401) {
           handleUnauthorized(errorPayload)
         }
-        throw new Error(`SSE request failed with HTTP ${response.status}`)
+        // 带上状态码：调用方（PsychMaster 的 onerror）按 429/403 等给专属文案，
+        // 而不是一律显示"连接中断"。
+        const error = new Error(
+          errorPayload?.message || `SSE request failed with HTTP ${response.status}`)
+        error.status = response.status
+        throw error
       }
       if (!response.body) {
         throw new Error('当前浏览器不支持流式响应')
