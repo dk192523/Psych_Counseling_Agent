@@ -22,7 +22,7 @@ jobs:
           distribution: temurin
           java-version: '25'
           cache: maven
-      - run: bash mvnw -B test
+      - run: ./mvnw -B test
         working-directory: dk-ai-agent
         env:
           TEST_DATABASE_URL: jdbc:postgresql://localhost:5432/repair_test
