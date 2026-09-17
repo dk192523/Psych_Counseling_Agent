@@ -1,7 +1,7 @@
 import { createApp } from 'vue'
 import App from './App.vue'
 import router from './router'
-import { createHead } from '@vueuse/head'
+import { createHead } from '@unhead/vue/client'
 import './styles/theme.css'
 import './style.css'
 

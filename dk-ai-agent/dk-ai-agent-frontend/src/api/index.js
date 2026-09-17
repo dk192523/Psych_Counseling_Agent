@@ -1,3 +1,5 @@
+import { createSSEConnection } from './sse'
+import { createCsrfClient } from './csrf'
 import axios from 'axios'
 import router from '../router'
 import { clearAuth, setAuthNotice } from '../stores/auth'
@@ -7,6 +9,9 @@ const API_BASE_URL = process.env.NODE_ENV === 'production'
  ? '/api' // 生产环境使用相对路径，适用于前后端部署在同一域名下
  : 'http://localhost:8123/api' // 开发环境指向本地后端服务
 
+const csrf = createCsrfClient(API_BASE_URL)
+export const getAuthConfiguration = () => csrf.get()
+
 // 创建axios实例（后端会话是 HttpOnly Cookie，跨域开发模式必须带凭据）
 const request = axios.create({
   baseURL: API_BASE_URL,
@@ -14,11 +19,19 @@ const request = axios.create({
   withCredentials: true
 })
 
+request.interceptors.request.use(async config => {
+  if (!['get', 'head', 'options'].includes(config.method?.toLowerCase())) {
+    Object.assign(config.headers, await csrf.headers())
+  }
+  return config
+})
+
 // 这些认证端点的 401 由各自页面自行处理展示，拦截器不做全局跳转，
 // 避免与路由守卫/表单错误提示互相打架。
 const INTERCEPTOR_SKIP_URLS = ['/auth/login', '/auth/register', '/auth/me', '/auth/logout']
 
 const handleUnauthorized = (payload = {}) => {
+  csrf.clear()
   if (payload?.error === 'DISABLED') {
     setAuthNotice('该账号已被停用，请联系管理员')
   }
@@ -48,103 +61,14 @@ request.interceptors.response.use(
       handleUnauthorized(error.response?.data)
     }
 
+    if (error?.response?.data?.error === 'CSRF_INVALID') csrf.clear()
     return Promise.reject(error)
   }
 )
 
 // fetch 支持 POST 请求体并保留 SSE 流式读取，避免咨询内容进入 URL。
 // 返回值维持 EventSource 风格的 onmessage/onerror/close，调用页面无需感知传输变化。
-export const connectSSE = (url, payload) => {
-  const controller = new AbortController()
-  let closed = false
-
-  const connection = {
-    onmessage: null,
-    onerror: null,
-    close() {
-      if (closed) return
-      closed = true
-      controller.abort()
-    }
-  }
-
-  const dispatchFrame = (frame) => {
-    const data = frame
-      .split(/\r?\n/)
-      .filter((line) => line.startsWith('data:'))
-      .map((line) => line.slice(5).replace(/^ /, ''))
-      .join('\n')
-
-    if (data && !closed) {
-      connection.onmessage?.({ data })
-    }
-  }
-
-  const run = async () => {
-    try {
-      const response = await fetch(`${API_BASE_URL}${url}`, {
-        method: 'POST',
-        credentials: 'include',
-        headers: {
-          Accept: 'text/event-stream',
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(payload),
-        signal: controller.signal
-      })
-
-      if (!response.ok) {
-        let errorPayload = {}
-        try {
-          errorPayload = await response.json()
-        } catch (_) {
-          // 非 JSON 错误页只保留 HTTP 状态，避免把代理响应写入界面。
-        }
-        if (response.status === 401) {
-          handleUnauthorized(errorPayload)
-        }
-        // 带上状态码：调用方（PsychMaster 的 onerror）按 429/403 等给专属文案，
-        // 而不是一律显示"连接中断"。
-        const error = new Error(
-          errorPayload?.message || `SSE request failed with HTTP ${response.status}`)
-        error.status = response.status
-        throw error
-      }
-      if (!response.body) {
-        throw new Error('当前浏览器不支持流式响应')
-      }
-
-      const reader = response.body.getReader()
-      const decoder = new TextDecoder('utf-8')
-      let buffer = ''
-
-      while (!closed) {
-        const { value, done } = await reader.read()
-        if (done) break
-        buffer += decoder.decode(value, { stream: true })
-
-        let separator = /\r?\n\r?\n/.exec(buffer)
-        while (separator) {
-          const frame = buffer.slice(0, separator.index)
-          buffer = buffer.slice(separator.index + separator[0].length)
-          dispatchFrame(frame)
-          separator = /\r?\n\r?\n/.exec(buffer)
-        }
-      }
-
-      if (!closed) {
-        throw new Error('SSE 连接在完成事件前结束')
-      }
-    } catch (error) {
-      if (!closed && error?.name !== 'AbortError') {
-        connection.onerror?.(error)
-      }
-    }
-  }
-
-  void run()
-  return connection
-}
+export const connectSSE = (url, payload) => createSSEConnection(`${API_BASE_URL}${url}`, payload, { headers: csrf.headers, onUnauthorized: handleUnauthorized, onCsrfInvalid: csrf.clear })
 
 // AI 心理咨询师聊天
 // clientMsgId：前端为本轮生成的幂等键。SSE 中断后重发同一消息时携带同键，
@@ -178,18 +102,20 @@ export const deleteConversation = async (conversationId) => {
 // 登录：成功后后端写 HttpOnly 会话 Cookie，axios 自动携带。
 export const login = async (username, password) => {
   const response = await request.post('/auth/login', { username, password })
+  csrf.clear()
   return response.data
 }
 
 // 注册：201 并自动登录。
 export const register = async (username, password) => {
   const response = await request.post('/auth/register', { username, password })
+  csrf.clear()
   return response.data
 }
 
 // 登出：销毁会话，204。
 export const logout = async () => {
-  await request.post('/auth/logout')
+  try { await request.post('/auth/logout') } finally { csrf.clear() }
 }
 
 // 当前登录用户信息；未认证 401。

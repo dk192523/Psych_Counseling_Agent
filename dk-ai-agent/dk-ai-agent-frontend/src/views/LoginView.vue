@@ -51,6 +51,7 @@
           <button
             type="button"
             role="tab"
+            v-if="registrationEnabled"
             :aria-selected="tab === 'register'"
             :class="{ active: tab === 'register' }"
             @click="switchTab('register')"
@@ -124,7 +125,7 @@
           </button>
         </form>
 
-        <p class="form-foot">
+        <p v-if="registrationEnabled" class="form-foot">
           {{ tab === 'login' ? '还没有账号？' : '已经有账号了？' }}
           <button type="button" class="link-button" @click="switchTab(tab === 'login' ? 'register' : 'login')">
             {{ tab === 'login' ? '去注册' : '去登录' }}
@@ -138,7 +139,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { login, register } from '../api'
+import { login, register, getAuthConfiguration } from '../api'
 import { setMe, useAuth } from '../stores/auth'
 
 const route = useRoute()
@@ -148,6 +149,7 @@ const { notice, clearAuthNotice } = useAuth()
 const USERNAME_PATTERN = new RegExp('^[A-Za-z0-9_\\u4e00-\\u9fa5]{3,32}$')
 
 const tab = ref('login')
+const registrationEnabled = ref(false)
 const username = ref('')
 const password = ref('')
 const confirmPassword = ref('')
@@ -161,6 +163,7 @@ const breathPhase = ref('吸气')
 let breathTimer = null
 
 onMounted(() => {
+  getAuthConfiguration().then(config => { registrationEnabled.value = config.registrationEnabled }).catch(() => {})
   breathTimer = window.setInterval(() => {
     breathPhase.value = breathPhase.value === '吸气' ? '呼气' : '吸气'
   }, 4000)
@@ -171,7 +174,7 @@ onBeforeUnmount(() => {
 })
 
 const switchTab = (nextTab) => {
-  if (nextTab === tab.value) return
+  if (nextTab === tab.value || (nextTab === 'register' && !registrationEnabled.value)) return
   tab.value = nextTab
   formError.value = ''
   confirmPassword.value = ''

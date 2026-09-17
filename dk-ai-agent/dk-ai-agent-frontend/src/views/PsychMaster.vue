@@ -157,7 +157,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { useHead } from '@vueuse/head'
+import { useHead } from '@unhead/vue'
 import ChatRoom from '../components/ChatRoom.vue'
 import ConversationSidebar from '../components/ConversationSidebar.vue'
 import MemoryDigestCard from '../components/MemoryDigestCard.vue'
@@ -320,6 +320,7 @@ const memoryStats = ref(null)
 const retryableTurn = ref(null)
 let eventSource = null
 let streamVersion = 0
+let conversationVersion = 0
 
 const isBusy = computed(() => (
   historyLoading.value ||
@@ -358,7 +359,7 @@ const parseChatStreamEvent = (rawData) => {
     }
 
     if (parsed && typeof parsed === 'object') {
-      const supportedTypes = ['status', 'fallback', 'delta', 'done']
+      const supportedTypes = ['status', 'fallback', 'delta', 'done', 'error']
       const type = supportedTypes.includes(parsed.type) ? parsed.type : 'delta'
       return {
         type,
@@ -442,7 +443,7 @@ const refreshConversations = async ({ silent = false } = {}) => {
 
   try {
     conversations.value = normalizeConversationList(await getConversations())
-    historyError.value = ''
+    if (!silent) historyError.value = ''
   } catch (error) {
     console.error('读取历史会话失败:', error)
     historyError.value = '历史会话暂时无法读取，请稍后重试。'
@@ -498,11 +499,13 @@ const refreshMemoryUntilSettled = async () => {
 }
 
 const loadConversation = async (conversationId) => {
+  const version = ++conversationVersion
   stopStream()
   conversationLoading.value = true
 
   try {
     const detail = await getConversation(conversationId)
+    if (version !== conversationVersion) return
     chatId.value = detail.id || conversationId
     memoryStats.value = detail.memory || null
     const storedMessages = mapStoredMessages(detail.messages)
@@ -511,9 +514,9 @@ const loadConversation = async (conversationId) => {
     mobileHistoryOpen.value = false
   } catch (error) {
     console.error('读取会话内容失败:', error)
-    historyError.value = '这段会话暂时无法打开，请稍后重试。'
+    if (version === conversationVersion) historyError.value = '这段会话暂时无法打开，请稍后重试。'
   } finally {
-    conversationLoading.value = false
+    if (version === conversationVersion) conversationLoading.value = false
   }
 }
 
@@ -527,11 +530,13 @@ const selectConversation = async (conversationId) => {
 }
 
 const createNewConversation = async () => {
+  const version = ++conversationVersion
   stopStream()
   conversationLoading.value = true
 
   try {
     const created = await createConversation()
+    if (version !== conversationVersion) return
     const createdId = created?.id || created?.conversationId
     if (!createdId) throw new Error('创建会话接口没有返回会话 ID')
 
@@ -543,9 +548,9 @@ const createNewConversation = async () => {
     await refreshConversations({ silent: true })
   } catch (error) {
     console.error('创建会话失败:', error)
-    historyError.value = '新会话创建失败，请检查后端服务后重试。'
+    if (version === conversationVersion) historyError.value = '新会话创建失败，请检查后端服务后重试。'
   } finally {
-    conversationLoading.value = false
+    if (version === conversationVersion) conversationLoading.value = false
   }
 }
 
@@ -553,9 +558,11 @@ const confirmDeleteConversation = async (conversation) => {
   const title = conversation.title || '这段会话'
   if (!window.confirm(`确认删除“${title}”吗？删除后无法恢复。`)) return
 
+  const version = ++conversationVersion
   conversationLoading.value = true
   try {
     await deleteConversation(conversation.id)
+    if (version !== conversationVersion) return
     const deletedCurrent = conversation.id === chatId.value
     if (deletedCurrent) {
       stopStream()
@@ -565,6 +572,7 @@ const confirmDeleteConversation = async (conversation) => {
     }
 
     await refreshConversations({ silent: true })
+    if (version !== conversationVersion) return
     if (deletedCurrent) {
       if (conversations.value.length > 0) {
         await loadConversation(conversations.value[0].id)
@@ -574,9 +582,9 @@ const confirmDeleteConversation = async (conversation) => {
     }
   } catch (error) {
     console.error('删除会话失败:', error)
-    historyError.value = '会话删除失败，请稍后重试。'
+    if (version === conversationVersion) historyError.value = '会话删除失败，请稍后重试。'
   } finally {
-    conversationLoading.value = false
+    if (version === conversationVersion) conversationLoading.value = false
   }
 }
 
@@ -678,6 +686,17 @@ const openChatStream = ({ message, mode, chatId: turnChatId, aiMessageIndex, cli
       messages.value[aiMessageIndex].content += payload.content ?? ''
     }
 
+    if (payload.type === 'error') {
+      currentEventSource.close()
+      eventSource = null
+      connectionStatus.value = 'error'
+      thinkingState.value = null
+      historyError.value = payload.content || '回答未能完成，请稍后重试。'
+      retryableTurn.value = payload.phase === 'partial' ? null : { message, mode, chatId: turnChatId, aiMessageIndex, clientMsgId, retryCount }
+      refreshConversations({ silent: true })
+      return
+    }
+
     if (payload.type === 'done') {
       thinkingState.value = null
       connectionStatus.value = 'disconnected'
@@ -698,7 +717,7 @@ const openChatStream = ({ message, mode, chatId: turnChatId, aiMessageIndex, cli
     eventSource = null
 
     const receivedAnyDelta = Boolean(messages.value[aiMessageIndex]?.content)
-    if (!receivedAnyDelta && retryCount < 1 && error?.status !== 429) {
+    if (!receivedAnyDelta && retryCount < 1 && !error?.status) {
       connectionStatus.value = 'connecting'
       openChatStream({
         message,
@@ -717,6 +736,8 @@ const openChatStream = ({ message, mode, chatId: turnChatId, aiMessageIndex, cli
       // 429 是限频（A4 护栏），专属文案比"连接中断"更能让人理解发生了什么。
       messages.value[aiMessageIndex].content = error?.status === 429
         ? '发得太快了，歇几秒再告诉我。'
+        : error?.status === 409 ? '这段会话正在生成回答，请稍后重试。'
+        : error?.status === 403 ? '页面安全凭据已过期，请刷新页面后重试。'
         : '连接中断了，请稍后再试。'
     }
     retryableTurn.value = { message, mode, chatId: turnChatId, aiMessageIndex, clientMsgId, retryCount }

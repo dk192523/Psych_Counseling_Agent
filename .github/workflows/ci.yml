@@ -1,0 +1,58 @@
+name: Verify
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: repair_test_only
+          POSTGRES_DB: repair_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+      - run: bash mvnw -B test
+        working-directory: dk-ai-agent
+        env:
+          TEST_DATABASE_URL: jdbc:postgresql://localhost:5432/repair_test
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: java-test-results
+          path: dk-ai-agent/target/surefire-reports
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -e './ai-worker[test]' -r eval/requirements.txt
+      - run: python -m pytest ai-worker/tests eval
+        env:
+          PYTHONPATH: ai-worker/src
+          PYTHONUTF8: '1'
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: dk-ai-agent/dk-ai-agent-frontend/package-lock.json
+      - run: npm ci
+        working-directory: dk-ai-agent/dk-ai-agent-frontend
+      - run: npm run lint && npm test && npm run build
+        working-directory: dk-ai-agent/dk-ai-agent-frontend
