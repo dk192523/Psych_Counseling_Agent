@@ -11,6 +11,8 @@ services:
     # Session 超时都可经 .env 覆盖，避免本地调试与生产透传面漂移。
     environment:
       ADMIN_INITIAL_PASSWORD: ${ADMIN_INITIAL_PASSWORD:-}
+      SESSION_COOKIE_SECURE: "false"
+      APP_REGISTRATION_ENABLED: "true"
       SESSION_TIMEOUT: ${SESSION_TIMEOUT:-24h}
 
   ai-worker:

@@ -1,5 +1,7 @@
 # 腾讯云 OrcaTerm 部署手册（端口 3004）
 
+> 2026-09-17：服务器示例现在默认环回绑定、Secure Cookie=true、关闭注册。下文方式 A 仅作为显式修改后的临时排障方式，正式使用按方式 B 配置 HTTPS。前后端须一起升级以支持 CSRF，详情见 ../../docs/REPAIR_REPORT.md。
+
 这是一套源码构建型 Docker Compose 部署。宿主机只发布前端入口 `3004`；PostgreSQL、Java 后端 `8123`、Python AI Worker `8000` 都只在 Docker 内网通信。
 
 > OrcaTerm（遨驰终端）是腾讯云网页终端和文件管理工具，不是应用商店式部署面板。下面所有命令都在 OrcaTerm 的终端中执行，压缩包从它的文件管理区上传。

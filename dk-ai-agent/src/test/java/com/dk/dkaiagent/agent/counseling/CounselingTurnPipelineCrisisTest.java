@@ -40,6 +40,7 @@ class CounselingTurnPipelineCrisisTest {
         counselingApp = mock(CounselingApp.class);
         executor = mock(CounselingAgentExecutor.class);
         pipeline = new CounselingTurnPipeline();
+        com.dk.dkaiagent.agent.counseling.PipelineTestSupport.configure(pipeline);
         Mockito.lenient().when(counselingApp.doChatWithRagByStreamPrepared(anyLong(), anyString(), anyString()))
                 .thenReturn(Flux.just("普通回答", "[DONE]"));
         ReflectionSupport.setField(pipeline, "counselingApp", counselingApp);
@@ -69,7 +70,7 @@ class CounselingTurnPipelineCrisisTest {
 
         // 用户消息与模板回答都归档
         verify(counselingApp).prepareConversationTurn(OWNER_ID, "chat-id", "我吞了一整瓶药", "client-msg-1");
-        verify(counselingApp).archiveAssistantAnswer(eq(OWNER_ID), eq("chat-id"), anyString());
+        verify(counselingApp, never()).archiveAssistantAnswer(anyLong(), anyString(), anyString());
         // 不进入任何 LLM 链——深度模式开关形同虚设，这正是拦截的意义
         verify(executor, never()).prepareAndAnswer(anyString(), anyString(), anyLong());
         verify(counselingApp, never()).doChatWithRagByStreamPrepared(anyLong(), anyString(), anyString());
@@ -104,7 +105,7 @@ class CounselingTurnPipelineCrisisTest {
         assertTrue(joined.contains("随时可以求助"));
         assertTrue(joined.contains("12356"));
         assertEquals("done", events.get(events.size() - 1).type());
-        assertTrue(events.get(events.size() - 2).fallback());
+        assertFalse(joined.contains("尊重你的决定"));
         assertFalse(events.get(events.size() - 1).fallback());
     }
 

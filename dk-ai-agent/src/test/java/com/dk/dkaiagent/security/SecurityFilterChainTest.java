@@ -29,7 +29,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static com.dk.dkaiagent.security.CsrfTestRequests.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -48,6 +48,9 @@ class SecurityFilterChainTest {
 
     @Autowired
     private MockMvc mockMvc;
+
+    @Autowired
+    private com.dk.dkaiagent.controller.AuthController authController;
 
     @MockitoBean
     private UserAccountService userAccountService;
@@ -83,6 +86,67 @@ class SecurityFilterChainTest {
     }
 
     // ---------------------------------------------------------------- permitAll 白名单
+
+    @Test
+    void missingCsrfRejectsMutationBeforeController() throws Exception {
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"username\":\"alice\",\"password\":\"password-1\"}"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error").value("CSRF_INVALID"));
+        verify(userAccountService, never()).authenticate(any(), any());
+    }
+
+    @Test
+    void realMaskedCsrfTokenWorksAndRotatesOnLogin() throws Exception {
+        var bootstrap = mockMvc.perform(get("/auth/csrf")).andExpect(status().isOk()).andReturn();
+        var session = (org.springframework.mock.web.MockHttpSession) bootstrap.getRequest().getSession(false);
+        var json = new com.fasterxml.jackson.databind.ObjectMapper().readTree(bootstrap.getResponse().getContentAsString());
+        String token = json.get("token").asText();
+        String header = json.get("headerName").asText();
+        when(userAccountService.authenticate("alice", "password-1")).thenReturn(
+                new UserAccountService.AuthResult(true, null, activeUser(7L, "alice"), null));
+        when(userAccountService.statusOf(7L)).thenReturn(UserAccountService.STATUS_ACTIVE);
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/auth/login")
+                        .session(session).header(header, token).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"username\":\"alice\",\"password\":\"password-1\"}"))
+                .andExpect(status().isOk());
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/auth/logout")
+                        .session(session).header(header, token))
+                .andExpect(status().isForbidden());
+        var fresh = mockMvc.perform(get("/auth/csrf").session(session)).andReturn();
+        String freshToken = new com.fasterxml.jackson.databind.ObjectMapper().readTree(fresh.getResponse().getContentAsString()).get("token").asText();
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/auth/logout")
+                        .session(session).header(header, freshToken))
+                .andExpect(status().isNoContent());
+    }
+
+    @Test
+    void defaultSecurityHeadersArePresentIncludingHstsOnHttps() throws Exception {
+        mockMvc.perform(get("/health").secure(true))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.header().string("X-Content-Type-Options", "nosniff"))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.header().string("X-Frame-Options", "DENY"))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.header().exists("Strict-Transport-Security"));
+    }
+
+    @Test
+    void closedRegistrationRejectsBeforeAccountCreation() throws Exception {
+        org.springframework.test.util.ReflectionTestUtils.setField(authController, "registrationEnabled", false);
+        try {
+            mockMvc.perform(get("/auth/csrf")).andExpect(jsonPath("$.registrationEnabled").value(false));
+            mockMvc.perform(post("/auth/register").contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"username\":\"alice\",\"password\":\"password-1\"}"))
+                    .andExpect(status().isForbidden()).andExpect(jsonPath("$.error").value("REGISTRATION_DISABLED"));
+            verify(userAccountService, never()).register(any(), any());
+        } finally {
+            org.springframework.test.util.ReflectionTestUtils.setField(authController, "registrationEnabled", true);
+        }
+    }
+
+    @Test
+    void metricsAreRestrictedToAdministrators() throws Exception {
+        mockMvc.perform(get("/actuator/metrics").with(user("alice").roles("USER"))).andExpect(status().isForbidden());
+    }
 
     @Test
     void healthIsPublic() throws Exception {

@@ -60,6 +60,7 @@ class AiControllerTest {
         // 控制器把归档与分流收口给 pipeline：这里装配真实 pipeline + mock 依赖，
         // 让用例同时覆盖"pipeline 正确接线"与"事件映射不变"。
         CounselingTurnPipeline pipeline = new CounselingTurnPipeline();
+        com.dk.dkaiagent.agent.counseling.PipelineTestSupport.configure(pipeline);
         ReflectionTestUtils.setField(pipeline, "counselingApp", counselingApp);
         ReflectionTestUtils.setField(pipeline, "counselingAgentExecutor", counselingAgentExecutor);
         ReflectionTestUtils.setField(pipeline, "crisisResponse",
@@ -96,12 +97,35 @@ class AiControllerTest {
     void syncEndpointUsesRagConversation() {
         when(conversationHistoryService.getConversation("chat-id", OWNER_ID))
                 .thenReturn(Optional.of(detail("chat-id")));
-        when(counselingApp.doChatWithRag(OWNER_ID, "message", "chat-id", null)).thenReturn("answer");
+        when(counselingApp.doChatWithRagByStreamPrepared(OWNER_ID, "message", "chat-id")).thenReturn(Flux.just("answer", "[DONE]"));
 
         String result = controller.doChatWithCounselingSync("message", "chat-id");
 
-        assertSame("answer", result);
-        verify(counselingApp).doChatWithRag(OWNER_ID, "message", "chat-id", null);
+        assertEquals("answer", result);
+        verify(counselingApp).doChatWithRagByStreamPrepared(OWNER_ID, "message", "chat-id");
+    }
+
+    @Test
+    void invalidInputIsRejectedBeforeHistoryOrModelAccess() {
+        for (var request : List.of(
+                new AiController.ChatRequest("字".repeat(4001), "chat-id", false),
+                new AiController.ChatRequest(" ", "chat-id", false),
+                new AiController.ChatRequest("hello", "../chat", false),
+                new AiController.ChatRequest("hello", "chat-id", false, "invalid/key"))) {
+            var error = assertThrows(ResponseStatusException.class, () -> controller.doChatWithCounselingSSE(request));
+            assertEquals(HttpStatus.BAD_REQUEST, error.getStatusCode());
+        }
+        org.mockito.Mockito.verifyNoInteractions(conversationHistoryService, counselingApp, counselingAgentExecutor);
+    }
+
+    @Test
+    void syncBodyHonorsDeepModeThroughTheSharedPipeline() {
+        when(conversationHistoryService.getConversation("chat-id", OWNER_ID)).thenReturn(Optional.of(detail("chat-id")));
+        when(counselingAgentExecutor.prepareAndAnswer("message", "chat-id", OWNER_ID)).thenReturn(Flux.just(
+                CounselingStreamEvent.delta("deep answer", "deep", false), CounselingStreamEvent.done("deep", false)));
+        assertEquals("deep answer", controller.doChatWithCounselingSync(new AiController.ChatRequest("message", "chat-id", true)));
+        verify(counselingAgentExecutor).prepareAndAnswer("message", "chat-id", OWNER_ID);
+        verify(counselingApp, never()).doChatWithRagByStreamPrepared(anyLong(), anyString(), anyString());
     }
 
     @Test
@@ -172,13 +196,13 @@ class AiControllerTest {
     void syncRequestUsesBodyContract() {
         when(conversationHistoryService.getConversation("chat-id", OWNER_ID))
                 .thenReturn(Optional.of(detail("chat-id")));
-        when(counselingApp.doChatWithRag(OWNER_ID, "message", "chat-id", null)).thenReturn("answer");
+        when(counselingApp.doChatWithRagByStreamPrepared(OWNER_ID, "message", "chat-id")).thenReturn(Flux.just("answer", "[DONE]"));
 
         String result = controller.doChatWithCounselingSync(
                 new AiController.ChatRequest("message", "chat-id", false));
 
-        assertSame("answer", result);
-        verify(counselingApp).doChatWithRag(OWNER_ID, "message", "chat-id", null);
+        assertEquals("answer", result);
+        verify(counselingApp).doChatWithRagByStreamPrepared(OWNER_ID, "message", "chat-id");
     }
 
     @Test

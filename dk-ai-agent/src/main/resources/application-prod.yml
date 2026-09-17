@@ -14,8 +14,14 @@ springdoc:
 knife4j:
   production: true
 server:
+  servlet:
+    session:
+      cookie:
+        secure: ${SESSION_COOKIE_SECURE:true}
   # 后端只暴露在 Compose 内网，信任前置 Nginx 传入的 Forwarded/X-Forwarded-*。
   forward-headers-strategy: framework
 app:
+  registration:
+    enabled: ${APP_REGISTRATION_ENABLED:false}
   docs:
     enabled: false

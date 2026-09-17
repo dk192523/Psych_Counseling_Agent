@@ -33,6 +33,9 @@ public class CorsConfig implements WebMvcConfigurer {
         if (allowedOriginPatterns != null) {
             for (String pattern : allowedOriginPatterns) {
                 if (pattern != null && !pattern.isBlank()) {
+                    if (pattern.contains("*")) {
+                        throw new IllegalArgumentException("Credentialed CORS requires explicit origins; wildcard origins are forbidden");
+                    }
                     patterns.add(pattern.trim());
                 }
             }

@@ -87,8 +87,9 @@ services:
       # 生产同源反代无需 CORS：缺省透传空值 → 后端不注册任何跨域放行。
       # 若生产前后端分域，显式设置生产前端 Origin（逗号分隔，严禁 "*"）。
       APP_CORS_ALLOWED_ORIGIN_PATTERNS: ${APP_CORS_ALLOWED_ORIGIN_PATTERNS:-}
+      APP_REGISTRATION_ENABLED: ${APP_REGISTRATION_ENABLED:-false}
       SESSION_TIMEOUT: ${SESSION_TIMEOUT:-24h}
-      SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-false}
+      SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-true}
       COUNSELING_TRANSCRIPT_DIRECTORY: /data/transcripts
       ONNX_EMBEDDING_MODEL_URI: ${ONNX_EMBEDDING_MODEL_URI:-https://media.githubusercontent.com/media/spring-projects/spring-ai/v1.0.0/models/spring-ai-transformers/src/main/resources/onnx/all-MiniLM-L6-v2/model.onnx}
     volumes:

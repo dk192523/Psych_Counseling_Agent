@@ -5,7 +5,6 @@ import com.dk.dkaiagent.history.ConversationHistoryService;
 import com.dk.dkaiagent.memory.MemoryFollowUp;
 import com.dk.dkaiagent.history.ConversationUnavailableException;
 import com.dk.dkaiagent.memory.ConversationMemoryService;
-import com.dk.dkaiagent.memory.DigestAdvancedEvent;
 import com.dk.dkaiagent.rag.PgVectorVectorStoreConfig;
 import com.dk.dkaiagent.rag.QueryRewriter;
 import com.dk.dkaiagent.rag.TranscriptProvenanceAdvisor;
@@ -27,13 +26,10 @@ import org.springframework.ai.support.ToolCallbacks;
 import org.springframework.ai.vectorstore.SearchRequest;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Flux;
 
 import java.util.List;
-import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
 
 @Component
 @Slf4j
@@ -44,8 +40,6 @@ public class CounselingApp {
     private final ConversationHistoryService conversationHistoryService;
     private final ConversationMemoryService conversationMemoryService;
     private final int contextWindowMessages;
-    private final Set<String> hydratedConversationIds = ConcurrentHashMap.newKeySet();
-    private final Set<String> dirtyDigestIds = ConcurrentHashMap.newKeySet();
 
     /*
      * 核心 system prompt。精简原则：语义零删减、只做结构性压缩（约 2900 → 1800 字符）——
@@ -177,8 +171,6 @@ public class CounselingApp {
                         MessageChatMemoryAdvisor.builder(chatMemory).build(),
                         // 自定义日志 Advisor，可按需开启
                         new MyLoggerAdvisor()
-//                        // 自定义推理增强 Advisor，可按需开启
-//                       ,new ReReadingAdvisor()
                 )
                 .build();
     }
@@ -328,7 +320,6 @@ public class CounselingApp {
      * the user message twice.
      */
     public Flux<String> doChatWithRagByStreamPrepared(long ownerId, String message, String chatId) {
-        StringBuilder assistantContent = new StringBuilder();
         return chatClient
                 .prompt()
                 .system(systemPromptWithDigest(chatId, revisitEpisodes(chatId, message, SYSTEM_PROMPT)))
@@ -342,8 +333,6 @@ public class CounselingApp {
                 .toolCallbacks(ToolCallbacks.from(transcriptLookupTool, deepSeekWebSearchTool))
                 .stream()
                 .content()
-                .doOnNext(assistantContent::append)
-                .doFinally(signal -> archiveOnSignal(signal, ownerId, chatId, assistantContent))
                 .concatWithValues("[DONE]");
     }
 
@@ -356,7 +345,6 @@ public class CounselingApp {
         if (agentContext == null || agentContext.isBlank()) {
             throw new IllegalArgumentException("agentContext must not be blank");
         }
-        StringBuilder assistantContent = new StringBuilder();
         String deepSystemPrompt = systemPromptWithDigest(chatId,
                 SYSTEM_PROMPT + DEEP_AGENT_CONTEXT_PROMPT.formatted(agentContext));
         return chatClient
@@ -367,25 +355,7 @@ public class CounselingApp {
                 .toolCallbacks(ToolCallbacks.from(transcriptLookupTool, deepSeekWebSearchTool))
                 .stream()
                 .content()
-                .doOnNext(assistantContent::append)
-                .doFinally(signal -> archiveOnSignal(signal, ownerId, chatId, assistantContent))
                 .concatWithValues("[DONE]");
-    }
-
-    /**
-     * 归档时机（A1 真洞修复）：原来只挂 doOnComplete——用户中途关标签页、切会话或点停止时
-     * 流被取消，半截回答不落库，刷新后"回答消失"。现在 COMPLETE 与 CANCEL 都归档已生成内容：
-     * 半截回答也是真实发生的对话（用户已经看到它了），进档案与记忆整合符合事实。
-     * ERROR 不归档——错误路径的语义（如归属守卫的 ConversationUnavailableException）由
-     * persistAssistantMessage 内部处理，半截内容 accompanying 一个错误信号可能是模型故障的
-     * 碎片，落库价值存疑，保守跳过。
-     */
-    private void archiveOnSignal(
-            reactor.core.publisher.SignalType signal, long ownerId, String chatId, StringBuilder content) {
-        if (signal == reactor.core.publisher.SignalType.ON_COMPLETE
-                || signal == reactor.core.publisher.SignalType.CANCEL) {
-            persistAssistantMessage(ownerId, chatId, content.toString());
-        }
     }
 
     /**
@@ -414,33 +384,8 @@ public class CounselingApp {
      */
     public void clearConversationMemory(String chatId) {
         chatMemory.clear(chatId);
-        hydratedConversationIds.remove(chatId);
-        dirtyDigestIds.remove(chatId);
     }
 
-    /**
-     * 整合推进摘要后标记会话为脏：下一轮开始前窗口会整体重建，
-     * 丢弃被钉住的旧摘要与已被剪枝的旧原文。
-     */
-    public void markDigestDirty(String chatId) {
-        if (chatId != null && !chatId.isBlank()) {
-            dirtyDigestIds.add(chatId);
-        }
-    }
-
-    /**
-     * 由 {@link ConversationMemoryService} 在整合成功剪枝后发布；事件解耦避免
-     * CounselingApp 与记忆服务之间的循环依赖。
-     */
-    @EventListener
-    public void onDigestAdvanced(DigestAdvancedEvent event) {
-        markDigestDirty(event.chatId());
-    }
-
-    /**
-     * 每轮按需携带最新长期摘要的系统提示：每次从库读取最新 digest，天然幂等、零残留，
-     * 进程内新建的会话与整合后的摘要变化都能立即进入回答模型的上下文（含安全备注）。
-     */
     /**
      * 回访轮（距上一轮 ≥6 小时后的第一轮）为快速模式补一次情景召回：开场没有流式延迟压力，
      * 原话级的"上次你说'我撑不下去'"是摘要回访做不到的细度。非回访轮直接返回原 prompt，
@@ -502,33 +447,15 @@ public class CounselingApp {
     }
 
     private void prepareConversation(long ownerId, String chatId, String userMessage, String clientMsgId) {
-        hydrateConversation(chatId);
         conversationHistoryService.appendUserMessage(ownerId, chatId, userMessage, clientMsgId);
-    }
-
-    private void hydrateConversation(String chatId) {
-        synchronized (hydratedConversationIds) {
-            // 摘要注入已解耦为「每轮 system prompt」（见 systemPromptWithDigest），水合只回填近期原文。
-            // 整合推进摘要并剪枝原文后（DigestAdvancedEvent 标脏），必须丢弃旧窗口重建：
-            // 否则进程内模型会永久看着过期的长期视图与已被删除的原文。
-            //
-            // 脏标记必须无条件先消费：写成 `!contains(chatId) || dirtyDigestIds.remove(chatId)` 时，
-            // 首轮水合会因短路而跳过 remove，把标记留到下一轮触发一次纯多余的窗口重建。
-            // 注意这里不存在"remove 之后别的线程 add 就丢失"的竞态：remove 本身即原子读写，
-            // 晚到的 add 只是把标记留给下一轮——那正是它应有的语义（整合发生在本次读库之后）。
-            boolean digestDirty = dirtyDigestIds.remove(chatId);
-            boolean rehydrate = digestDirty || !hydratedConversationIds.contains(chatId);
-            if (!rehydrate) {
-                return;
-            }
-            chatMemory.clear(chatId);
-            List<Message> recentMessages =
-                    conversationHistoryService.getRecentMessages(chatId, contextWindowMessages);
-            if (!recentMessages.isEmpty()) {
-                chatMemory.add(chatId, recentMessages);
-            }
-            hydratedConversationIds.add(chatId);
-        }
+        // Rebuild from committed history on every admitted turn. Exclude the current user message:
+        // MessageChatMemoryAdvisor adds it itself, including when an empty failed turn is retried.
+        chatMemory.clear(chatId);
+        List<Message> recent = new java.util.ArrayList<>(
+                conversationHistoryService.getRecentMessages(chatId, contextWindowMessages + 1));
+        if (!recent.isEmpty() && recent.getLast() instanceof org.springframework.ai.chat.messages.UserMessage
+                && userMessage.equals(recent.getLast().getText())) recent.removeLast();
+        if (!recent.isEmpty()) chatMemory.add(chatId, recent);
     }
 
     private void persistAssistantMessage(long ownerId, String chatId, String content) {

@@ -9,13 +9,12 @@ import java.util.regex.Pattern;
 
 /**
  * 输出侧安全检查（轻量、纯规则）：当本轮风险 ≥ PASSIVE 时，累积模型回复并在结束时做
- * 两项校验，任一命中都在流尾补一条温和的求助资源消息——
+ * 两项校验：禁忌应和替换为固定求助文本，资源缺失则补充渠道后再输出。
  * ①禁忌应和：模型对自伤意念表示认可/协助/浪漫化（"尊重你的决定"）；
  * ②资源缺失：整条回复没有出现任何可执行的求助渠道。
  *
- * <p>刻意不做 LLM 复核：规则误报的代价只是多一段资源提醒（无害且 clinically 可接受——
- * 对表达消极意念的用户，多一次资源提示本就是好的实践），LLM 复核的代价是延迟与新的
- * 不可控输出。黑名单只收"应和/协助"的明确模式，不收泛化的共情用语。</p>
+ * <p>规则存在漏报和误报，不能视为临床安全认证。缓冲仅作用于已识别风险的轮次，
+ * 不能替代风险识别和人工评测。</p>
  */
 public final class SafetyOutputGuard {
 
@@ -42,17 +41,27 @@ public final class SafetyOutputGuard {
         if (!armed) {
             return events;
         }
+        return Flux.defer(() -> {
         StringBuilder seen = new StringBuilder();
         return events.concatMap(event -> {
             if ("delta".equals(event.type()) && event.content() != null) {
+                if (seen.length() + event.content().length() > 32_000) {
+                    return Flux.error(new IllegalStateException("safety buffer limit exceeded"));
+                }
                 seen.append(event.content());
+                // Risk-bearing replies are checked before any model text is exposed.
+                return Flux.empty();
             }
-            if ("done".equals(event.type()) && needsSupplement(seen.toString())) {
+            if ("done".equals(event.type())) {
+                String text = seen.toString();
+                if (violated(text) || text.isBlank()) text = supplement;
+                else if (needsSupplement(text)) text += "\n\n" + supplement;
                 return Flux.just(
-                        CounselingStreamEvent.delta("\n\n" + supplement, event.effectiveMode(), true),
+                        CounselingStreamEvent.delta(text, event.effectiveMode(), event.fallback()),
                         event);
             }
             return Flux.just(event);
+        });
         });
     }
 

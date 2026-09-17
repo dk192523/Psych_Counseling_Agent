@@ -25,6 +25,9 @@ import org.springframework.security.web.context.HttpSessionSecurityContextReposi
 import org.springframework.security.web.context.SecurityContextRepository;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.security.web.csrf.CsrfToken;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseStatus;
@@ -45,6 +48,15 @@ public class AuthController {
     private final RegisterThrottleService registerThrottle;
     private final SecurityContextRepository securityContextRepository = new HttpSessionSecurityContextRepository();
 
+    @Value("${app.registration.enabled:true}")
+    private boolean registrationEnabled = true;
+
+    @GetMapping("/csrf")
+    public java.util.Map<String, Object> csrf(CsrfToken token) {
+        return java.util.Map.of("token", token.getToken(), "headerName", token.getHeaderName(),
+                "registrationEnabled", registrationEnabled);
+    }
+
     public AuthController(UserAccountService userAccountService,
                           ActiveSessionService activeSessionService,
                           RegisterThrottleService registerThrottle) {
@@ -57,6 +69,9 @@ public class AuthController {
     public ResponseEntity<?> register(@RequestBody RegisterRequest request,
                                       HttpServletRequest servletRequest,
                                       HttpServletResponse servletResponse) {
+        if (!registrationEnabled) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(new ApiError("REGISTRATION_DISABLED", "当前不开放注册，请联系管理员"));
+        }
         // 未认证注册限流：409/201 可被批量枚举账号存在性（并为首启抢注提供探测手段），
         // 双键窗口（来源 IP + 归一化用户名）超限统一泛化 429，不区分触发维度。
         String normalizedUsername = AuthValidation.normalizeUsername(request.username());
@@ -129,6 +144,8 @@ public class AuthController {
                 new UsernamePasswordAuthenticationToken(principal, null, principal.getAuthorities()));
         SecurityContextHolder.setContext(context);
         securityContextRepository.saveContext(context, request, response);
+        // Rotate CSRF after hand-written authentication, matching Spring's login lifecycle.
+        new org.springframework.security.web.csrf.HttpSessionCsrfTokenRepository().saveToken(null, request, response);
         activeSessionService.registerLogin(user.id(), session);
         // 竞态补偿：登记后复核账号状态，闭合"登录与停用并发"的空窗。
         // adminSetStatus 内 updateStatus 序在 killSessions 之前（同线程保证），故只有两种偏序：

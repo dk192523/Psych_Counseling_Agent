@@ -6,6 +6,15 @@ import com.dk.dkaiagent.app.SafetyOutputGuard;
 import com.dk.dkaiagent.memory.RiskTier;
 import com.dk.dkaiagent.memory.SafetyProperties;
 import com.dk.dkaiagent.memory.SafetyTerms;
+import com.dk.dkaiagent.history.ChatTurnService;
+import com.dk.dkaiagent.memory.ConversationMemoryService;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import org.springframework.beans.factory.annotation.Autowired;
+import reactor.core.publisher.Mono;
+import java.time.Duration;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import jakarta.annotation.Resource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -52,8 +61,35 @@ public class CounselingTurnPipeline {
     @Resource
     private SafetyProperties safetyProperties;
 
+    @Resource
+    private ChatTurnService chatTurnService;
+
+    @Resource
+    private ConversationMemoryService memoryService;
+
+    @Autowired(required = false)
+    private MeterRegistry metrics = new SimpleMeterRegistry();
+
     public Flux<CounselingStreamEvent> run(CounselingTurnRequest request) {
+        // Admission runs before the HTTP stream starts, so conflicts retain HTTP 409 semantics.
+        ChatTurnService.Turn turn = chatTurnService.begin(request.ownerId(), request.chatId(),
+                request.clientMsgId(), request.message(), request.deepThinking());
+        if (turn.replay()) {
+            return Flux.just(CounselingStreamEvent.delta(turn.answer(), turn.mode(), turn.fallback()),
+                    "COMPLETED".equals(turn.status()) ? CounselingStreamEvent.done(turn.mode(), turn.fallback())
+                            : failure("partial", "上次回答已中断，已保存的部分如下。你可以发送新消息继续。"));
+        }
+        AtomicBoolean subscribed = new AtomicBoolean();
         return Flux.defer(() -> {
+            if (!subscribed.compareAndSet(false, true)) {
+                return Flux.error(new IllegalStateException("A turn stream can only be subscribed once"));
+            }
+            StringBuilder visible = new StringBuilder();
+            AtomicBoolean terminal = new AtomicBoolean();
+            AtomicReference<CounselingStreamEvent> last = new AtomicReference<>(
+                    CounselingStreamEvent.done(turn.mode(), false));
+            long started = System.nanoTime();
+            Flux<CounselingStreamEvent> source = Flux.defer(() -> {
             // 危机拦截先于一切：IMMINENT 级（手段/计划/进行中）直接走专用模板，
             // 不进入任何 LLM 聊天链——这是快速模式此前缺失的危机前置检查，
             // 现在两条模式在 pipeline 收口处统一获得。
@@ -70,7 +106,7 @@ public class CounselingTurnPipeline {
                 }
             }
             counselingApp.prepareConversationTurn(
-                    request.ownerId(), request.chatId(), request.message(), request.clientMsgId());
+                    request.ownerId(), request.chatId(), request.message(), turn.key());
             if (tier == RiskTier.IMMINENT && safetyProperties.isCrisisResponseEnabled()) {
                 return crisisResponse(request);
             }
@@ -78,15 +114,82 @@ public class CounselingTurnPipeline {
                     ? counselingAgentExecutor.prepareAndAnswer(
                             request.message(), request.chatId(), request.ownerId())
                     : standardAnswer(request.ownerId(), request.message(), request.chatId());
-            // PASSIVE/IMMINENT 轮次的输出侧检查：模型若应和自伤意念或漏给资源，流尾补一条纠正与资源。
+            // 高风险轮次先检查完整输出，再向客户端发送通过检查的文本。
             return SafetyOutputGuard.guard(events, tier, crisisResponse.supplement());
+            });
+            // Hard deadline, including continuously arriving tokens; timeout() alone only bounds idle time.
+            return source.takeUntilOther(Mono.delay(Duration.ofSeconds(180))
+                            .flatMap(ignored -> Mono.error(new IllegalStateException("turn deadline exceeded"))))
+                    .concatMap(event -> {
+                        last.set(event);
+                        if ("delta".equals(event.type())) {
+                            if (visible.length() + event.content().length() > 32_000) throw new IllegalStateException("answer budget exceeded");
+                            visible.append(event.content());
+                        }
+                        if ("done".equals(event.type())) {
+                            if (visible.toString().isBlank()) throw new IllegalStateException("empty answer");
+                            chatTurnService.finish(request.ownerId(), request.chatId(), turn.key(),
+                                    visible.toString(), "COMPLETED", event.effectiveMode(), event.fallback());
+                            terminal.set(true);
+                            afterCommit(request.chatId());
+                            metrics.counter("counseling.turns", "outcome", "completed").increment();
+                        }
+                        return Mono.just(event);
+                    })
+                    .takeUntil(event -> "done".equals(event.type()))
+                    .concatWith(Flux.defer(() -> terminal.get() ? Flux.empty()
+                            : Flux.error(new IllegalStateException("missing completion event"))))
+                    .onErrorResume(error -> {
+                        boolean stored = finishInterrupted(request, turn, visible.toString(), "FAILED", last.get(), terminal);
+                        auditLog.warn("Turn failed; chatId={} errorType={}", request.chatId(), error.getClass().getSimpleName());
+                        return Flux.just(failure(stored && !visible.isEmpty() ? "partial" : "failed",
+                                stored ? "回答未完成，已生成的内容已保存。" : "回答未能保存，请稍后重试。"));
+                    })
+                    .doFinally(signal -> {
+                        if (signal == reactor.core.publisher.SignalType.CANCEL) {
+                            finishInterrupted(request, turn, visible.toString(), "CANCELLED", last.get(), terminal);
+                        }
+                        metrics.timer("counseling.turn.duration", "mode", turn.mode())
+                                .record(System.nanoTime() - started, java.util.concurrent.TimeUnit.NANOSECONDS);
+                    });
         });
+    }
+
+    private void afterCommit(String chatId) {
+        // The answer is already durable. Optional memory maintenance must not undo HTTP success.
+        try {
+            counselingApp.clearConversationMemory(chatId);
+            memoryService.onTurnArchived(chatId);
+        } catch (RuntimeException error) {
+            auditLog.warn("Post-commit memory maintenance failed; chatId={} errorType={}",
+                    chatId, error.getClass().getSimpleName());
+        }
+    }
+
+    private boolean finishInterrupted(CounselingTurnRequest request, ChatTurnService.Turn turn, String answer,
+                                      String status, CounselingStreamEvent last, AtomicBoolean terminal) {
+        if (!terminal.compareAndSet(false, true)) return true;
+        try {
+            chatTurnService.finish(request.ownerId(), request.chatId(), turn.key(), answer, status,
+                    last.effectiveMode(), last.fallback());
+            return true;
+        } catch (RuntimeException error) {
+            metrics.counter("counseling.archive.failures").increment();
+            auditLog.error("Unable to save interrupted turn; chatId={} errorType={}", request.chatId(), error.getClass().getSimpleName());
+            return false;
+        } finally {
+            counselingApp.clearConversationMemory(request.chatId());
+            metrics.counter("counseling.turns", "outcome", status.toLowerCase(java.util.Locale.ROOT)).increment();
+        }
+    }
+
+    private static CounselingStreamEvent failure(String phase, String message) {
+        return new CounselingStreamEvent("error", message, phase, "standard", false);
     }
 
     /** 危机模板响应：用户消息已归档，模板流式发出，回答照常归档并触发记忆整合。 */
     private Flux<CounselingStreamEvent> crisisResponse(CounselingTurnRequest request) {
         String text = crisisResponse.render();
-        counselingApp.archiveAssistantAnswer(request.ownerId(), request.chatId(), text);
         return Flux.fromIterable(crisisResponse.toChunks(text))
                 .map(chunk -> CounselingStreamEvent.delta(chunk, "standard", false))
                 .concatWithValues(CounselingStreamEvent.done("standard", false));

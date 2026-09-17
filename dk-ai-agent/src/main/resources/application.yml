@@ -83,7 +83,7 @@ server:
         # 通过 HTTPS 反向代理部署时设为 true；直接 HTTP 调试必须保持 false。
         secure: ${SESSION_COOKIE_SECURE:false}
         # SameSite=Lax 经 Boot 的 WebServerFactoryCustomizer 接线进 Tomcat Rfc6265CookieProcessor：
-        # 落实 SecurityConfig 中禁用 CSRF 所依赖的缓解项（不再依赖浏览器对缺省属性的默认 Lax 行为，
+        # SameSite 与会话绑定的 CSRF token 共同防护（显式声明 Lax，
         # 旧内核浏览器不会把缺省当 None 处理）。Secure 属性待 TLS 上线后再随 prod profile 开启，
         # 否则当前 HTTP 部署下浏览器将拒绝回送 Cookie、全站会话立即失效。
         same-site: lax
@@ -111,6 +111,8 @@ deepseek:
   web-search-tool: ${DEEPSEEK_WEB_SEARCH_TOOL:web_search_20260209}
 # 修改日志级别，查看 Spring AI 更多调用细节
 logging:
+  pattern:
+    level: "%5p [requestId=%X{requestId:-}]"
   level:
     org.springframework.ai: ${SPRING_AI_LOG_LEVEL:INFO}
 
@@ -118,7 +120,7 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info
+        include: health,info,metrics
   endpoint:
     health:
       probes:

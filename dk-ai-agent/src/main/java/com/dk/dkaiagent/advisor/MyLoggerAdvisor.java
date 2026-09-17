@@ -35,6 +35,14 @@ public class MyLoggerAdvisor implements CallAdvisor, StreamAdvisor {
 
 	private void observeAfter(ChatClientResponse chatClientResponse) {
 		log.debug("AI request completed; requestId={}", currentRequestId());
+		var response = chatClientResponse.chatResponse();
+		if (response == null || response.getMetadata().getUsage() == null) return;
+		var usage = response.getMetadata().getUsage();
+		// Aggregated counters contain no prompts, answers, conversation IDs or user labels.
+		if (usage.getPromptTokens() != null && usage.getPromptTokens() > 0)
+			io.micrometer.core.instrument.Metrics.counter("counseling.model.tokens", "kind", "input").increment(usage.getPromptTokens());
+		if (usage.getCompletionTokens() != null && usage.getCompletionTokens() > 0)
+			io.micrometer.core.instrument.Metrics.counter("counseling.model.tokens", "kind", "output").increment(usage.getCompletionTokens());
 	}
 
 	private static String currentRequestId() {

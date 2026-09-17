@@ -88,7 +88,7 @@ public class AiController {
      */
     @PostMapping("/counseling/chat/sync")
     public String doChatWithCounselingSync(@RequestBody ChatRequest request) {
-        return doChatWithCounselingSync(request.message(), request.chatId(), request.clientMsgId());
+        return collectAnswer(doChatWithCounselingSSE(request));
     }
 
     /** 无映射注解的 Java 入口：供进程内调用与单测，不对外暴露 HTTP 形式。 */
@@ -97,8 +97,16 @@ public class AiController {
     }
 
     public String doChatWithCounselingSync(String message, String chatId, String clientMsgId) {
-        long ownerId = requireConversationOwner(chatId);
-        return counselingApp.doChatWithRag(ownerId, message, chatId, clientMsgId);
+        return collectAnswer(doChatWithCounselingSSE(message, chatId, false, clientMsgId));
+    }
+
+    private String collectAnswer(Flux<ServerSentEvent<ChatStreamEvent>> events) {
+        return events
+                .map(ServerSentEvent::data)
+                .handle((event, sink) -> {
+                    if ("error".equals(event.type())) sink.error(new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, event.content()));
+                    else if ("delta".equals(event.type())) sink.next(event.content());
+                }).cast(String.class).collectList().map(parts -> String.join("", parts)).block();
     }
 
     /** 主页面使用 POST 传输咨询内容，避免敏感文本出现在 URL 与代理访问日志中。 */
@@ -128,6 +136,7 @@ public class AiController {
             String chatId,
             boolean deepThinking,
             String clientMsgId) {
+        validateChatInput(message, chatId, clientMsgId);
         // 开流前完成所有权校验：跨用户与不存在一律 404，绝不带着他人主体进入下游。
         long ownerId = requireConversationOwner(chatId);
         // A4 成本护栏：单用户滑动窗口限频，超限 429（前端有专属文案）。
@@ -180,6 +189,14 @@ public class AiController {
 
         public ChatRequest(String message, String chatId, boolean deepThinking) {
             this(message, chatId, deepThinking, null);
+        }
+    }
+
+    private static void validateChatInput(String message, String chatId, String clientMsgId) {
+        if (message == null || message.isBlank() || message.codePointCount(0, message.length()) > 4000
+                || chatId == null || !chatId.matches("[A-Za-z0-9_-]{1,64}")
+                || (clientMsgId != null && !clientMsgId.matches("[A-Za-z0-9_-]{1,64}"))) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "消息需为 1–4000 字，消息和会话标识需合法");
         }
     }
 

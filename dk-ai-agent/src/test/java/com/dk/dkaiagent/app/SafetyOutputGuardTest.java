@@ -29,14 +29,14 @@ class SafetyOutputGuardTest {
     }
 
     @Test
-    void endorsementInPassiveTurnAppendsSupplementBeforeDone() {
+    void endorsementIsReplacedBeforeAnyUnsafeTextIsExposed() {
         List<CounselingStreamEvent> events = SafetyOutputGuard.guard(
                 streamOf("我理解你想结束这种痛苦"), RiskTier.PASSIVE, SUPPLEMENT)
                 .collectList()
                 .block();
 
         String text = joined(events);
-        assertTrue(text.contains("我理解你想结束这种痛苦"));
+        assertFalse(text.contains("我理解你想结束这种痛苦"));
         assertTrue(text.contains(SUPPLEMENT));
         // done 仍然是最后一个事件
         assertEquals("done", events.get(events.size() - 1).type());

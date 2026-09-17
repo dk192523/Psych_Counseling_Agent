@@ -176,6 +176,7 @@ class ConversationIsolationTest {
             ReflectionTestUtils.setField(controller, "conversationHistoryService", historyService);
             ReflectionTestUtils.setField(controller, "counselingAgentExecutor", executor);
             CounselingTurnPipeline pipeline = new CounselingTurnPipeline();
+        com.dk.dkaiagent.agent.counseling.PipelineTestSupport.configure(pipeline);
             ReflectionTestUtils.setField(pipeline, "counselingApp", counselingApp);
             ReflectionTestUtils.setField(pipeline, "counselingAgentExecutor", executor);
             ReflectionTestUtils.setField(controller, "counselingTurnPipeline", pipeline);

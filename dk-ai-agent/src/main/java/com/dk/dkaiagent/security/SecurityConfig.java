@@ -12,7 +12,6 @@ import org.springframework.http.MediaType;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
-import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.session.SessionRegistry;
@@ -49,21 +48,29 @@ public class SecurityConfig {
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http
-                // CSRF：冻结合约 AUTH-v1 显式关闭。
-                // 权衡：主咨询流已迁移为 POST + fetch SSE，但会话认证接口尚未完成 CSRF token 接线；
-                // 立即启用会打断现有登录和流式调用。当前缓解依赖 Cookie SameSite=Lax（application.yml
-                // 显式配置）+ 生产 nginx 同源反代 + CORS 显式 Origin 白名单（严禁 "*"）。
-                // 后续应给所有状态变更请求接入 CSRF token，再仅豁免无状态健康检查。
-                .csrf(AbstractHttpConfigurer::disable)
+                // All state-changing requests, including login and fetch SSE, require the
+                // session-bound masked token returned by GET /auth/csrf.
+                .csrf(Customizer.withDefaults())
                 // CORS：本项目无 CorsConfigurationSource Bean，.cors(withDefaults()) 回退到 MVC CORS 配置，
                 // 即 config/CorsConfig（WebMvcConfigurer）提供的显式 Origin 白名单；allowCredentials 的跨域
                 // 开发模式（localhost:3001）在该处统一约束，生产同源部署缺省不注册任何 CORS 放行。
                 .cors(Customizer.withDefaults())
+                // 应用层安全头兜底：nginx 已带同类头（security-headers.conf），此处覆盖
+                // "绕过 nginx 直连后端"的开发/内网场景。刻意不设 CSP——前端有 v-html 渲染与
+                // 内联场景，CSP 需按实际资源清单单独设计后再启用。HSTS 在纯 HTTP 响应中被
+                // 浏览器忽略、切到 HTTPS 后自动生效，预先带上无代价。
+                .headers(headers -> headers
+                        .contentTypeOptions(Customizer.withDefaults())
+                        .frameOptions(frame -> frame.deny())
+                        .httpStrictTransportSecurity(hsts -> hsts.includeSubDomains(true).preload(false))
+                        .addHeaderWriter(new org.springframework.security.web.header.writers.ReferrerPolicyHeaderWriter(
+                                org.springframework.security.web.header.writers.ReferrerPolicyHeaderWriter.ReferrerPolicy.NO_REFERRER)))
                 .authorizeHttpRequests(auth -> {
                         // permitAll 白名单（冻结合约 AUTH-v1）。
                         auth.requestMatchers(
                                 "/auth/login",
                                 "/auth/register",
+                                "/auth/csrf",
                                 // 启动器健康检查经前端 nginx 打 /api/health，必须免认证，否则 WaitHealth 永久失败。
                                 "/health",
                                 // Readiness remains REFUSING_TRAFFIC until ApplicationRunner finishes the vector load.
@@ -82,7 +89,7 @@ public class SecurityConfig {
                                     "/webjars/**")
                             .permitAll();
                         }
-                        auth.requestMatchers("/admin/**").hasRole(UserAccountService.ROLE_ADMIN)
+                        auth.requestMatchers("/admin/**", "/actuator/metrics/**").hasRole(UserAccountService.ROLE_ADMIN)
                         .anyRequest().authenticated();
                 })
                 .exceptionHandling(exceptions -> exceptions
@@ -91,7 +98,9 @@ public class SecurityConfig {
                                 writeError(response, HttpStatus.UNAUTHORIZED, "UNAUTHORIZED", "未登录或会话已过期"))
                         // 已认证无权限（如 USER 访问 /admin/**）：403 JSON。
                         .accessDeniedHandler((request, response, accessDeniedException) ->
-                                writeError(response, HttpStatus.FORBIDDEN, "FORBIDDEN", "无权访问该资源")))
+                                writeError(response, HttpStatus.FORBIDDEN,
+                                        accessDeniedException instanceof org.springframework.security.web.csrf.CsrfException ? "CSRF_INVALID" : "FORBIDDEN",
+                                        accessDeniedException instanceof org.springframework.security.web.csrf.CsrfException ? "页面安全凭据已过期，请重试" : "无权访问该资源")))
                 // 会话固定防护：changeSessionId 是 Spring Security 默认策略，此处显式声明以确认未被禁用。
                 // 注意：AuthController 的手工登录路径不经过 SessionManagementFilter 的认证检测，
                 // 因此登录成功时另由控制器显式 changeSessionId，两条路径共同满足合约的防固定要求。
