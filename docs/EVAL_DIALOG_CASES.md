@@ -3,6 +3,12 @@
 > 配套改造：`RhythmDirectives` 提问限速器 + System Prompt 回应工具箱 + worker `response_mode/next_probe` 策略信号。
 > 评测视角与传统 NLP 指标不同：**不测"回答得多好"，测"问题问得多好、对话是否被推进、对方是否愿意继续说"**。
 
+## 自动化覆盖边界（2026-09-17）
+
+`eval/cases.yaml` 的 9 条机器用例是本文人工场景的选取与改写，不是一一对应的完整子集：多轮消息和断言有简化，不能仅凭 ID 宣称覆盖本文全部场景。D1 明确为消极意念，D2/D4 覆盖明确危险及深度模式危机分流。max_chars 已实际执行；流缺失 done、空回答、error、judge 返回非布尔值均不得判成功。
+
+未启用 judge 时报告为 `PASS deterministic / SKIP judge`。本轮只测试 harness，本轮未执行付费真实对话评测；历史 `eval/report.md` 不能作为修复后质量证据。检索评测独立见 `eval/RAG_BASELINE.md`。
+
 ## 评测协议（人工）
 
 1. 每个用例在真实会话中按顺序发送"用户消息"列（每条一行，等待 AI 回完再发下一条）。

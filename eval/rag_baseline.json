@@ -1,0 +1,797 @@
+{
+  "timestamp" : "2026-09-17T05:54:09.906119500Z",
+  "label_status" : "source-grounded seed; pending independent human relevance review",
+  "scope" : "production Markdown loader and Transformers embedding; exact cosine; excludes pgvector ANN, deep planning/reranking and chat generation",
+  "model_uri" : "https://media.githubusercontent.com/media/spring-projects/spring-ai/v1.0.0/models/spring-ai-transformers/src/main/resources/onnx/all-MiniLM-L6-v2/model.onnx",
+  "dimensions" : 384,
+  "corpus_fingerprint" : "abc35ec23e9d4722",
+  "documents" : 835,
+  "top_k" : 4,
+  "threshold" : 0.3,
+  "positive_cases" : 25,
+  "negative_cases" : 5,
+  "recall_at_4" : 0.04,
+  "mrr_at_4" : 0.02,
+  "no_hit_accuracy" : 0.0,
+  "results" : [ {
+    "expected" : [ "2026-07-18-call-01" ],
+    "query" : "我从小被父母留在乡下，曾经对姐姐动手，现在很后悔，又没有能力独立生活。",
+    "id" : "R01",
+    "candidates" : [ {
+      "slugs" : [ ],
+      "filename" : "咨询案例 - 婚姻篇.md",
+      "rank" : 1,
+      "score" : 0.6505693897225449
+    }, {
+      "slugs" : [ ],
+      "filename" : "咨询案例 - 情感篇.md",
+      "rank" : 2,
+      "score" : 0.6505693897225449
+    }, {
+      "slugs" : [ ],
+      "filename" : "咨询案例 - 成长篇.md",
+      "rank" : 3,
+      "score" : 0.6499613688129314
+    }, {
+      "slugs" : [ ],
+      "filename" : "咨询案例 - 其他篇.md",
+      "rank" : 4,
+      "score" : 0.6484814682853518
+    } ],
+    "first_relevant_rank" : 0
+  }, {
+    "expected" : [ "2026-07-18-call-02" ],
+    "query" : "我在事业单位工作，两套房的月供已经超过工资，想卖房却一直被家里干涉。",
+    "id" : "R02",
+    "candidates" : [ {
+      "slugs" : [ ],
+      "filename" : "心理疏导通用框架 - 框架篇.md",
+      "rank" : 1,
+      "score" : 0.6047480247945174
+    }, {
+      "slugs" : [ "2026-04-13-call-03" ],
+      "filename" : "咨询案例 - 子女篇.md",
+      "rank" : 2,
+      "score" : 0.6005715783234388
+    }, {
+      "slugs" : [ "2026-04-13-call-10" ],
+      "filename" : "咨询案例 - 职场篇.md",
+      "rank" : 3,
+      "score" : 0.5946515555916418
+    }, {
+      "slugs" : [ "2026-04-07-call-03" ],
+      "filename" : "咨询案例 - 心理篇.md",
+      "rank" : 4,
+      "score" : 0.5931561128959134
+    } ],
+    "first_relevant_rank" : 0
+  }, {
+    "expected" : [ "2026-07-18-call-03" ],
+    "query" : "做了八年教培，想把自己做成有影响力的老师，但不知道怎么兼顾教学和个人品牌。",
+    "id" : "R03",
+    "candidates" : [ {
+      "slugs" : [ ],
+      "filename" : "咨询案例 - 成长篇.md",
+      "rank" : 1,
+      "score" : 0.7215806849653196
+    }, {
+      "slugs" : [ ],
+      "filename" : "咨询案例 - 心理篇.md",
+      "rank" : 2,
+      "score" : 0.709978072296177
+    }, {
+      "slugs" : [ ],
+      "filename" : "咨询案例 - 婚姻篇.md",
+      "rank" : 3,
+      "score" : 0.7089340996137932
+    }, {
+      "slugs" : [ ],
+      "filename" : "咨询案例 - 情感篇.md",
+      "rank" : 4,
+      "score" : 0.7089340996137932
+    } ],
+    "first_relevant_rank" : 0
+  }, {
+    "expected" : [ "2026-07-18-call-04" ],
+    "query" : "我博士毕业刚参加工作，对女友的收入和生活习惯越来越不满，是不是要求太高？",
+    "id" : "R04",
+    "candidates" : [ {
+      "slugs" : [ ],
+      "filename" : "心理疏导通用框架 - 框架篇.md",
+      "rank" : 1,
+      "score" : 0.6317683822384703
+    }, {
+      "slugs" : [ ],
+      "filename" : "心理疏导通用框架 - 框架篇.md",
+      "rank" : 2,
+      "score" : 0.6093035066813988
+    }, {
+      "slugs" : [ ],
+      "filename" : "咨询案例 - 成长篇.md",
+      "rank" : 3,
+      "score" : 0.6083434363393416
+    }, {
+      "slugs" : [ ],
+      "filename" : "咨询案例 - 婚姻篇.md",
+      "rank" : 4,
+      "score" : 0.6037070288583456
+    } ],
+    "first_relevant_rank" : 0
+  }, {
+    "expected" : [ "2026-07-18-call-05" ],
+    "query" : "我儿子上高二，性格内向，经常遭同学言语羞辱，作为母亲我该怎样帮他？",
+    "id" : "R05",
+    "candidates" : [ {
+      "slugs" : [ ],
+      "filename" : "咨询案例 - 父母篇.md",
+      "rank" : 1,
+      "score" : 0.5932279665841371
+    }, {
+      "slugs" : [ ],
+      "filename" : "咨询案例 - 学业篇.md",
+      "rank" : 2,
+      "score" : 0.5892498727275625
+    }, {
+      "slugs" : [ ],
+      "filename" : "咨询案例 - 心理篇.md",
+      "rank" : 3,
+      "score" : 0.5883048743910975
+    }, {
+      "slugs" : [ "2026-04-23-call-01" ],
+      "filename" : "咨询案例 - 学业篇.md",
+      "rank" : 4,
+      "score" : 0.5849982824678591
+    } ],
+    "first_relevant_rank" : 0
+  }, {
+    "expected" : [ "2026-07-18-call-06" ],
+    "query" : "父亲曾经家暴，我成年后切断联系，他却报警找我，让我很害怕。",
+    "id" : "R06",
+    "candidates" : [ {
+      "slugs" : [ "2026-07-10-call-08" ],
+      "filename" : "咨询案例 - 成长篇.md",
+      "rank" : 1,
+      "score" : 0.6855662321162715
+    }, {
+      "slugs" : [ ],
+      "filename" : "心理疏导通用框架 - 框架篇.md",
+      "rank" : 2,
+      "score" : 0.6808655518727448
+    }, {
+      "slugs" : [ "2026-07-16-call-07" ],
+      "filename" : "咨询案例 - 心理篇.md",
+      "rank" : 3,
+      "score" : 0.6656336076744126
+    }, {
+      "slugs" : [ "2026-07-10-call-07" ],
+      "filename" : "咨询案例 - 情感篇.md",
+      "rank" : 4,
+      "score" : 0.6514687966311153
+    } ],
+    "first_relevant_rank" : 0
+  }, {
+    "expected" : [ "2026-07-18-call-07" ],
+    "query" : "女儿二十岁特别爱干净，不让家人进房间，已经很瘦还在节食，父亲该怎么办？",
+    "id" : "R07",
+    "candidates" : [ {
+      "slugs" : [ ],
+      "filename" : "心理疏导通用框架 - 框架篇.md",
+      "rank" : 1,
+      "score" : 0.6834955674403373
+    }, {
+      "slugs" : [ ],
+      "filename" : "心理疏导通用框架 - 框架篇.md",
+      "rank" : 2,
+      "score" : 0.6119358952336564
+    }, {
+      "slugs" : [ "2026-06-04-call-08" ],
+      "filename" : "咨询案例 - 情感篇.md",
+      "rank" : 3,
+      "score" : 0.5909134591959858
+    }, {
+      "slugs" : [ "2026-03-24-call-20" ],
+      "filename" : "咨询案例 - 心理篇.md",
+      "rank" : 4,
+      "score" : 0.5863383961369729
+    } ],
+    "first_relevant_rank" : 0
+  }, {
+    "expected" : [ "2026-07-18-call-08" ],
+    "query" : "我是单亲妈妈，儿子十六岁，我总想管住他，又担心管得越多他越反抗。",
+    "id" : "R08",
+    "candidates" : [ {
+      "slugs" : [ ],
+      "filename" : "咨询案例 - 心理篇.md",
+      "rank" : 1,
+      "score" : 0.6342371621407983
+    }, {
+      "slugs" : [ ],
+      "filename" : "咨询案例 - 成长篇.md",
+      "rank" : 2,
+      "score" : 0.6263897721023647
+    }, {
+      "slugs" : [ ],
+      "filename" : "咨询案例 - 父母篇.md",
+      "rank" : 3,
+      "score" : 0.6242935908690419
+    }, {
+      "slugs" : [ ],
+      "filename" : "咨询案例 - 婚姻篇.md",
+      "rank" : 4,
+      "score" : 0.618001784699621
+    } ],
+    "first_relevant_rank" : 0
+  }, {
+    "expected" : [ "2026-07-18-call-09" ],
+    "query" : "我工作一阵就辞职休息，看到同事发展得好又很焦虑，生活总是停停走走。",
+    "id" : "R09",
+    "candidates" : [ {
+      "slugs" : [ ],
+      "filename" : "心理疏导通用框架 - 框架篇.md",
+      "rank" : 1,
+      "score" : 0.7007201177601428
+    }, {
+      "slugs" : [ ],
+      "filename" : "心理疏导通用框架 - 框架篇.md",
+      "rank" : 2,
+      "score" : 0.656155746916188
+    }, {
+      "slugs" : [ ],
+      "filename" : "心理疏导通用框架 - 框架篇.md",
+      "rank" : 3,
+      "score" : 0.6499078003883048
+    }, {
+      "slugs" : [ ],
+      "filename" : "心理疏导通用框架 - 框架篇.md",
+      "rank" : 4,
+      "score" : 0.641978092181944
+    } ],
+    "first_relevant_rank" : 0
+  }, {
+    "expected" : [ "2026-07-18-call-10" ],
+    "query" : "养父经常喝酒，我工资很低还被催婚，也在纠结要不要寻找亲生父母。",
+    "id" : "R10",
+    "candidates" : [ {
+      "slugs" : [ ],
+      "filename" : "心理疏导通用框架 - 框架篇.md",
+      "rank" : 1,
+      "score" : 0.6984732430137107
+    }, {
+      "slugs" : [ ],
+      "filename" : "咨询案例 - 成长篇.md",
+      "rank" : 2,
+      "score" : 0.6623133222971181
+    }, {
+      "slugs" : [ ],
+      "filename" : "心理疏导通用框架 - 框架篇.md",
+      "rank" : 3,
+      "score" : 0.6588943650247042
+    }, {
+      "slugs" : [ ],
+      "filename" : "咨询案例 - 婚姻篇.md",
+      "rank" : 4,
+      "score" : 0.6576140140481316
+    } ],
+    "first_relevant_rank" : 0
+  }, {
+    "expected" : [ "2026-07-18-call-11" ],
+    "query" : "事业单位的女同事排挤嫉妒我，领导也变得疏远，我不知道怎么处理人际关系。",
+    "id" : "R11",
+    "candidates" : [ {
+      "slugs" : [ ],
+      "filename" : "心理疏导通用框架 - 框架篇.md",
+      "rank" : 1,
+      "score" : 0.7136929240180659
+    }, {
+      "slugs" : [ ],
+      "filename" : "心理疏导通用框架 - 框架篇.md",
+      "rank" : 2,
+      "score" : 0.6613511500081489
+    }, {
+      "slugs" : [ ],
+      "filename" : "心理疏导通用框架 - 框架篇.md",
+      "rank" : 3,
+      "score" : 0.6413787157511273
+    }, {
+      "slugs" : [ ],
+      "filename" : "心理疏导通用框架 - 框架篇.md",
+      "rank" : 4,
+      "score" : 0.6408173597562979
+    } ],
+    "first_relevant_rank" : 0
+  }, {
+    "expected" : [ "2026-07-16-call-01" ],
+    "query" : "我有脑瘫后遗症，村里有人一直骂我傻子，成年以后依然害怕他们的评价。",
+    "id" : "R12",
+    "candidates" : [ {
+      "slugs" : [ "2026-04-13-call-16" ],
+      "filename" : "咨询案例 - 子女篇.md",
+      "rank" : 1,
+      "score" : 0.6176492097905306
+    }, {
+      "slugs" : [ "2026-07-16-call-07" ],
+      "filename" : "咨询案例 - 心理篇.md",
+      "rank" : 2,
+      "score" : 0.6087323776942003
+    }, {
+      "slugs" : [ "2026-03-18-call-20" ],
+      "filename" : "咨询案例 - 子女篇.md",
+      "rank" : 3,
+      "score" : 0.60761573968763
+    }, {
+      "slugs" : [ "2026-03-26-call-11" ],
+      "filename" : "咨询案例 - 心理篇.md",
+      "rank" : 4,
+      "score" : 0.6037376094920773
+    } ],
+    "first_relevant_rank" : 0
+  }, {
+    "expected" : [ "2026-07-16-call-02" ],
+    "query" : "我是山东女博士，有稳定编制，男友在江苏，我该不该辞职搬过去？",
+    "id" : "R13",
+    "candidates" : [ {
+      "slugs" : [ "2026-07-16-call-07" ],
+      "filename" : "咨询案例 - 心理篇.md",
+      "rank" : 1,
+      "score" : 0.5927392742551022
+    }, {
+      "slugs" : [ ],
+      "filename" : "心理疏导通用框架 - 框架篇.md",
+      "rank" : 2,
+      "score" : 0.5663679545376631
+    }, {
+      "slugs" : [ "2026-05-11-call-01" ],
+      "filename" : "咨询案例 - 职场篇.md",
+      "rank" : 3,
+      "score" : 0.5614884698924494
+    }, {
+      "slugs" : [ "2026-07-08-call-04" ],
+      "filename" : "咨询案例 - 父母篇.md",
+      "rank" : 4,
+      "score" : 0.5576588607514447
+    } ],
+    "first_relevant_rank" : 0
+  }, {
+    "expected" : [ "2026-07-16-call-04" ],
+    "query" : "我一直因父母离世和当年的房产分配自责，婚姻里又遭到暴力，怎么面对这种愧疚？",
+    "id" : "R14",
+    "candidates" : [ {
+      "slugs" : [ ],
+      "filename" : "咨询案例 - 成长篇.md",
+      "rank" : 1,
+      "score" : 0.6453607918564782
+    }, {
+      "slugs" : [ "2026-04-13-call-08" ],
+      "filename" : "咨询案例 - 心理篇.md",
+      "rank" : 2,
+      "score" : 0.635674076303502
+    }, {
+      "slugs" : [ ],
+      "filename" : "咨询案例 - 心理篇.md",
+      "rank" : 3,
+      "score" : 0.6324898095481211
+    }, {
+      "slugs" : [ ],
+      "filename" : "咨询案例 - 婚姻篇.md",
+      "rank" : 4,
+      "score" : 0.6296503054892
+    } ],
+    "first_relevant_rank" : 0
+  }, {
+    "expected" : [ "2026-07-16-call-05" ],
+    "query" : "博士找工作，一边是降薪但稳定的事业编，一边是珠三角收入高却要夜班的跨专业岗位。",
+    "id" : "R15",
+    "candidates" : [ {
+      "slugs" : [ ],
+      "filename" : "心理疏导通用框架 - 框架篇.md",
+      "rank" : 1,
+      "score" : 0.68010782106552
+    }, {
+      "slugs" : [ "2026-07-16-call-05" ],
+      "filename" : "咨询案例 - 职场篇.md",
+      "rank" : 2,
+      "score" : 0.6586375369777213
+    }, {
+      "slugs" : [ ],
+      "filename" : "心理疏导通用框架 - 框架篇.md",
+      "rank" : 3,
+      "score" : 0.6577944043062823
+    }, {
+      "slugs" : [ "2026-07-12-call-01" ],
+      "filename" : "咨询案例 - 职场篇.md",
+      "rank" : 4,
+      "score" : 0.6368894499098943
+    } ],
+    "first_relevant_rank" : 2
+  }, {
+    "expected" : [ "2026-07-16-call-06" ],
+    "query" : "我在读医学，学费给家里很大压力，想做自媒体赚生活费，又怕耽误学业。",
+    "id" : "R16",
+    "candidates" : [ {
+      "slugs" : [ ],
+      "filename" : "咨询案例 - 婚姻篇.md",
+      "rank" : 1,
+      "score" : 0.6846388375940311
+    }, {
+      "slugs" : [ ],
+      "filename" : "咨询案例 - 情感篇.md",
+      "rank" : 2,
+      "score" : 0.6846388375940311
+    }, {
+      "slugs" : [ ],
+      "filename" : "咨询案例 - 心理篇.md",
+      "rank" : 3,
+      "score" : 0.6828420762875245
+    }, {
+      "slugs" : [ ],
+      "filename" : "咨询案例 - 其他篇.md",
+      "rank" : 4,
+      "score" : 0.6817195832427548
+    } ],
+    "first_relevant_rank" : 0
+  }, {
+    "expected" : [ "2026-07-16-call-07" ],
+    "query" : "我是视障按摩师，最近情绪起伏很大，甚至想到不活了，想找相似处境的求助经历。",
+    "id" : "R17",
+    "candidates" : [ {
+      "slugs" : [ ],
+      "filename" : "心理疏导通用框架 - 框架篇.md",
+      "rank" : 1,
+      "score" : 0.6224322473265688
+    }, {
+      "slugs" : [ ],
+      "filename" : "咨询案例 - 成长篇.md",
+      "rank" : 2,
+      "score" : 0.6187699469763056
+    }, {
+      "slugs" : [ ],
+      "filename" : "咨询案例 - 心理篇.md",
+      "rank" : 3,
+      "score" : 0.6172807698088189
+    }, {
+      "slugs" : [ ],
+      "filename" : "咨询案例 - 婚姻篇.md",
+      "rank" : 4,
+      "score" : 0.6146932181140903
+    } ],
+    "first_relevant_rank" : 0
+  }, {
+    "expected" : [ "2026-07-14-call-01" ],
+    "query" : "我是失业程序员，有精神分裂和抑郁的问题，一直自己调整药物，日子越来越乱。",
+    "id" : "R18",
+    "candidates" : [ {
+      "slugs" : [ "2026-03-08-call-14" ],
+      "filename" : "咨询案例 - 心理篇.md",
+      "rank" : 1,
+      "score" : 0.7305842943676858
+    }, {
+      "slugs" : [ "2026-04-07-call-11" ],
+      "filename" : "咨询案例 - 心理篇.md",
+      "rank" : 2,
+      "score" : 0.676239613705067
+    }, {
+      "slugs" : [ "2026-05-11-call-02" ],
+      "filename" : "咨询案例 - 心理篇.md",
+      "rank" : 3,
+      "score" : 0.6716684504634183
+    }, {
+      "slugs" : [ "2026-04-13-call-08" ],
+      "filename" : "咨询案例 - 心理篇.md",
+      "rank" : 4,
+      "score" : 0.667205743403612
+    } ],
+    "first_relevant_rank" : 0
+  }, {
+    "expected" : [ "2026-07-14-call-02" ],
+    "query" : "父亲去世后我常失眠，还要替哥哥还贷款，家里又一直催我结婚。",
+    "id" : "R19",
+    "candidates" : [ {
+      "slugs" : [ "2026-04-13-call-08" ],
+      "filename" : "咨询案例 - 心理篇.md",
+      "rank" : 1,
+      "score" : 0.570924608136263
+    }, {
+      "slugs" : [ ],
+      "filename" : "心理疏导通用框架 - 框架篇.md",
+      "rank" : 2,
+      "score" : 0.5608939790114664
+    }, {
+      "slugs" : [ ],
+      "filename" : "心理疏导通用框架 - 框架篇.md",
+      "rank" : 3,
+      "score" : 0.5566966376441672
+    }, {
+      "slugs" : [ ],
+      "filename" : "咨询案例 - 成长篇.md",
+      "rank" : 4,
+      "score" : 0.5416114174125668
+    } ],
+    "first_relevant_rank" : 0
+  }, {
+    "expected" : [ "2026-07-14-call-03" ],
+    "query" : "孩子快上小学了，和其他孩子冲突时说脏话，家长应不应该直接找对方监护人？",
+    "id" : "R20",
+    "candidates" : [ {
+      "slugs" : [ ],
+      "filename" : "心理疏导通用框架 - 框架篇.md",
+      "rank" : 1,
+      "score" : 0.6644900131230285
+    }, {
+      "slugs" : [ ],
+      "filename" : "咨询案例 - 心理篇.md",
+      "rank" : 2,
+      "score" : 0.6550916777518375
+    }, {
+      "slugs" : [ ],
+      "filename" : "咨询案例 - 父母篇.md",
+      "rank" : 3,
+      "score" : 0.6534545002545015
+    }, {
+      "slugs" : [ ],
+      "filename" : "咨询案例 - 其他篇.md",
+      "rank" : 4,
+      "score" : 0.6527324021666628
+    } ],
+    "first_relevant_rank" : 0
+  }, {
+    "expected" : [ "2026-07-14-call-04" ],
+    "query" : "我独自养两个女儿，前夫陷入传销还欠债，大女儿想勤工俭学分担，我心里很难受。",
+    "id" : "R21",
+    "candidates" : [ {
+      "slugs" : [ ],
+      "filename" : "咨询案例 - 婚姻篇.md",
+      "rank" : 1,
+      "score" : 0.6836221074982961
+    }, {
+      "slugs" : [ ],
+      "filename" : "咨询案例 - 情感篇.md",
+      "rank" : 2,
+      "score" : 0.6836221074982961
+    }, {
+      "slugs" : [ ],
+      "filename" : "咨询案例 - 心理篇.md",
+      "rank" : 3,
+      "score" : 0.680906736010185
+    }, {
+      "slugs" : [ ],
+      "filename" : "咨询案例 - 父母篇.md",
+      "rank" : 4,
+      "score" : 0.6791819942771063
+    } ],
+    "first_relevant_rank" : 0
+  }, {
+    "expected" : [ "2026-07-14-call-05" ],
+    "query" : "我和对象只有一个小时车程，却总觉得像异地恋，见不到他就特别焦虑。",
+    "id" : "R22",
+    "candidates" : [ {
+      "slugs" : [ ],
+      "filename" : "心理疏导通用框架 - 框架篇.md",
+      "rank" : 1,
+      "score" : 0.6318054730800895
+    }, {
+      "slugs" : [ ],
+      "filename" : "心理疏导通用框架 - 框架篇.md",
+      "rank" : 2,
+      "score" : 0.5559604566924932
+    }, {
+      "slugs" : [ ],
+      "filename" : "咨询案例 - 婚姻篇.md",
+      "rank" : 3,
+      "score" : 0.548438886595569
+    }, {
+      "slugs" : [ ],
+      "filename" : "咨询案例 - 情感篇.md",
+      "rank" : 4,
+      "score" : 0.548438886595569
+    } ],
+    "first_relevant_rank" : 0
+  }, {
+    "expected" : [ "2026-07-14-call-06" ],
+    "query" : "我替前夫还了八十万网贷又遭裁员，还带着孩子，要留北京还是接受广州的工作？",
+    "id" : "R23",
+    "candidates" : [ {
+      "slugs" : [ "2026-04-13-call-10" ],
+      "filename" : "咨询案例 - 职场篇.md",
+      "rank" : 1,
+      "score" : 0.6495017116222991
+    }, {
+      "slugs" : [ "2026-03-12-call-02" ],
+      "filename" : "咨询案例 - 职场篇.md",
+      "rank" : 2,
+      "score" : 0.6135945083007835
+    }, {
+      "slugs" : [ "2026-04-29-call-03" ],
+      "filename" : "咨询案例 - 婚姻篇.md",
+      "rank" : 3,
+      "score" : 0.6135621387909747
+    }, {
+      "slugs" : [ "2026-05-27-call-02" ],
+      "filename" : "咨询案例 - 职场篇.md",
+      "rank" : 4,
+      "score" : 0.6126395017780529
+    } ],
+    "first_relevant_rank" : 0
+  }, {
+    "expected" : [ "2026-07-14-call-08" ],
+    "query" : "我带自闭症孩子去欧洲，丈夫却一直监控我，还怀疑我，感觉没人理解。",
+    "id" : "R24",
+    "candidates" : [ {
+      "slugs" : [ ],
+      "filename" : "心理疏导通用框架 - 框架篇.md",
+      "rank" : 1,
+      "score" : 0.5876612300292413
+    }, {
+      "slugs" : [ ],
+      "filename" : "咨询案例 - 成长篇.md",
+      "rank" : 2,
+      "score" : 0.5872323521606757
+    }, {
+      "slugs" : [ ],
+      "filename" : "咨询案例 - 其他篇.md",
+      "rank" : 3,
+      "score" : 0.5856396597467288
+    }, {
+      "slugs" : [ ],
+      "filename" : "咨询案例 - 婚姻篇.md",
+      "rank" : 4,
+      "score" : 0.5841716539681924
+    } ],
+    "first_relevant_rank" : 0
+  }, {
+    "expected" : [ "2026-07-14-call-09" ],
+    "query" : "我做IT，和别人相处后总是不停复盘自己的话，反复道歉，怎么改变？",
+    "id" : "R25",
+    "candidates" : [ {
+      "slugs" : [ ],
+      "filename" : "咨询案例 - 心理篇.md",
+      "rank" : 1,
+      "score" : 0.6300376747426873
+    }, {
+      "slugs" : [ ],
+      "filename" : "咨询案例 - 婚姻篇.md",
+      "rank" : 2,
+      "score" : 0.6264910617441833
+    }, {
+      "slugs" : [ ],
+      "filename" : "咨询案例 - 情感篇.md",
+      "rank" : 3,
+      "score" : 0.6264910617441833
+    }, {
+      "slugs" : [ ],
+      "filename" : "咨询案例 - 成长篇.md",
+      "rank" : 4,
+      "score" : 0.6264031892242756
+    } ],
+    "first_relevant_rank" : 0
+  }, {
+    "expected" : [ ],
+    "query" : "请给出快速傅里叶变换的蝶形运算公式。",
+    "id" : "N01",
+    "candidates" : [ {
+      "slugs" : [ ],
+      "filename" : "咨询案例 - 父母篇.md",
+      "rank" : 1,
+      "score" : 0.6847034872635046
+    }, {
+      "slugs" : [ ],
+      "filename" : "咨询案例 - 学业篇.md",
+      "rank" : 2,
+      "score" : 0.6825950152145484
+    }, {
+      "slugs" : [ ],
+      "filename" : "咨询案例 - 职场篇.md",
+      "rank" : 3,
+      "score" : 0.6814275760858213
+    }, {
+      "slugs" : [ ],
+      "filename" : "咨询案例 - 其他篇.md",
+      "rank" : 4,
+      "score" : 0.6787163017043751
+    } ],
+    "first_relevant_rank" : 0
+  }, {
+    "expected" : [ ],
+    "query" : "如何配置 PostgreSQL 物理流复制和 WAL 归档？",
+    "id" : "N02",
+    "candidates" : [ {
+      "slugs" : [ ],
+      "filename" : "心理疏导通用框架 - 框架篇.md",
+      "rank" : 1,
+      "score" : 0.4749831998762642
+    }, {
+      "slugs" : [ ],
+      "filename" : "咨询案例 - 父母篇.md",
+      "rank" : 2,
+      "score" : 0.4566597977461872
+    }, {
+      "slugs" : [ ],
+      "filename" : "咨询案例 - 心理篇.md",
+      "rank" : 3,
+      "score" : 0.45300210855874773
+    }, {
+      "slugs" : [ ],
+      "filename" : "咨询案例 - 子女篇.md",
+      "rank" : 4,
+      "score" : 0.4515042699590684
+    } ],
+    "first_relevant_rank" : 0
+  }, {
+    "expected" : [ ],
+    "query" : "帮我查询今天新加坡到上海的航班价格。",
+    "id" : "N03",
+    "candidates" : [ {
+      "slugs" : [ ],
+      "filename" : "咨询案例 - 心理篇.md",
+      "rank" : 1,
+      "score" : 0.6155666279778532
+    }, {
+      "slugs" : [ ],
+      "filename" : "咨询案例 - 婚姻篇.md",
+      "rank" : 2,
+      "score" : 0.6150530079705782
+    }, {
+      "slugs" : [ ],
+      "filename" : "咨询案例 - 情感篇.md",
+      "rank" : 3,
+      "score" : 0.6150530079705782
+    }, {
+      "slugs" : [ ],
+      "filename" : "咨询案例 - 成长篇.md",
+      "rank" : 4,
+      "score" : 0.6133215311708217
+    } ],
+    "first_relevant_rank" : 0
+  }, {
+    "expected" : [ ],
+    "query" : "求矩阵的特征多项式和 Jordan 标准形。",
+    "id" : "N04",
+    "candidates" : [ {
+      "slugs" : [ ],
+      "filename" : "咨询案例 - 成长篇.md",
+      "rank" : 1,
+      "score" : 0.5717539345012648
+    }, {
+      "slugs" : [ ],
+      "filename" : "咨询案例 - 婚姻篇.md",
+      "rank" : 2,
+      "score" : 0.5674475411917532
+    }, {
+      "slugs" : [ ],
+      "filename" : "咨询案例 - 情感篇.md",
+      "rank" : 3,
+      "score" : 0.5674475411917532
+    }, {
+      "slugs" : [ ],
+      "filename" : "咨询案例 - 学业篇.md",
+      "rank" : 4,
+      "score" : 0.5643637279521844
+    } ],
+    "first_relevant_rank" : 0
+  }, {
+    "expected" : [ ],
+    "query" : "生成一份 nginx 静态文件缓存配置。",
+    "id" : "N05",
+    "candidates" : [ {
+      "slugs" : [ ],
+      "filename" : "咨询案例 - 成长篇.md",
+      "rank" : 1,
+      "score" : 0.6441137162725712
+    }, {
+      "slugs" : [ ],
+      "filename" : "咨询案例 - 心理篇.md",
+      "rank" : 2,
+      "score" : 0.6403912653947503
+    }, {
+      "slugs" : [ ],
+      "filename" : "咨询案例 - 婚姻篇.md",
+      "rank" : 3,
+      "score" : 0.6402757612352306
+    }, {
+      "slugs" : [ ],
+      "filename" : "咨询案例 - 情感篇.md",
+      "rank" : 4,
+      "score" : 0.6402757612352306
+    } ],
+    "first_relevant_rank" : 0
+  } ]
+}

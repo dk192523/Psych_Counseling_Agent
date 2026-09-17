@@ -1,0 +1,43 @@
+{
+  "recorded_at": "2026-09-17T08:11:55.186911+00:00",
+  "scope": "working tree based on f63f5ea; local verification, no remote CI or production deployment",
+  "java": {
+    "tests": 321,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 7,
+    "passed": 314,
+    "postgres_transaction_tests": 8,
+    "database": "isolated PostgreSQL 16.15; stopped after tests"
+  },
+  "python": {
+    "passed": 41,
+    "worker": 30,
+    "eval_harness": 11
+  },
+  "frontend": {
+    "passed": 13,
+    "eslint": "passed",
+    "vite_build": "passed",
+    "docker_build": "passed",
+    "npm_audit_known_vulnerabilities": 0
+  },
+  "nginx": {
+    "config_test": "passed",
+    "http_header_checks": [
+      "200 homepage",
+      "502 unavailable-backend error"
+    ]
+  },
+  "retrieval": {
+    "artifact": "rag_baseline.json",
+    "separately_executed": true,
+    "clinical_or_full_rag_acceptance": false
+  },
+  "not_executed": [
+    "6 original live LLM/pgvector integration tests",
+    "paid conversation/judge evaluation",
+    "production TLS end-to-end acceptance",
+    "GitHub Actions remote run"
+  ]
+}

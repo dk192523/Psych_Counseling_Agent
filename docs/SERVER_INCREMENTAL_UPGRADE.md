@@ -385,8 +385,8 @@ cd "$CURRENT_DIR"
 
 本指南只覆盖本轮审计修复。它不表示以下生产安全事项已经解决：
 
-- CSRF token 全链路尚未启用；
-- 注册默认开放；
+- CSRF 已在本轮启用：必须同时更新后端、前端及自动调用客户端；
+- 生产注册默认关闭；已有环境变量可覆盖默认值，需核对；
 - 进程内限流与会话注册表不支持多副本共享；
 - 真实咨询数据仍必须使用 HTTPS，不能长期通过公网 HTTP 提供服务。
 
@@ -459,3 +459,36 @@ cd "$CURRENT_DIR"
 - **前端**：导出当前会话为 .md（纯前端）；`connectSSE` 错误携带 HTTP 状态码。
 - **评估沉淀**：新增 `docs/IMPROVEMENT_BACKLOG.md`（安全加固包/可观测性/RAG 升级/数据治理/单副本检查单）。
 - **升级注意**：重建 backend 镜像；`app.chat-rate-limit.*` 有默认值，无需改 `.env`。
+
+## 2026-09-17 修复版升级补充
+
+前面按日期记录的 doFinally、7 用例等内容是历史实现，不再描述当前版本。当前实现和测试证据以 `REPAIR_REPORT.md` 为准。
+
+1. 备份数据库与环境配置，确认单副本；停旧实例后再起新实例，不能滚动重叠启动。
+2. 用 `mvnw clean package` 构建，避免旧名称知识库资源残留在 target/classes。前端需要 Node 24.15+（本轮 24.19 验证），执行 npm ci、lint、test、build。
+3. 首次启动自动新建 psych_chat_turn 和索引，不改写现有正文。回滚旧代码前先停止新实例；旧版本忽略新表，但不再具备新的幂等及安全保障。
+4. 公网 `.env` 使用 SESSION_COOKIE_SECURE=true、APP_REGISTRATION_ENABLED=false，HTTPS 反代后环回绑定；本地 HTTP 启动器显式使用 false/true。不要覆盖私有 `.env`。
+5. 验收 GET /api/auth/csrf、登录后 token 轮换、关闭注册、会话读写、停止、同键重放、ADMIN metrics；抓取首页和静态资源确认安全响应头。外部脚本也必须接入 CSRF。
+6. 本轮没有部署现有运行栈、没有执行真实聊天模型 E2E；上线验收仍须验证真实 Worker/LLM 以及正式域名 TLS/Cookie 行为。
+
+## 12. 第六轮增量（2026-09-17：轮次安全链路 + CSRF + 工程化）部署约束
+
+本轮（见 docs/REPAIR_REPORT.md）引入了会改变部署方式的约束，升级/回滚前必读：
+
+1. **前后端必须同版本部署**：CSRF 已启用（session 绑定 token，登录后轮换）。旧前端 + 新后端
+   的组合会因缺 `X-CSRF-TOKEN` 被拒（403 CSRF_INVALID）。整包换版（同时替换 frontend 与
+   backend 镜像）是唯一安全顺序。
+2. **新增表 `psych_chat_turn`**（局部唯一索引实现"每会话仅一个生成中轮次"+ request_hash 幂等）。
+   DDL 由 initializeSchema 幂等追加，无需手工 SQL；**回滚须先停新实例**——旧实例不认识新表，
+   但新实例写入的 turn 行会残留（无害但应知）。
+3. **必须 clean 构建**：`target/` 残留曾导致知识库 1654 个文档重复加载（启动时长翻倍）。
+   本地构建用 `mvn clean package`，容器构建不受影响（多阶段构建自带干净上下文）。
+4. **CI 首跑**：`.github/workflows/ci.yml` 为本轮新增，push 后首次实际运行。Java job 起
+   postgres:16 service 并注入 `TEST_DATABASE_URL`——8 个真实数据库事务测试只在有该变量时
+   执行（无变量时计入 skipped，属预期）；本地复现方式见 `ChatTurnPostgresTest` 类注释。
+5. **SafetyOutputGuard 权衡记录**：PASSIVE/IMMINENT 轮次的回复改为整体缓冲、检查后一次性
+   下发（修复"危险文本先输出后检查"）——代价是高风险轮次无流式打字效果。这是安全优先的
+   刻意选择，不要为恢复流式而回退缓冲。
+6. **应用层安全头**（本轮补齐）：Spring Security `headers()` 现输出 nosniff / DENY /
+   Referrer-Policy / HSTS，与 nginx `security-headers.conf` 双层兜底；CSP 仍未启用（v-html
+   与内联场景需单独设计），上 TLS 后建议一并评估。

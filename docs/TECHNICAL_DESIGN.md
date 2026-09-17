@@ -39,9 +39,9 @@ Psych_Counseling_Agent/
 │   │   ├── orchestration/             AgentRequestContext(deadline/requestId)、ExecutionContextScope(ScopedValue)
 │   │   ├── history/                   ConversationHistoryService(建表/读写/守卫/墓碑/CAS) + 4 个 record + MemoryStats
 │   │   ├── memory/                    ConversationMemoryService(整合编排/召回)、DefaultCounselingMemoryAgent(双引擎)、SafetyTerms、MemoryProperties、DigestAdvancedEvent
-│   │   ├── rag/                       PgVectorVectorStoreConfig(版本化灌库)、CounselingDocumentLoader、TranscriptSearchService、TranscriptProvenanceAdvisor、QueryRewriter；MyKeywordEnricher/MyTokenTextSplitter 为遗留脚手架(不在活跃链路)
+│   │   ├── rag/                       PgVectorVectorStoreConfig(版本化灌库)、CounselingDocumentLoader、TranscriptSearchService、TranscriptProvenanceAdvisor、QueryRewriter；未使用的增强器/切分器脚手架已删除
 │   │   ├── integration/aiworker/      AiWorkerClient(熔断/bulkhead/envelope)、AiWorkerContracts(record 合约)、AiWorkerProperties、AiWorkerHealthIndicator
-│   │   ├── advisor/                   MyLoggerAdvisor(活跃，仅记 requestId)、ReReadingAdvisor(注释停用)
+│   │   ├── advisor/                   MyLoggerAdvisor(状态日志与 usage 指标)
 │   │   ├── tools/                     TranscriptLookupTool(按 slug 溯源)、DeepSeekWebSearchTool(联网核验)
 │   │   ├── security/                  SecurityConfig、CurrentUser、ActiveSessionService、dto/(ApiError 等 13 个 record)
 │   │   ├── account/                   UserAccountService、UserRepository、AdminBootstrap、AuthValidation、LoginAttemptService、RegisterThrottleService、AccountSecurityBeans、PsychUser、SessionKillPort
@@ -205,13 +205,14 @@ Psych_Counseling_Agent/
 | 变量 | 默认 | 作用 |
 |---|---|---|
 | `SESSION_TIMEOUT` | `24h` | 登录会话超时（Spring Duration 语法） |
-| `SESSION_COOKIE_SECURE` | `false` | Cookie `Secure` 位；HTTP 部署必须 false，TLS 上线后置 true（application.yml + compose 透传） |
+| `SESSION_COOKIE_SECURE` | prod/compose 为 `true`，本地示例为 `false` | HTTPS 使用 Secure Cookie；本地 HTTP 显式关闭 |
+| `APP_REGISTRATION_ENABLED` | prod/compose 为 `false`，本地为 `true` | 关闭时注册端点返回 403，前端隐藏注册入口 |
 | `ADMIN_INITIAL_PASSWORD` | 空 | 初始超管口令；空则首启随机 12 位并 WARN 日志输出一次 |
 | `APP_CORS_ALLOWED_ORIGIN_PATTERNS` | `http://localhost:3001,http://127.0.0.1:3001`（compose 缺省透传**空值**） | CORS 显式 Origin 白名单，严禁 `*`；空即不注册任何 CORS 映射（`config/CorsConfig`） |
 | `APP_DOCS_ENABLED` | `true` | SecurityConfig 文档白名单开关（prod profile 强制 false） |
 | `SERVER_PORT` | `8123` | 后端端口（compose 内固定 8123） |
 | `COUNSELING_TRANSCRIPT_DIRECTORY` | `../counseling-kb/raw`（容器内两侧均 `/data/transcripts`） | raw 逐字稿目录；Java `app.rag.transcript-directory` 与 Worker `config.py` 共用此变量 |
-| `FRONTEND_PORT` / `FRONTEND_BIND_ADDRESS` | `3001` / `127.0.0.1` | 前端发布端口/绑定地址；服务器部署用 `0.0.0.0`（deploy 模板用 3004） |
+| `FRONTEND_PORT` / `FRONTEND_BIND_ADDRESS` | `3001` / `127.0.0.1` | 前端发布端口/绑定地址；服务器示例用 `127.0.0.1:3004`，由宿主 HTTPS 反代公开 |
 | `DEV_BIND_ADDRESS` / `POSTGRES_PORT` / `BACKEND_PORT` / `AI_WORKER_PORT` | `127.0.0.1` / `5432` / `8123` / `8001` | dev overlay 调试端口 |
 | `COMPOSE_PROJECT_NAME` | `psych-counseling-agent` | Compose 项目名（隔离多栈的关键） |
 | `LOG_MAX_SIZE` / `LOG_MAX_FILE` | `10m` / `5` | 容器日志轮转 |
@@ -226,34 +227,26 @@ Psych_Counseling_Agent/
 
 ## §4 请求生命周期
 
-### 4.1 快速路径（端到端）
+### 4.1 快速路径（2026-09-17）
 
 ```text
-Browser POST /api/ai/counseling/chat/sse  body={message, chatId, deepThinking:false, clientMsgId?}
- → AiController.doChatWithCounselingSSE(ChatRequest)
-     · requireConversationOwner(chatId)：CurrentUser.requireUserId() + ConversationHistoryService.getConversation(chatId, ownerId)
-       —— 跨用户/不存在同形 404，在任何下游之前完成（ownerId 在请求线程取出，见 §4.4）
- → CounselingTurnPipeline.run(CounselingTurnRequest)          ← 快速/深度两条链路唯一汇合点
-     · prepareConversationTurn(ownerId, chatId, message, clientMsgId)：归档每轮恰好一次
-       = hydrateConversation(chatId) + ConversationHistoryService.appendUserMessage(ownerId, …, clientMsgId)
-       （clientMsgId 唯一索引 + ON CONFLICT DO NOTHING：SSE 中断重发同一幂等键不重复归档）
- → CounselingApp.doChatWithRagByStreamPrepared(ownerId, message, chatId)   ← 深度回退也复用此方法（Prepared 变体不二次保存用户消息）
-     · system = SYSTEM_PROMPT + "\n\n" + digestForContext(chatId)（框架语 + 最新 digest，每轮从库读，幂等零残留）
-     · advisor 链：MessageChatMemoryAdvisor（近期原文窗口 ≤30）+ MyLoggerAdvisor（order 0，仅记 requestId）
-                  + QuestionAnswerAdvisor（order 0，buildRagAdvisor）+ TranscriptProvenanceAdvisor（order 1）
-     · toolCallbacks：lookupTranscript + searchWeb
-     · stream().content() → doOnNext 累积 → doOnComplete persistAssistantMessage → concatWithValues("[DONE]")
- → persistAssistantMessage
-     · appendAssistantMessage 返回 0（流式期间会话被并发删除）→ 记 info，跳过归档与整合
-     · ConversationUnavailableException（生成期间删除/归属变化）→ 跳过归档，不复活或越权写入
-     · 其他持久化异常向上传播并使 SSE 失败，禁止客户端收到 done 后刷新丢回答的虚假成功
-     · 成功后 ConversationMemoryService.onTurnArchived(chatId)（异步，§5.1；触发失败只记日志）
- → Pipeline 把 "[DONE]" 映射为 done 事件、其余为 delta 事件（CounselingStreamEvent），控制器封 ServerSentEvent<ChatStreamEvent>
+GET /api/auth/csrf → 获取会话绑定 token
+POST /api/ai/counseling/chat/sse + X-CSRF-TOKEN
+ → SecurityFilterChain：CSRF、认证
+ → AiController：输入校验、owner 校验、用户限流
+ → ChatTurnService.begin：会话行锁、请求哈希、同键重放或 RUNNING 准入
+ → CounselingTurnPipeline：风险识别、保存用户消息、重建模型上下文
+ → IMMINENT 模板，或快速 RAG / 深度 executor
+ → SafetyOutputGuard：高风险先检查完整文本，普通轮次继续流式
+ → ChatTurnService.finish：回答和终态原子提交
+ → 发送 done；异步触发记忆整合
 ```
 
-**hydration（`CounselingApp.hydrateConversation`）**：`synchronized (hydratedConversationIds)` 内判定 `rehydrate = !hydratedConversationIds.contains(chatId) || dirtyDigestIds.remove(chatId)`；需要时 `chatMemory.clear` 后从库回填最近 `context-window-messages`（默认 30）条原文。digest 不走水合——注入已解耦为每轮 system prompt，天然看到最新摘要；`DigestAdvancedEvent`（整合剪枝后发布）经 `@EventListener onDigestAdvanced` 标脏，下一轮丢弃旧窗口重建，避免进程内模型永久看着已剪枝的原文。
+取消/异常时尽量保存已发出的部分；写库失败返回 error，不能冒充 done。删除会话后的保存会失败，不复活父记录。同键重放不调用模型，部分回答返回 partial 并提示用户发送新消息继续。
 
-**为什么流式链路不做 query rewrite**：`QueryRewriter.doQueryRewrite`（Spring AI `RewriteQueryTransformer`）是一次阻塞 LLM 前置调用，放在首字路径上直接抬高 TTFB。因此只有同步接口 `POST /api/ai/counseling/chat/sync → CounselingApp.doChatWithRag` 做重写，并以重写文本同时作为 user 消息与 `TranscriptProvenanceAdvisor.ORIGINAL_QUERY`（advisor 参数键 `"transcript_original_query"`）；流式链路直接把原始 message 传给 `ORIGINAL_QUERY`。
+每个准入轮次从数据库重建近期原文窗口，排除当前用户消息（由 MessageChatMemoryAdvisor 加入），不再使用 hydratedConversationIds/dirtyDigestIds。digest 仍由每轮 system prompt 读取。
+
+同步 HTTP 接口也收集同一 pipeline，因此同样保留 deepThinking、风险拦截和幂等行为；不再通过旧 doChatWithRag 方法单独 query rewrite。旧 Java 方法保留供内部/测试调用，不是 HTTP 入口。
 
 ### 4.1b 风险分级与危机响应（内核 v2）
 
@@ -266,10 +259,7 @@ Browser POST /api/ai/counseling/chat/sse  body={message, chatId, deepThinking:fa
 - **DISTRESS**（撑不住/崩溃/好累…）——仅注入"以反映与陪伴为主、不提问"的姿态约束
   （与 worker `_DISTRESS_MARKERS` 同源，驱动 response_mode=listen）。
 
-**输出侧检查**（`app/SafetyOutputGuard`，tier≥PASSIVE 时武装）：累积回复后校验
-①禁忌应和（"尊重你的决定"等 7 模式）②资源缺失（无 热线/120/110/12356/急救 标记）——
-命中即在流尾 concat 一条温和的求助资源 delta（fallback=true），done 恒为末事件。
-不做 LLM 复核：误报代价是多一段资源提醒，clinically 可接受。
+**输出侧检查**（`app/SafetyOutputGuard`，tier≥PASSIVE）：先缓冲文本；危险应和命中时替换为固定资源文本，资源缺失则补充后输出。原始危险文本不会先发给客户端；检查后的内容统一归档。fallback 表示链路降级，不用于表示安全检查。规则存在误报和漏报，未做临床安全认证。
 
 **记忆回访**（`memory/MemoryFollowUp`）：距上一轮 ≥6h 且 digest「## 待确认问题」段有具体事项时，
 注入回访指令（只回访一个、语气轻、不接就放下）；快速模式在回访轮额外做一次情景召回
@@ -392,7 +382,7 @@ consolidateIfNeeded(chatId):                       // 跑在 agentVirtualThreadE
               ? 0                                    // 增量：只推进水位，不删原文
               : min(evictionBatch.last.id, coveredUntil)   // 淘汰：先整合后删除，未覆盖永不删
     historyService.replaceMemoryAndPrune(chatId, digest, coveredUntil, coveredCount, pruneUpTo)
-    publish(DigestAdvancedEvent(chatId))             // → CounselingApp 标脏，下轮重水合
+    publish(DigestAdvancedEvent(chatId))             // 事件保留；CounselingApp 现每轮主动重建窗口
   finally: lock.unlock()
 ```
 
@@ -443,7 +433,7 @@ fitDigest(body, safetySection, maxChars):
 - 2 个间隙模式：`吞[^，。！？\n]{0,6}药`、`吃[^，。！？\n]{0,6}安眠药`
 - 匹配前 `replaceAll("\\s+","")` + 转小写。门控**故意偏向误报**：多一条安全备注或一次稳妥模式回退是廉价的，漏掉危机信号不是。
 
-**异步与事件**：`onTurnArchived(chatId)`（`memory.enabled=false` 时 no-op）提交到 `agentVirtualThreadExecutor`，`consolidateIfNeeded` 内 `tryLock` 非阻塞——LLM 挂起可能持锁数十秒，阻塞排队会堆积卡死线程；整合按设计幂等可重试，在途即跳过。`DigestAdvancedEvent(chatId)` → `CounselingApp.onDigestAdvanced` → `markDigestDirty` → 下一轮 `hydrateConversation` 整体重建窗口。
+**异步与事件**：`onTurnArchived(chatId)`（`memory.enabled=false` 时 no-op）提交到 `agentVirtualThreadExecutor`，`consolidateIfNeeded` 内 `tryLock` 非阻塞——LLM 挂起可能持锁数十秒，阻塞排队会堆积卡死线程；整合按设计幂等可重试，在途即跳过。整合仍发布 `DigestAdvancedEvent`，但模型窗口已改为每轮从库重建，不再依赖事件标脏。
 
 **模型上下文注入顺序**：
 
@@ -633,7 +623,7 @@ tryBeginCheck(username):                    // 单次 ConcurrentHashMap.compute 
 | 入口点 | 未认证 `401 {"error":"UNAUTHORIZED","message":"未登录或会话已过期"}`；无权限 `403 {"error":"FORBIDDEN","message":"无权访问该资源"}`（UTF-8 JSON，不泄露资源存在性） |
 | 会话固定 | `sessionFixation().changeSessionId()` + 手工登录路径 `AuthController.establishSession` 显式 `request.changeSessionId()`（手工认证不经 `SessionManagementFilter` 检测，两条路径共同满足） |
 
-**CSRF 关闭（冻结合约 AUTH-v1，有记录的权衡）**：主咨询流已迁移为 POST + fetch SSE（§8.3），但认证与状态变更接口尚未完成 CSRF token 接线，立即启用会打断登录和流式调用。当前缓解：Cookie 显式 `SameSite=Lax` + 生产 nginx 同源反代 + CORS 显式 Origin 白名单（严禁 `*`）+ 开发 `127.0.0.1` 绑定。不构成公网级防护；路线图：状态变更端点补 CSRF token 后仅豁免无状态健康检查。
+**CSRF 已启用（2026-09-17）**：使用 HttpSessionCsrfTokenRepository 和默认 XOR 掩码处理。GET `/api/auth/csrf` 返回 token/headerName/registrationEnabled；登录、注册、删除、改密与 POST SSE 均需 token。手工认证成功后清除旧 token，前端重新获取。缺失或失效返回 403 `CSRF_INVALID`。SameSite=Lax 和严格 Origin 白名单继续作为额外防护。
 
 **CORS（`config/CorsConfig`）**：项目无 `CorsConfigurationSource` Bean，`SecurityConfig.cors(withDefaults())` 回退到本 `WebMvcConfigurer`。策略是 env 驱动的显式白名单 `APP_CORS_ALLOWED_ORIGIN_PATTERNS`（缺省仅开发前端 3001）；**空白名单即不注册任何 CORS 映射**（compose 生产缺省透传空值）。`allowCredentials(true)` + 显式 patterns；允许方法 `GET/POST/PUT/DELETE/OPTIONS`、允许头 `*`；刻意不设 `exposedHeaders("*")`（凭据模式下按规范被当字面量）。通配 `*` 会把任意 Origin 原样回显 `ACAO` + `ACAC: true`，等于把会话 Cookie 跨域读权限交给浏览器 SameSite 默认值——红线。
 
@@ -946,20 +936,19 @@ SSE delta → markdown-it({html:false, breaks:true, linkify:true, typographer:fa
 
 ## §11 测试与验证
 
-### 11.1 测试矩阵（31 个 Java 类 / 230 例 + 3 个 pytest 文件 / 21 例）
+### 11.1 当前测试矩阵（2026-09-17）
 
-默认 CI 只跑纯单元 + Web 切片；4 个 `@SpringBootTest` 全部被 `@EnabledIfEnvironmentVariable` 门控（`RUN_LIVE_INTEGRATION_TESTS=true` / `RUN_PGVECTOR_INTEGRATION_TESTS=true`），真 LLM/真 pgvector 开销不进常规构建。
+以 Surefire 实际报告为准，不能把 skipped 计为执行通过。新增真实 PostgreSQL 测试使用 `TEST_DATABASE_URL`，覆盖幂等重放、并发准入、事务回滚、跨用户拒绝、删除级联和七天缓存过期。默认 CI 提供独立 PostgreSQL service。
 
-| 域 | 类（例数）与覆盖要点 |
+| 层 | 当前验证 |
 |---|---|
-| memory | `ConversationMemoryServiceTest`（16）：同步执行器替身（`doAnswer` 当场 run）+ 冻结 Instant。**prune 边界三测试**：`incrementalConsolidationAdvancesWatermarkWithoutPruningRaw`（pruneUpTo 恒 0）、`evictionPruneBoundaryNeverExceedsConsolidatedWatermark`（min(20,15)=15）、`evictionWithFullyCoveredGapSkipsLlmButPrunesEvictionBatch`（verify consolidate never）；另有召回消毒四例（worker 伪造片段不含“伪造”二字、非候选 id 丢弃、两种回退）、框架语、disabled no-op。`DefaultCounselingMemoryAgentTest`（12）：安全段逐字重建丢弃 worker 改写、危机词自动打标传契约、软预算爆表救画像、超硬顶不截断、历史安全备注继承、长消息尾部存活（2000 字契约界）、预算钳位 200..3000 |
-| account | `LoginAttemptServiceTest`（32 线程**真并发**：并行爆发准入数严格 = 5）、`RegisterThrottleServiceTest`（双键独立）、`AuthValidationTest`（72 字节上限含 30 汉字 90 字节）、`AdminBootstrapTest`（真 BCrypt；抢注裁决：admin 被非管理员占用 → **绝不收养孤儿**）、`UserAccountServiceTest`（36 例：时序拉平/DISABLED 不计失败只释放名额/改密轮换/批量四码/分页钳位）、`UserRepositoryTest`（SQL 注入探针只作绑定参数；deleteById 墓碑→级联→删行 InOrder） |
-| security | `SecurityFilterChainTest`（17，`@WebMvcTest` + `@Import(真 SecurityConfig)` + 7 个 `@MockitoBean`：白名单/错误码映射/角色门控/passwordHash doesNotExist）、`ActiveSessionServiceTest`（只杀目标用户、重复 sessionId 先摘旧、已失效会话容错）、`ConversationIsolationTest`（9：服务层 argThat 验 SQL owner 过滤 + 控制器层 mockStatic(CurrentUser) 验 404 先于下游）、`CurrentUserTest`、`DtoLeakGuardTest`（反射 record 组件 + Jackson 序列化双扫 6 个出参 DTO）、`AdminUserControllerTest`（self 保护先于副作用） |
-| agent/orchestration | `SpringAiCounselingAgentExecutorTest`（7：真虚拟线程执行器 + block() 收敛；禁用回退/planner 失败回退/四阶段 deep 成功/worker 全权/worker 降级还本地/危机语快通道 5 正 1 负/向量检索超时中断）、`DeepThinkingPropertiesTest`（七种越界逐一拒绝）、`ExecutionContextScopeTest`（绑定不泄漏 + wrap 跨虚拟线程传播） |
-| history/controller | `ConversationHistoryServiceTest`（墓碑零窗口复核、assistant WHERE EXISTS 返回 0 不 upsert 父行、CAS upsert 返 0 不剪枝、recall SQL `(content ILIKE ?) DESC, id DESC`）、`AiControllerTest`（POST body 契约、deep 走 executor、他人会话 sync+SSE 双路径 404、相同消息仍作为独立会话轮次生成） |
-| rag/integration | `AiWorkerClientTest`（10：JDK 内嵌 HttpServer 镜像 worker 契约；UTF-8 中文 body 无损、X-Request-Id 取 body（未绑定 scope 回归）、shared-secret、503/degraded 熔断、envelope 不匹配计失败）、`TranscriptSearchServiceTest`（@TempDir 真 JSON：路径穿越拒绝、≤3 段 ≤420 字、`?t=` 定位）、`TranscriptProvenanceAdvisorTest`、`PgVectorVectorStoreConfigUnitTest`（版本哈希与顺序/随机 id 无关、内容/embedding 变更触发）、`KnowledgeBaseLinkageTest`（810 slug 与文档正文案例编号集合相等，assumeTrue 门控）、`ApplicationYamlTest`（yml 无重复键）、`CounselingDocumentLoaderTest`/`PgVectorVectorStoreConfigTest`/`CounselingAppTest`/`DkAiAgentApplicationTests`（门控集成） |
+| Java | 原行为测试 + Web 安全切片 + 轮次生命周期 + PostgreSQL 事务；完整数字见 REPAIR_REPORT |
+| Python | Worker 30 项 + eval 11 项，本轮全部通过 |
+| 前端 | Vitest 13 项：CSRF/SSE、中文输入法、停止、重试幂等键、会话切换竞态和 HTML 清洗；ESLint、构建通过 |
+| 检索 | RUN_RAG_BASELINE=true 单独启用；835 文档、30 个种子用例，见 eval/RAG_BASELINE.md |
+| 外部服务集成 | 原 6 项真实 LLM/pgvector 测试未执行；不能由 MockMvc 或单独 SQL 测试替代其结论 |
 
-Python：`test_api.py`（FastAPI TestClient 真路由：无 key 降级、auth 401 / request-id 400、extra 字段 422、consolidate 安全段逐字重建 + 继承、recall bm25+rrf 与 keyword 降级序）、`test_ranking.py`（中文词组 + n-gram 并存、RRF 反超）、`test_service.py`（grade 选择校验、RRF 不夹带零命中候选、`_fit_digest` 安全段边界、安全行提取/合并去重）。
+CI 配置位于 `.github/workflows/ci.yml`。本轮完成本地验证，未推送或运行远端 GitHub Actions。
 
 ### 11.2 三管线命令
 
@@ -1030,4 +1019,16 @@ docker ps -a --filter "name=psych-counseling-e2e"
 | 启动器自检 | `PsychCounselorLauncher.exe --self-test` 退出码：0 通过 / 10 项目根异常 / 11 Compose 文件缺失 / 12 Docker CLI 缺失 / 13 Docker Desktop 缺失 / 14 浏览器缺失 / 15 无可用备用端口（3002–3010）/ 16 端口检测矛盾 / 20 其他。API Key 缺失不算自检失败 |
 | 构建注意 | 后端镜像 `mvn -B -DskipTests package`（测试在本地/CI 跑）；换 Spring AI 版本注意 ONNX URL/tokenizer 兼容；raw 挂载路径变化同步 `COUNSELING_TRANSCRIPT_DIRECTORY`；多实例首启会重复灌库（无迁移锁，§5.4） |
 
-**当前风险（如实保留）**：心理消息历史经 GET 兼容端点可进入代理日志（主链路已 POST）；CSRF 关闭（§6.6 路线图）；开放注册无邀请码、限流与会话注册表进程内（不支持多副本）；Worker 默认无密钥（§9-8）；Cookie `Secure` 未开启（HTTP 约束）；知识库公开案例版权/隐私边界待确认；案例与时间戳需人工核对。上线前必须：POST 迁移 + CSRF 重评估、收敛注册入口 + 共享会话存储（Spring Session + Redis）、日志保留与删除 API、TLS + CORS + 强制 `AI_WORKER_SHARED_SECRET`、危机事件人工转介流程、暴露过的 Key 立即轮换。
+**当前风险（2026-09-17）**：正文和长期摘要仍为数据库明文；部署者须落实磁盘/备份加密、访问控制及保留策略。检索种子基线 Recall@4=4%，模型与切分方案需要独立标注集验证。限流、会话和轮次恢复仅支持单副本；规则安全检查不能替代人工评测。代码已移除聊天 GET 入口、启用 CSRF、默认关闭生产注册并开启 Secure Cookie。详见 REPAIR_REPORT。
+
+## 2026-09-17 轮次协议修订
+
+`CounselingTurnPipeline` 是 HTTP 聊天的唯一编排入口，同步接口收集同一事件流。`ChatTurnService` 在开流前锁定所属会话行，持久化 clientMsgId、请求哈希与 RUNNING 状态；同会话只能有一个 RUNNING。相同键但内容或模式不同返回 409，完成请求直接重放，不重复调用模型。
+
+回答与终态在同一数据库事务中提交，提交成功之后才发 done。错误或取消尽量保存已向下游发出的部分；若数据库写入失败，客户端收到 error 而非虚假 done。部分回答不可变，同键重试只重放部分并返回 partial 错误，用户可用新消息继续。没有已生成文本的失败可以同键重试。网络断开并不保证浏览器收到每个已发出的 chunk。
+
+生成硬期限 180 秒，未完成预留 5 分钟后可恢复；启动时清理 RUNNING，因此部署严格限制单副本。重放缓存七天后按小时清理，不删除主历史；删除整个会话通过 FK 级联清除缓存。幂等保障限于缓存保留窗口，客户端不得长期复用消息键。
+
+风险达到 PASSIVE/IMMINENT 时先缓冲并检查完整模型文本，再输出：应和自伤的规则命中会替换文本，缺少资源会补充资源。实际通过检查的文本由 pipeline 统一落库。普通轮次仍流式输出；规则的漏报与误报未被消除。
+
+每轮开始从已提交历史重建模型窗口，剔除当前用户消息，避免重试导致上下文重复；旧的水合脏标记与 doFinally 成功归档入口已删除。可观测性新增请求 ID、轮次数量/时长/归档失败计数及 ChatClient 回复 usage 计数，`/api/actuator/metrics/**` 仅 ADMIN 可访问。尚不等于所有异步日志贯通或全链路账单统计。
