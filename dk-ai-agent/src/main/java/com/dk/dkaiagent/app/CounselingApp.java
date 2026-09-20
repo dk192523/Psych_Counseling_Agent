@@ -332,8 +332,7 @@ public class CounselingApp {
                 // 支持按 slug 溯源逐字稿原文
                 .toolCallbacks(ToolCallbacks.from(transcriptLookupTool, deepSeekWebSearchTool))
                 .stream()
-                .content()
-                .concatWithValues("[DONE]");
+                .content();
     }
 
     /**
@@ -354,8 +353,7 @@ public class CounselingApp {
                 .advisors(spec -> spec.param(ChatMemory.CONVERSATION_ID, chatId))
                 .toolCallbacks(ToolCallbacks.from(transcriptLookupTool, deepSeekWebSearchTool))
                 .stream()
-                .content()
-                .concatWithValues("[DONE]");
+                .content();
     }
 
     /**
@@ -425,7 +423,7 @@ public class CounselingApp {
         // 回合级指令统一注入点：最近 6 条（3 轮问答）同时驱动节奏限速器与安全姿态，
         // 一次小索引查询，不引入任何 LLM 前置调用。安全姿态在节奏约束之后注入，
         // 并带"优先于节奏约束"的显式声明——危机时刻问卷感无关紧要，安全要素不能被稀释。
-        List<Message> recentMessages = conversationHistoryService.getRecentMessages(chatId, 6);
+        List<Message> recentMessages = conversationHistoryService.getRecentMessages(chatId, SafetyDirectives.CONTEXT_MESSAGES);
         String rhythm = RhythmDirectives.build(recentMessages);
         if (!rhythm.isBlank()) {
             prompt.append(rhythm);
@@ -440,6 +438,12 @@ public class CounselingApp {
             prompt.append(followUp);
         }
         return prompt.toString();
+    }
+
+    /** Read durable history after admission/append, so restarts and mode switches retain the same guard window. */
+    public com.dk.dkaiagent.memory.RiskTier outputRiskTier(String chatId) {
+        return SafetyDirectives.outputRiskTier(conversationHistoryService.getRecentMessages(
+                chatId, SafetyDirectives.CONTEXT_MESSAGES));
     }
 
     private void prepareConversation(long ownerId, String chatId, String userMessage) {

@@ -3,7 +3,7 @@ set -Eeuo pipefail
 
 umask 077
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 COMPOSE_DIR="$ROOT_DIR/dk-ai-agent"
 COMPOSE_FILE="$COMPOSE_DIR/docker-compose.yml"
 ENV_FILE="$COMPOSE_DIR/.env"
@@ -28,7 +28,7 @@ die() {
 
 usage() {
   cat <<'EOF'
-Usage: ./manage.sh <command> [service]
+Usage: ./manage.sh <command> [service|backup-path]
 
 Commands:
   check             Validate Docker, .env, corpus, disk and port 3004
@@ -38,7 +38,8 @@ Commands:
   stop              Stop containers; named database/model volumes are retained
   status            Show container and HTTP health status
   logs [service]    Follow the last 200 log lines (backend/frontend/ai-worker/postgres)
-  backup            Create a PostgreSQL custom-format dump under ./backups
+  backup            Stream a PostgreSQL dump into an age-encrypted backup
+  verify-backup <path> Check an encrypted backup without restoring a database
 
 This script never deletes Docker volumes and never kills a process occupying a port.
 EOF
@@ -270,21 +271,209 @@ cmd_logs() {
   fi
 }
 
-cmd_backup() {
-  check_docker
+backup_setting() {
+  if [[ -f "$ENV_FILE" ]]; then
+    env_value "$1"
+  fi
+}
+
+check_backup_directory() {
+  local create="${1:-false}" backup_dir="$ROOT_DIR/backups" root_mode root_owner
+  require_command realpath
+  require_command stat
+  root_mode="$(stat -c '%a' -- "$ROOT_DIR")"
+  root_owner="$(stat -c '%u' -- "$ROOT_DIR")"
+  [[ "$root_owner" == "$EUID" || "$root_owner" == "0" ]] \
+    || die "部署目录必须由当前用户或 root 所有"
+  (( (8#$root_mode & 0022) == 0 )) || die "部署目录不能允许组或其他用户写入"
+
+  [[ ! -L "$backup_dir" ]] || die "备份目录不能是符号链接"
+  if [[ ! -e "$backup_dir" && "$create" == "true" ]]; then
+    mkdir -m 700 -- "$backup_dir"
+  fi
+  [[ -d "$backup_dir" && ! -L "$backup_dir" ]] || die "备份目录不存在或不是实际目录"
+  [[ "$(realpath -e -- "$backup_dir")" == "$backup_dir" ]] || die "备份目录越界"
+  [[ "$(stat -c '%u' -- "$backup_dir")" == "$EUID" ]] || die "备份目录必须由当前用户所有"
+  [[ "$(stat -c '%a' -- "$backup_dir")" == "700" ]] || die "备份目录权限必须为 700"
+}
+
+check_backup_file() {
+  local file="$1"
+  [[ ! -L "$file" && -f "$file" && -s "$file" ]] || die "备份产物缺失、为空或不是普通文件：$file"
+  [[ "$(stat -c '%u' -- "$file")" == "$EUID" ]] || die "备份产物必须由当前用户所有：$file"
+  [[ "$(stat -c '%a' -- "$file")" == "600" ]] || die "备份产物权限必须为 600：$file"
+  [[ "$(stat -c '%h' -- "$file")" == "1" ]] || die "备份产物不能有硬链接：$file"
+}
+
+verify_cipher_backup() {
+  local supplied_file="$1" backup_file backup_name checksum expected_line age_header
+  check_backup_directory
+  require_command sha256sum
+  backup_file="$(realpath -ms -- "$supplied_file")"
+  backup_name="${backup_file##*/}"
+  [[ "${backup_file%/*}" == "$ROOT_DIR/backups" ]] || die "只能校验本部署 backups 目录内的文件"
+  [[ "$backup_name" =~ ^psych-[0-9]{8}-[0-9]{6}\.dump\.age$ ]] || die "备份文件名不符合脚本格式"
+  check_backup_file "$backup_file"
+  [[ "$(realpath -e -- "$backup_file")" == "$backup_file" ]] || die "备份路径包含符号链接或越界"
+  check_backup_file "$backup_file.sha256"
+  check_backup_file "$backup_file.manifest"
+  (( $(stat -c '%s' -- "$backup_file") >= 128 )) || die "密文过小，可能不完整"
+  (( $(stat -c '%s' -- "$backup_file.sha256") <= 256 )) || die "SHA-256 sidecar 大小异常"
+  (( $(stat -c '%s' -- "$backup_file.manifest") <= 4096 )) || die "备份清单大小异常"
+  age_header="$(LC_ALL=C head -c 22 -- "$backup_file")"
+  [[ "$age_header" == 'age-encryption.org/v1' ]] || die "文件没有预期的 age v1 密文头"
+  checksum="$(sha256sum -- "$backup_file")"
+  checksum="${checksum%% *}"
+  expected_line="$checksum  $backup_name"
+  [[ "$(cat -- "$backup_file.sha256")" == "$expected_line" ]] \
+    || die "密文 SHA-256 或 sidecar 文件名校验失败"
+  (( $(stat -c '%s' -- "$backup_file.sha256") == ${#expected_line} + 1 )) \
+    || die "SHA-256 sidecar 必须只包含一行密文哈希和文件名"
+}
+
+prune_backups() {
+  local retention_days="$1" current_file="$2" backup_file backup_name cutoff modified_at
+  check_backup_directory
+  cutoff=$(( $(date '+%s') - retention_days * 86400 ))
+  for backup_file in "$ROOT_DIR/backups"/psych-*.dump.age; do
+    [[ ! -L "$backup_file" && -f "$backup_file" && "$backup_file" != "$current_file" ]] || continue
+    backup_name="${backup_file##*/}"
+    [[ "$backup_name" =~ ^psych-[0-9]{8}-[0-9]{6}\.dump\.age$ ]] || continue
+    modified_at="$(stat -c '%Y' -- "$backup_file")"
+    (( modified_at < cutoff )) || continue
+    # A missing, linked or invalid sidecar means this is not a completed backup.
+    if ! (verify_cipher_backup "$backup_file"); then
+      warn "保留未通过校验的旧产物，需人工检查：$backup_file"
+      continue
+    fi
+    rm -f -- "$backup_file.manifest" "$backup_file.sha256" "$backup_file"
+    log "已清理超过 ${retention_days} 天的备份：$backup_name"
+  done
+}
+
+cmd_backup() (
+  # Traps are confined to this subshell; plaintext only ever travels through pipes.
+  local backup_dir="$ROOT_DIR/backups" backup_file backup_name recipient retention_days age_bin
+  local ciphertext_tmp checksum_tmp manifest_tmp checksum ciphertext_bytes backup_complete=false file
+  local -a temporary_files=() published_files=()
+  cleanup_backup() {
+    local status="$1" path
+    trap - EXIT HUP INT TERM
+    for path in "${temporary_files[@]}"; do
+      rm -f -- "$path" || true
+    done
+    if [[ "$backup_complete" != "true" ]]; then
+      for path in "${published_files[@]}"; do
+        rm -f -- "$path" || true
+      done
+    fi
+    exit "$status"
+  }
+  trap 'cleanup_backup "$?"' EXIT
+  trap 'exit 129' HUP
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+
   require_env_file
-  local backup_dir backup_file
-  backup_dir="$ROOT_DIR/backups"
-  mkdir -p "$backup_dir"
-  backup_file="$backup_dir/psych-$(date '+%Y%m%d-%H%M%S').dump"
+  recipient="$(env_value BACKUP_AGE_RECIPIENT)"
+  retention_days="$(env_value BACKUP_RETENTION_DAYS)"
+  retention_days="${retention_days:-30}"
+  age_bin="${AGE_BIN:-$(backup_setting AGE_BIN)}"
+  age_bin="${age_bin:-age}"
+  [[ "$recipient" =~ ^age1[qpzry9x8gf2tvdw0s3jn54khce6mua7l]{58}$ ]] \
+    || die "BACKUP_AGE_RECIPIENT 必须显式配置为有效的 age X25519 公钥，不能使用占位符"
+  [[ "$retention_days" =~ ^[0-9]{1,4}$ ]] || die "BACKUP_RETENTION_DAYS 必须为 1..3650 的整数"
+  (( 10#$retention_days >= 1 && 10#$retention_days <= 3650 )) \
+    || die "BACKUP_RETENTION_DAYS 必须为 1..3650 的整数"
+  retention_days=$(( 10#$retention_days ))
+  require_command "$age_bin"
+  require_command sha256sum
+  require_command mktemp
+  # Let age validate the recipient's Bech32 checksum before touching PostgreSQL.
+  "$age_bin" -r "$recipient" </dev/null >/dev/null || die "age 无法使用配置的公钥；备份已中止"
+  check_backup_directory true
+  check_docker
+  backup_name="psych-$(date '+%Y%m%d-%H%M%S').dump.age"
+  backup_file="$backup_dir/$backup_name"
+  for file in "$backup_file" "$backup_file.sha256" "$backup_file.manifest"; do
+    [[ ! -e "$file" && ! -L "$file" ]] || die "同秒备份文件已存在，不会覆盖：$file"
+  done
+
+  ciphertext_tmp="$(mktemp "$backup_dir/.psych-backup.XXXXXXXXXX")"
+  temporary_files+=("$ciphertext_tmp")
+  checksum_tmp="$(mktemp "$backup_dir/.psych-backup.XXXXXXXXXX")"
+  temporary_files+=("$checksum_tmp")
+  manifest_tmp="$(mktemp "$backup_dir/.psych-backup.XXXXXXXXXX")"
+  temporary_files+=("$manifest_tmp")
+  chmod 600 -- "$ciphertext_tmp" "$checksum_tmp" "$manifest_tmp"
 
   if ! compose exec -T postgres sh -c \
-    'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc' >"$backup_file"; then
-    rm -f "$backup_file"
-    die "数据库备份失败；确认 postgres 容器处于运行状态。"
+    'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc' \
+    | "$age_bin" -r "$recipient" -o "$ciphertext_tmp"; then
+    die "数据库导出或 age 加密失败；临时产物会清理，不会退回明文备份"
   fi
-  [[ -s "$backup_file" ]] || die "数据库备份文件为空：$backup_file"
-  log "数据库备份完成：$backup_file"
+  [[ -s "$ciphertext_tmp" ]] || die "加密备份文件为空"
+  checksum="$(sha256sum -- "$ciphertext_tmp")"
+  checksum="${checksum%% *}"
+  ciphertext_bytes="$(stat -c '%s' -- "$ciphertext_tmp")"
+  printf '%s  %s\n' "$checksum" "$backup_name" >"$checksum_tmp"
+  {
+    printf 'format=psych-postgresql-age-v1\n'
+    printf 'created_at_utc=%s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+    printf 'backup_file=%s\narchive_format=postgresql-custom\nencryption=age-x25519\n' "$backup_name"
+    printf 'recipient=%s\nciphertext_bytes=%s\nciphertext_sha256=%s\n' "$recipient" "$ciphertext_bytes" "$checksum"
+    printf 'retention_days=%s\n' "$retention_days"
+  } >"$manifest_tmp"
+  chmod 600 -- "$ciphertext_tmp" "$checksum_tmp" "$manifest_tmp"
+  check_backup_directory
+
+  # GNU mv -nT never replaces an existing path, including a concurrent same-second backup.
+  mv -nT -- "$ciphertext_tmp" "$backup_file"
+  [[ ! -e "$ciphertext_tmp" ]] || die "同秒备份文件已存在，不会覆盖"
+  published_files+=("$backup_file")
+  mv -nT -- "$checksum_tmp" "$backup_file.sha256"
+  [[ ! -e "$checksum_tmp" ]] || die "SHA-256 sidecar 已存在，不会覆盖"
+  published_files+=("$backup_file.sha256")
+  mv -nT -- "$manifest_tmp" "$backup_file.manifest"
+  [[ ! -e "$manifest_tmp" ]] || die "备份清单已存在，不会覆盖"
+  published_files+=("$backup_file.manifest")
+  verify_cipher_backup "$backup_file"
+  backup_complete=true
+  log "加密备份已生成并通过密文校验：$backup_file"
+  prune_backups "$retention_days" "$backup_file"
+)
+
+cmd_verify_backup() {
+  (( $# == 2 )) || die "用法：./manage.sh verify-backup <path>"
+  local backup_file identity_file age_bin
+  verify_cipher_backup "$2"
+  backup_file="$(realpath -e -- "$2")"
+  identity_file="${BACKUP_AGE_IDENTITY_FILE:-$(backup_setting BACKUP_AGE_IDENTITY_FILE)}"
+  age_bin="${AGE_BIN:-$(backup_setting AGE_BIN)}"
+  age_bin="${age_bin:-age}"
+  if [[ -z "$identity_file" ]]; then
+    log "密文路径、权限、大小、SHA-256 和 age 文件头校验通过；未配置私钥，未验证解密和恢复"
+    return
+  fi
+  require_command "$age_bin"
+  require_command pg_restore
+  [[ ! -L "$identity_file" && -f "$identity_file" && -s "$identity_file" && -r "$identity_file" ]] \
+    || die "BACKUP_AGE_IDENTITY_FILE 必须指向可读、非空、非符号链接的私钥文件"
+  [[ "$(stat -c '%u' -- "$identity_file")" == "$EUID" ]] || die "私钥文件必须由当前用户所有"
+  [[ "$(stat -c '%a' -- "$identity_file")" == "600" || "$(stat -c '%a' -- "$identity_file")" == "400" ]] \
+    || die "私钥文件权限必须为 600 或 400"
+  [[ "$(stat -c '%h' -- "$identity_file")" == "1" ]] || die "私钥文件不能有硬链接"
+  if ! "$age_bin" --decrypt -i "$identity_file" "$backup_file" | {
+    # Drain the decrypted stream even if pg_restore stops after reading its TOC.
+    # This lets age authenticate the complete payload without writing plaintext.
+    local list_status=0
+    pg_restore --list >/dev/null || list_status=$?
+    cat >/dev/null || exit 1
+    exit "$list_status"
+  }; then
+    die "解密或 PostgreSQL 归档目录校验失败；未连接或恢复任何数据库"
+  fi
+  log "密文、完整解密流和 pg_restore --list 校验通过；未连接数据库，仍需独立恢复演练"
 }
 
 command_name="${1:-}"
@@ -297,6 +486,7 @@ case "$command_name" in
   status) cmd_status ;;
   logs) cmd_logs "$@" ;;
   backup) cmd_backup ;;
+  verify-backup) cmd_verify_backup "$@" ;;
   -h|--help|help|"") usage ;;
   *) usage; die "未知命令：$command_name" ;;
 esac

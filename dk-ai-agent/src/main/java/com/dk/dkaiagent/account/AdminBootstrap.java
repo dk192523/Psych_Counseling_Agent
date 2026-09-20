@@ -9,8 +9,8 @@ import org.springframework.stereotype.Component;
 
 /**
  * 初始超管引导（冻结合约 AUTH-v1）：无任何 ADMIN 时创建 admin。
- * 口令取 env ADMIN_INITIAL_PASSWORD；未设置则 SecureRandom 生成 12 位字母数字，
- * BCrypt 落库并 WARN 日志输出一次。口令绝不写入文件/异常/接口返回。
+ * 口令必须取 env ADMIN_INITIAL_PASSWORD；无管理员且未配置时阻止启动。
+ * BCrypt 落库，日志仅记录创建成功及口令来源，绝不输出口令或哈希。
  * 随后把无主历史会话归属到超管（幂等，每次启动只影响 owner_id IS NULL 的行）。
  *
  * 时机：@PostConstruct 处于 refresh() 的 finishBeanFactoryInitialization 阶段——此时依赖注入
@@ -24,7 +24,6 @@ import org.springframework.stereotype.Component;
 public class AdminBootstrap {
 
     private static final String ADMIN_USERNAME = "admin";
-    private static final int GENERATED_PASSWORD_LENGTH = 12;
 
     private final UserRepository userRepository;
     private final UserAccountService userAccountService;
@@ -47,13 +46,12 @@ public class AdminBootstrap {
             adoptOrphanConversations();
             return;
         }
-        String initialPassword =
-                configuredInitialPassword == null || configuredInitialPassword.isBlank()
-                        ? userAccountService.generateRandomPassword(GENERATED_PASSWORD_LENGTH)
-                        : configuredInitialPassword;
+        if (configuredInitialPassword == null || configuredInitialPassword.isBlank()) {
+            throw new IllegalStateException("尚无管理员，首次启动必须配置 ADMIN_INITIAL_PASSWORD；未创建初始超管");
+        }
+        String initialPassword = configuredInitialPassword;
         // env 配置口令与注册/改密走同一事实源校验（≥8 位、UTF-8 ≤72 字节）：BCrypt 对超 72 字节
-        // 静默截断，必须在入口显式拒绝。校验失败在启动期抛出（fail-closed），异常消息不含口令本身；
-        // 生成的 12 位字母数字口令恒合规（12 字节，天然满足双边界），不会因此阻断。
+        // 静默截断，必须在入口显式拒绝。校验失败在启动期抛出（fail-closed），异常消息不含口令本身。
         AuthValidation.validatePassword(initialPassword);
         try {
             userRepository.insertUser(ADMIN_USERNAME,
@@ -71,7 +69,7 @@ public class AdminBootstrap {
                     ADMIN_USERNAME);
             return;
         }
-        log.warn("初始超管已创建，用户名 {}，密码 {}（仅显示一次，请尽快修改）", ADMIN_USERNAME, initialPassword);
+        log.info("初始超管已创建，用户名 {}，初始口令来源 ADMIN_INITIAL_PASSWORD", ADMIN_USERNAME);
         adoptOrphanConversations();
     }
 

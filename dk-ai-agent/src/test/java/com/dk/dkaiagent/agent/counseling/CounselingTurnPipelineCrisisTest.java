@@ -42,7 +42,7 @@ class CounselingTurnPipelineCrisisTest {
         pipeline = new CounselingTurnPipeline();
         com.dk.dkaiagent.agent.counseling.PipelineTestSupport.configure(pipeline);
         Mockito.lenient().when(counselingApp.doChatWithRagByStreamPrepared(anyLong(), anyString(), anyString()))
-                .thenReturn(Flux.just("普通回答", "[DONE]"));
+                .thenReturn(Flux.just("普通回答"));
         ReflectionSupport.setField(pipeline, "counselingApp", counselingApp);
         ReflectionSupport.setField(pipeline, "counselingAgentExecutor", executor);
         ReflectionSupport.setField(pipeline, "crisisResponse", new CrisisResponse(new SafetyProperties()));
@@ -90,7 +90,7 @@ class CounselingTurnPipelineCrisisTest {
     void passiveRiskContinuesThroughLlmChainWithGuardArmed() {
         // PASSIVE 不切换链路：照常走 LLM，但输出侧检查已武装（模型应和自伤时补资源）。
         when(counselingApp.doChatWithRagByStreamPrepared(OWNER_ID, "我不想活了", "chat-id"))
-                .thenReturn(Flux.just("尊重你的决定", "[DONE]"));
+                .thenReturn(Flux.just("尊重你的决定"));
 
         List<CounselingStreamEvent> events = pipeline.run(new CounselingTurnPipeline.CounselingTurnRequest(
                 OWNER_ID, "chat-id", "我不想活了", null, false))

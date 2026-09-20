@@ -97,7 +97,7 @@ class AiControllerTest {
     void syncEndpointUsesRagConversation() {
         when(conversationHistoryService.getConversation("chat-id", OWNER_ID))
                 .thenReturn(Optional.of(detail("chat-id")));
-        when(counselingApp.doChatWithRagByStreamPrepared(OWNER_ID, "message", "chat-id")).thenReturn(Flux.just("answer", "[DONE]"));
+        when(counselingApp.doChatWithRagByStreamPrepared(OWNER_ID, "message", "chat-id")).thenReturn(Flux.just("answer"));
 
         String result = controller.doChatWithCounselingSync("message", "chat-id");
 
@@ -132,7 +132,7 @@ class AiControllerTest {
     void sseEndpointPreservesWhitespaceInStructuredEvents() {
         when(conversationHistoryService.getConversation("chat-id", OWNER_ID))
                 .thenReturn(Optional.of(detail("chat-id")));
-        Flux<String> expected = Flux.just("## ", "标题", "\n\n", "- ", "项目", "[DONE]");
+        Flux<String> expected = Flux.just("## ", "标题", "\n\n", "- ", "项目");
         when(counselingApp.doChatWithRagByStreamPrepared(OWNER_ID, "message", "chat-id")).thenReturn(expected);
 
         List<ServerSentEvent<AiController.ChatStreamEvent>> result = controller
@@ -180,7 +180,7 @@ class AiControllerTest {
         when(conversationHistoryService.getConversation("chat-id", OWNER_ID))
                 .thenReturn(Optional.of(detail("chat-id")));
         when(counselingApp.doChatWithRagByStreamPrepared(OWNER_ID, "message", "chat-id"))
-                .thenReturn(Flux.just("answer", "[DONE]"));
+                .thenReturn(Flux.just("answer"));
 
         List<ServerSentEvent<AiController.ChatStreamEvent>> result = controller
                 .doChatWithCounselingSSE(new AiController.ChatRequest("message", "chat-id", false))
@@ -196,7 +196,7 @@ class AiControllerTest {
     void syncRequestUsesBodyContract() {
         when(conversationHistoryService.getConversation("chat-id", OWNER_ID))
                 .thenReturn(Optional.of(detail("chat-id")));
-        when(counselingApp.doChatWithRagByStreamPrepared(OWNER_ID, "message", "chat-id")).thenReturn(Flux.just("answer", "[DONE]"));
+        when(counselingApp.doChatWithRagByStreamPrepared(OWNER_ID, "message", "chat-id")).thenReturn(Flux.just("answer"));
 
         String result = controller.doChatWithCounselingSync(
                 new AiController.ChatRequest("message", "chat-id", false));
@@ -212,7 +212,7 @@ class AiControllerTest {
         when(conversationHistoryService.getConversation("chat-id", OWNER_ID))
                 .thenReturn(Optional.of(detail("chat-id")));
         when(counselingApp.doChatWithRagByStreamPrepared(OWNER_ID, "message", "chat-id"))
-                .thenReturn(Flux.just("answer", "[DONE]"));
+                .thenReturn(Flux.just("answer"));
         when(counselingAgentExecutor.prepareAndAnswer("message", "chat-id", OWNER_ID))
                 .thenReturn(Flux.just(CounselingStreamEvent.done("deep", false)));
 
@@ -330,7 +330,7 @@ class AiControllerTest {
         when(conversationHistoryService.getConversation("chat-id", OWNER_ID))
                 .thenReturn(Optional.of(detail("chat-id")));
         when(counselingApp.doChatWithRagByStreamPrepared(OWNER_ID, "message", "chat-id"))
-                .thenReturn(Flux.just("first", "[DONE]"), Flux.just("second", "[DONE]"));
+                .thenReturn(Flux.just("first"), Flux.just("second"));
 
         List<ServerSentEvent<AiController.ChatStreamEvent>> first = controller
                 .doChatWithCounselingSSE("message", "chat-id").collectList().block();

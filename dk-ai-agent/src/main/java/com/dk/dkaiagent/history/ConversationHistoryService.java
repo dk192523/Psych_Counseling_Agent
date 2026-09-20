@@ -111,7 +111,7 @@ public class ConversationHistoryService {
                 """);
         // 删除墓碑：随 delete() 同事务写入，使聊天流 bootstrap 能区分"从未创建"与"刚被并发删除"，
         // 对已删 id 永久拒绝复活。刻意不加 psych_conversation 的 FK——墓碑正是在会话删除时写入的。
-        // UUID 永不复用，墓碑无需清理（仅容量问题，介意可按 deleted_at 定期清扫）。
+        // UUID 永不复用；墓碑不参与保留期清理，移除墓碑会重新开放旧 id 的 bootstrap 复活路径。
         jdbcTemplate.execute("""
                 CREATE TABLE IF NOT EXISTS psych_conversation_tombstone (
                     conversation_id VARCHAR(64) PRIMARY KEY,

@@ -863,9 +863,8 @@ public class SpringAiCounselingAgentExecutor implements CounselingAgentExecutor 
     }
 
     private Flux<CounselingStreamEvent> mapAnswer(Flux<String> chunks, String mode, boolean fallback) {
-        return chunks.map(chunk -> "[DONE]".equals(chunk)
-                ? done(mode, fallback)
-                : delta(chunk, mode, fallback));
+        return chunks.map(chunk -> delta(chunk, mode, fallback))
+                .concatWithValues(done(mode, fallback));
     }
 
     static boolean requiresImmediateSafetyResponse(String message) {

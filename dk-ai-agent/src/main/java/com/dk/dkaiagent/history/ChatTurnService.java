@@ -1,6 +1,9 @@
 package com.dk.dkaiagent.history;
 
 import jakarta.annotation.PostConstruct;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.DependsOn;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -21,9 +24,18 @@ import java.util.UUID;
 @Service
 @DependsOn("userRepository")
 public class ChatTurnService {
+    private static final Logger log = LoggerFactory.getLogger(ChatTurnService.class);
     private final JdbcTemplate jdbc;
+    private final ReplayRetentionProperties retention;
 
-    public ChatTurnService(JdbcTemplate jdbc) { this.jdbc = jdbc; }
+    public ChatTurnService(JdbcTemplate jdbc) { this(jdbc, new ReplayRetentionProperties()); }
+
+    @Autowired
+    public ChatTurnService(JdbcTemplate jdbc, ReplayRetentionProperties retention) {
+        retention.validate();
+        this.jdbc = jdbc;
+        this.retention = retention;
+    }
 
     @PostConstruct
     public void initializeSchema() {
@@ -51,12 +63,19 @@ public class ChatTurnService {
         public boolean replay() { return !"RUNNING".equals(status); }
     }
 
-    /** Replay data expires after seven days; this does not delete the conversation history.
+    /** Replay data expires after its configured duration (default seven days), independently
+     * of whole-conversation retention. This does not delete conversation history or tombstones.
      * Expiry limits duplication of sensitive answers in the idempotency cache.
      */
     @org.springframework.scheduling.annotation.Scheduled(fixedDelay = 3_600_000, initialDelay = 60_000)
     public void expireReplayCache() {
-        jdbc.update("DELETE FROM psych_chat_turn WHERE status <> 'RUNNING' AND updated_at < CURRENT_TIMESTAMP - INTERVAL '7 days'");
+        retention.validate();
+        long retentionMillis = retention.getReplayRetention().toMillis();
+        int removed = jdbc.update("""
+                DELETE FROM psych_chat_turn WHERE status <> 'RUNNING'
+                  AND updated_at < CURRENT_TIMESTAMP - CAST(? AS DOUBLE PRECISION) * INTERVAL '1 millisecond'
+                """, retentionMillis);
+        log.info("replay_retention retentionMillis={} deleted={}", retentionMillis, removed);
     }
 
     @Transactional

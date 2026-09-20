@@ -37,6 +37,11 @@ services:
       postgres:
         condition: service_healthy
     environment:
+      # 声明必须匹配真实部署；两个自称 single 的进程无法互相发现。
+      # 保留显式空 mode/count，让启动门禁拒绝误配置，不能用 :- 静默回退。
+      APP_DEPLOYMENT_MODE: ${APP_DEPLOYMENT_MODE-single}
+      APP_REPLICA_COUNT: ${APP_REPLICA_COUNT-1}
+      APP_INSTANCE_ID: ${APP_INSTANCE_ID:-}
       SPRING_PROFILES_ACTIVE: prod
       SERVER_PORT: 8123
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-dk_ai_db}
@@ -53,6 +58,10 @@ services:
       DEEPSEEK_WEB_SEARCH_TOOL: ${DEEPSEEK_WEB_SEARCH_TOOL:-web_search_20260209}
       CHAT_HISTORY_MAX_MESSAGES: ${CHAT_HISTORY_MAX_MESSAGES:-1000}
       CHAT_HISTORY_CONTEXT_WINDOW: ${CHAT_HISTORY_CONTEXT_WINDOW:-30}
+      CHAT_HISTORY_REPLAY_RETENTION: ${CHAT_HISTORY_REPLAY_RETENTION:-7d}
+      DATA_RETENTION_APPLY: ${DATA_RETENTION_APPLY:-false}
+      DATA_RETENTION_CONVERSATION_DAYS: ${DATA_RETENTION_CONVERSATION_DAYS:-0}
+      DATA_RETENTION_BATCH_SIZE: ${DATA_RETENTION_BATCH_SIZE:-100}
       CHAT_MEMORY_ENABLED: ${CHAT_MEMORY_ENABLED:-true}
       CHAT_MEMORY_DIGEST_MAX_CHARS: ${CHAT_MEMORY_DIGEST_MAX_CHARS:-1200}
       CHAT_MEMORY_FOLD_THRESHOLD: ${CHAT_MEMORY_FOLD_THRESHOLD:-6}
@@ -83,6 +92,9 @@ services:
       # 必填。`:?` 让缺失在 `docker compose up` 当场报错，而不是拉起一个鉴权失效
       # （旧行为）或反复 RuntimeError 重启（新行为）的 worker——后者要翻容器日志才看得出来。
       AI_WORKER_SHARED_SECRET: ${AI_WORKER_SHARED_SECRET:?set AI_WORKER_SHARED_SECRET in .env (openssl rand -base64 32)}
+      # 生产和开发首次启动、尚无管理员时必填（至少 8 位，UTF-8 不超过 72 字节）。
+      # 保留空值透传，由 AdminBootstrap 按数据库是否已有 ADMIN 校验；:? 会误拦已有管理员的启动。
+      # 初始口令及哈希不写日志；已有管理员时不要求配置，也不会重置密码。
       ADMIN_INITIAL_PASSWORD: ${ADMIN_INITIAL_PASSWORD:-}
       # 生产同源反代无需 CORS：缺省透传空值 → 后端不注册任何跨域放行。
       # 若生产前后端分域，显式设置生产前端 Origin（逗号分隔，严禁 "*"）。

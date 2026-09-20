@@ -115,7 +115,9 @@ public class CounselingTurnPipeline {
                             request.message(), request.chatId(), request.ownerId())
                     : standardAnswer(request.ownerId(), request.message(), request.chatId());
             // 高风险轮次先检查完整输出，再向客户端发送通过检查的文本。
-            return SafetyOutputGuard.guard(events, tier, crisisResponse.supplement());
+            // A neutral follow-up does not disarm checking while risk is still in persisted history.
+            RiskTier guardTier = tier.isSafetyRelevant() ? tier : counselingApp.outputRiskTier(request.chatId());
+            return SafetyOutputGuard.guard(events, guardTier, crisisResponse.supplement());
             });
             // Hard deadline, including continuously arriving tokens; timeout() alone only bounds idle time.
             return source.takeUntilOther(Mono.delay(Duration.ofSeconds(180))
@@ -198,8 +200,7 @@ public class CounselingTurnPipeline {
     /** 标准 RAG 作答（轮次已归档）。delta/done 的字段值与历史 SSE 契约逐字段一致。 */
     private Flux<CounselingStreamEvent> standardAnswer(long ownerId, String message, String chatId) {
         return counselingApp.doChatWithRagByStreamPrepared(ownerId, message, chatId)
-                .map(chunk -> "[DONE]".equals(chunk)
-                        ? CounselingStreamEvent.done("standard", false)
-                        : CounselingStreamEvent.delta(chunk, "standard", false));
+                .map(chunk -> CounselingStreamEvent.delta(chunk, "standard", false))
+                .concatWithValues(CounselingStreamEvent.done("standard", false));
     }
 }

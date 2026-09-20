@@ -119,6 +119,16 @@ public class UserAccountService {
         return userRepository.findById(userId).map(PsychUser::status).orElse(STATUS_DISABLED);
     }
 
+    /** The salted password hash is a credential version; never expose it in a session or DTO. */
+    public String sessionStatus(PsychUser authenticatedUser) {
+        return userRepository.findById(authenticatedUser.id()).map(current -> {
+            if (!STATUS_ACTIVE.equals(current.status())) return STATUS_DISABLED;
+            return java.util.Objects.equals(current.passwordHash(), authenticatedUser.passwordHash())
+                    && java.util.Objects.equals(current.role(), authenticatedUser.role())
+                    ? STATUS_ACTIVE : "CREDENTIALS_CHANGED";
+        }).orElse(STATUS_DISABLED);
+    }
+
     public void changeOwnPassword(long userId, String oldPassword, String newPassword) {
         AuthValidation.validatePassword(newPassword);
         PsychUser user = userRepository.findById(userId).orElseThrow(UserNotFoundException::new);

@@ -16,6 +16,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class SafetyDirectivesTest {
 
+    @Test
+    void outputGuardUsesUserHistoryButNotAssistantQuotes() {
+        assertEquals(RiskTier.PASSIVE, SafetyDirectives.outputRiskTier(List.of(user("我不想活了"), user("嗯"))));
+        assertEquals(RiskTier.NONE, SafetyDirectives.outputRiskTier(List.of(new AssistantMessage("我不想活了"), user("嗯"))));
+        assertEquals(RiskTier.NONE, SafetyDirectives.outputRiskTier(List.of(user("今天很好"), user("嗯"))));
+    }
+
     private Message user(String text) {
         return new UserMessage(text);
     }

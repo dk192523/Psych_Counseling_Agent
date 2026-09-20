@@ -152,15 +152,21 @@ public class AuthController {
         //  (1) 停用线程的枚举发生在本登记之前 → 本会话未被杀，但此处复核查到非 ACTIVE → 自毁；
         //  (2) 枚举发生在登记之后 → 注册表已含本会话，枚举自身可杀，此处复核读到 ACTIVE。
         // 两路互补无空隙，竞态存活的 DISABLED 会话不再可能。
-        String freshStatus = userAccountService.statusOf(user.id());
-        if (!UserAccountService.STATUS_ACTIVE.equals(freshStatus)) {
+        try {
+            // Register before re-reading: a subsequent rotation sees this session, while an
+            // earlier rotation changes the hash and is rejected here. DB failure also fails closed.
+            String freshStatus = userAccountService.sessionStatus(user);
+            if (!UserAccountService.STATUS_ACTIVE.equals(freshStatus)) {
+                throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, freshStatus);
+            }
+        } catch (RuntimeException error) {
             SecurityContextHolder.clearContext();
             try {
                 session.invalidate();
             } catch (IllegalStateException alreadyInvalidated) {
                 // 并发 killSessions 已销毁会话，忽略即安全。
             }
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "DISABLED");
+            throw error;
         }
     }
 

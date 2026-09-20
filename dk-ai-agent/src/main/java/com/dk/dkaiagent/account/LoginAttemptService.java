@@ -9,13 +9,13 @@ import java.util.concurrent.ConcurrentMap;
 /**
  * 进程内登录限流（冻结合约 AUTH-v1）：同一 username 15 分钟内失败 5 次锁定 15 分钟，
  * 登录成功清零。多副本部署下限流是每进程独立的软防护，这是本次有意的权衡。
- * 锁定态与窗口过期态都随访问惰性清理，避免陈旧条目无限堆积。
+ * 无在途请求的过期窗口定期清理；有在途比对时保留计数，避免旧请求结算释放新窗口名额。
  *
  * 并发准入：{@link #tryBeginCheck(String)} 在单个 compute 内完成「锁定/预算判定 + 在途名额预扣」，
  * 使每窗口每进程放行的真实 BCrypt 比对严格 ≤ LOCK_THRESHOLD——堵住旧版「先查 isLocked 后记 recordFailure」
  * 结构下并发爆发波次全部在失败计数落地前通过检查的竞态（100 并发即 100 次真实猜测）。
  * 合约语义保持「5 次真实失败才锁」：在途名额不计失败，经 recordFailure（记失败并释放）/
- * recordSuccess（整窗清零）/ releaseInFlight（仅释放，如 DISABLED 早退与异常兜底）配对归还。
+ * recordSuccess（失败清零，仅归还自身名额）/ releaseInFlight（仅释放）配对归还。
  */
 @Service
 public class LoginAttemptService {
@@ -51,7 +51,8 @@ public class LoginAttemptService {
             if (existing.lockedUntilMillis() > now) {
                 return existing;
             }
-            boolean expired = existing.lockedUntilMillis() > 0 || now - existing.windowStartMillis() > WINDOW_MILLIS;
+            boolean expired = existing.inFlight() == 0 &&
+                    (existing.lockedUntilMillis() > 0 || now - existing.windowStartMillis() > WINDOW_MILLIS);
             int failures = expired ? 0 : existing.failures();
             int inFlight = expired ? 0 : existing.inFlight();
             long windowStart = expired ? now : existing.windowStartMillis();
@@ -75,12 +76,12 @@ public class LoginAttemptService {
             if (existing == null) {
                 return new AttemptWindow(1, 0, now, 0);
             }
-            boolean windowExpired = now - existing.windowStartMillis() > WINDOW_MILLIS
-                    || (existing.lockedUntilMillis() > 0 && existing.lockedUntilMillis() <= now);
+            boolean windowExpired = existing.inFlight() == 0 && (now - existing.windowStartMillis() > WINDOW_MILLIS
+                    || (existing.lockedUntilMillis() > 0 && existing.lockedUntilMillis() <= now));
             int failures = windowExpired ? 1 : existing.failures() + 1;
             long windowStart = windowExpired ? now : existing.windowStartMillis();
-            long lockedUntil = failures >= LOCK_THRESHOLD ? now + LOCK_MILLIS : 0;
-            return new AttemptWindow(failures, 0, windowStart, lockedUntil);
+            long lockedUntil = failures >= LOCK_THRESHOLD ? now + LOCK_MILLIS : existing.lockedUntilMillis();
+            return new AttemptWindow(failures, Math.max(0, existing.inFlight() - 1), windowStart, lockedUntil);
         });
     }
 
@@ -106,7 +107,7 @@ public class LoginAttemptService {
         if (window.lockedUntilMillis() > now) {
             return true;
         }
-        if (window.lockedUntilMillis() > 0 || now - window.windowStartMillis() > WINDOW_MILLIS) {
+        if (window.inFlight() == 0 && (window.lockedUntilMillis() > 0 || now - window.windowStartMillis() > WINDOW_MILLIS)) {
             attempts.remove(username, window);
         }
         return false;
@@ -114,8 +115,18 @@ public class LoginAttemptService {
 
     public void recordSuccess(String username) {
         if (username != null) {
-            // 整窗移除：失败计数与在途名额一并清零。
-            attempts.remove(username);
+            // 登录成功可以清除失败记录，但不能释放其他尚在比对的请求。
+            attempts.computeIfPresent(username, (key, existing) -> existing.inFlight() <= 1 ? null
+                    : new AttemptWindow(0, existing.inFlight() - 1, System.currentTimeMillis(), 0));
         }
+    }
+
+    @org.springframework.scheduling.annotation.Scheduled(fixedDelay = 60_000)
+    public void expireIdleWindows() {
+        long now = System.currentTimeMillis();
+        attempts.forEach((key, window) -> {
+            if (window.inFlight() == 0 && window.lockedUntilMillis() <= now
+                    && now - window.windowStartMillis() > WINDOW_MILLIS) attempts.remove(key, window);
+        });
     }
 }

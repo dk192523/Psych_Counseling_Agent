@@ -61,7 +61,7 @@ class SpringAiCounselingAgentExecutorTest {
         Fixture fixture = new Fixture();
         fixture.properties.setEnabled(false);
         when(fixture.counselingApp.doChatWithRagByStreamPrepared(OWNER_ID, "message", "chat-id"))
-                .thenReturn(Flux.just("answer", "[DONE]"));
+                .thenReturn(Flux.just("answer"));
 
         List<CounselingStreamEvent> events = fixture.executor()
                 .prepareAndAnswer("message", "chat-id", OWNER_ID)
@@ -78,13 +78,25 @@ class SpringAiCounselingAgentExecutorTest {
     }
 
     @Test
+    void fallbackPreservesLiteralCompletionMarker() {
+        Fixture fixture = new Fixture();
+        fixture.properties.setEnabled(false);
+        when(fixture.counselingApp.doChatWithRagByStreamPrepared(OWNER_ID, "message", "chat-id"))
+                .thenReturn(Flux.just("[DONE]", "tail"));
+        var events = fixture.executor().prepareAndAnswer("message", "chat-id", OWNER_ID).collectList().block();
+        assertEquals(List.of("fallback", "delta", "delta", "done"), eventTypes(events));
+        assertEquals("[DONE]", events.get(1).content());
+        assertEquals("tail", events.get(2).content());
+    }
+
+    @Test
     void plannerFailureFallsBackBeforeAnyAnswerDelta() {
         Fixture fixture = new Fixture();
         when(fixture.historyService.getRecentMessages("chat-id", fixture.properties.getHistoryMessages()))
                 .thenReturn(List.of());
         when(fixture.chatModel.call(any(Prompt.class))).thenThrow(new RuntimeException("planner unavailable"));
         when(fixture.counselingApp.doChatWithRagByStreamPrepared(OWNER_ID, "message", "chat-id"))
-                .thenReturn(Flux.just("stable", "[DONE]"));
+                .thenReturn(Flux.just("stable"));
 
         List<CounselingStreamEvent> events = fixture.executor()
                 .prepareAndAnswer("message", "chat-id", OWNER_ID)
@@ -129,7 +141,7 @@ class SpringAiCounselingAgentExecutorTest {
                 .thenReturn(java.util.Optional.empty());
         when(fixture.counselingApp.doChatWithAgentContextByStreamPrepared(
                 eq(OWNER_ID), eq("message"), eq("chat-id"), anyString()))
-                .thenReturn(Flux.just("deep answer", "[DONE]"));
+                .thenReturn(Flux.just("deep answer"));
 
         List<CounselingStreamEvent> events = fixture.executor()
                 .prepareAndAnswer("message", "chat-id", OWNER_ID)
@@ -179,7 +191,7 @@ class SpringAiCounselingAgentExecutorTest {
         when(fixture.vectorStore.similaritySearch(any(SearchRequest.class))).thenReturn(List.of(document));
         when(fixture.counselingApp.doChatWithAgentContextByStreamPrepared(
                 eq(OWNER_ID), eq("message"), eq("chat-id"), anyString()))
-                .thenReturn(Flux.just("worker answer", "[DONE]"));
+                .thenReturn(Flux.just("worker answer"));
 
         List<CounselingStreamEvent> events = fixture.executor()
                 .prepareAndAnswer("message", "chat-id", OWNER_ID)
@@ -210,7 +222,7 @@ class SpringAiCounselingAgentExecutorTest {
                 """));
         when(fixture.counselingApp.doChatWithAgentContextByStreamPrepared(
                 eq(OWNER_ID), eq("message"), eq("chat-id"), anyString()))
-                .thenReturn(Flux.just("java planner answer", "[DONE]"));
+                .thenReturn(Flux.just("java planner answer"));
 
         List<CounselingStreamEvent> events = fixture.executor()
                 .prepareAndAnswer("message", "chat-id", OWNER_ID)
@@ -235,7 +247,7 @@ class SpringAiCounselingAgentExecutorTest {
                         "listen", "这种疲惫持续了多久")));
         when(fixture.counselingApp.doChatWithAgentContextByStreamPrepared(
                 eq(OWNER_ID), eq("message"), eq("chat-id"), anyString()))
-                .thenReturn(Flux.just("strategy answer", "[DONE]"));
+                .thenReturn(Flux.just("strategy answer"));
 
         List<CounselingStreamEvent> events = fixture.executor()
                 .prepareAndAnswer("message", "chat-id", OWNER_ID)
@@ -299,7 +311,7 @@ class SpringAiCounselingAgentExecutorTest {
             return List.of();
         });
         when(fixture.counselingApp.doChatWithRagByStreamPrepared(OWNER_ID, "message", "chat-id"))
-                .thenReturn(Flux.just("fallback answer", "[DONE]"));
+                .thenReturn(Flux.just("fallback answer"));
 
         List<CounselingStreamEvent> events = fixture.executor()
                 .prepareAndAnswer("message", "chat-id", OWNER_ID)

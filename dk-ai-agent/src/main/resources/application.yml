@@ -128,8 +128,15 @@ management:
       show-details: when_authorized
 
 app:
+  deployment:
+    # main 在 Spring 启动前校验环境变量；合并 YAML/命令行后、Bean 初始化前再次复核。
+    # 仅允许单副本，禁止重叠滚动发布；instance-id 仅用于启动观测，不是分布式锁。
+    mode: ${APP_DEPLOYMENT_MODE:single}
+    replica-count: ${APP_REPLICA_COUNT:1}
+    instance-id: ${APP_INSTANCE_ID:}
   admin:
-    # 初始超管口令（compose 透传 ADMIN_INITIAL_PASSWORD）；为空则首次启动随机生成 12 位并仅 WARN 日志输出一次
+    # 生产和开发首次启动、数据库尚无 ADMIN 时必须配置；缺失、空白或不合规时 AdminBootstrap 拒绝启动。
+    # 按数据库是否已有 ADMIN 条件校验：已有管理员时无需配置，也不重置密码；口令及哈希不写日志。
     initial-password: ${ADMIN_INITIAL_PASSWORD:}
   cors:
     # 允许携带凭据跨域的 Origin 显式白名单（逗号分隔，严禁 "*"）。缺省仅开发前端；
@@ -149,15 +156,17 @@ app:
       - ${SAFETY_HOTLINE_2:北京心理危机研究与干预中心 010-82951332}
       - ${SAFETY_HOTLINE_3:急救 120 · 报警 110}
   chat-rate-limit:
-    # A4 成本护栏：单用户滑动窗口限频（进程内实现，多副本时限制放宽为"每副本 N 条"）。
+    # A4 成本护栏：单用户滑动窗口限频（进程内实现；当前门禁仅允许单副本）。
     limit: ${CHAT_RATE_LIMIT:12}
     window-seconds: ${CHAT_RATE_LIMIT_WINDOW_SECONDS:60}
   chat-history:
-    # Database retention and default context hydration are intentionally separate.
-    # Raw-message retention cap; consolidation into the long-term digest must run before eviction.
+    # Memory working-set cap, NOT a time-based business-data retention policy.
+    # Consolidation into the long-term digest must run before raw-message eviction.
     max-messages-per-conversation: ${CHAT_HISTORY_MAX_MESSAGES:1000}
     context-window-messages: ${CHAT_HISTORY_CONTEXT_WINDOW:30}
     title-max-length: ${CHAT_HISTORY_TITLE_MAX_LENGTH:30}
+    # Terminal-turn replay cache only; does not expire conversation history or digests.
+    replay-retention: ${CHAT_HISTORY_REPLAY_RETENTION:7d}
     memory:
       # Long-term digest + episode recall. Any failure degrades silently and never blocks the main answer.
       enabled: ${CHAT_MEMORY_ENABLED:true}
@@ -166,6 +175,11 @@ app:
       recall-candidates: ${CHAT_MEMORY_RECALL_CANDIDATES:30}
       recall-max-episodes: ${CHAT_MEMORY_RECALL_EPISODES:4}
       recall-snippet-chars: ${CHAT_MEMORY_RECALL_SNIPPET_CHARS:300}
+  data-retention:
+    # Whole-conversation expiry is dry-run by default. 0 = no product/legal period configured.
+    apply: ${DATA_RETENTION_APPLY:false}
+    conversation-days: ${DATA_RETENTION_CONVERSATION_DAYS:0}
+    batch-size: ${DATA_RETENTION_BATCH_SIZE:100}
   deep-thinking:
     # Deep mode adds planner + evidence-grader calls. Any preparation failure falls back
     # to the existing QuestionAnswerAdvisor chain before the first answer token is sent.

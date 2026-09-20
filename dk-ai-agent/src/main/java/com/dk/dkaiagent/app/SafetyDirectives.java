@@ -21,6 +21,18 @@ import java.util.List;
  */
 public final class SafetyDirectives {
 
+    /** Shared persisted-history window for prompt posture and output checking (about three turns).
+     * Risk leaves this window as new turns arrive; this is not a clinical declaration of safety.
+     */
+    public static final int CONTEXT_MESSAGES = 6;
+
+    public static RiskTier outputRiskTier(List<Message> recentMessages) {
+        if (recentMessages == null) return RiskTier.NONE;
+        return recentMessages.stream().filter(UserMessage.class::isInstance)
+                .map(message -> SafetyTerms.assess(message.getText()))
+                .max(java.util.Comparator.comparingInt(Enum::ordinal)).orElse(RiskTier.NONE);
+    }
+
     private static final org.slf4j.Logger auditLog =
             org.slf4j.LoggerFactory.getLogger(SafetyDirectives.class);
 

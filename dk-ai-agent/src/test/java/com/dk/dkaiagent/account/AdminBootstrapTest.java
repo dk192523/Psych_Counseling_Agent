@@ -1,10 +1,17 @@
 package com.dk.dkaiagent.account;
 
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.NullAndEmptySource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -13,6 +20,8 @@ import java.time.Instant;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyLong;
@@ -20,6 +29,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 /**
@@ -50,24 +60,19 @@ class AdminBootstrapTest {
                 UserAccountService.STATUS_ACTIVE, NOW, NOW, null, null, null);
     }
 
-    @Test
-    void createsAdminWithBcryptHashWhenNoneExists() {
+    @ParameterizedTest
+    @NullAndEmptySource
+    @ValueSource(strings = {" ", "\t\n", "        "})
+    void rejectsMissingConfiguredPasswordBeforeCreatingAdmin(String configuredPassword) {
         when(userRepository.countByRole(UserAccountService.ROLE_ADMIN)).thenReturn(0L);
-        when(userAccountService.generateRandomPassword(12)).thenReturn("RandomPass12");
-        when(userRepository.insertUser(eq("admin"), anyString(), eq(UserAccountService.ROLE_ADMIN)))
-                .thenReturn(1L);
-        when(userRepository.findByUsername("admin")).thenReturn(Optional.of(admin(1L, "$2a$10$x")));
+        AdminBootstrap bootstrap =
+                new AdminBootstrap(userRepository, userAccountService, passwordEncoder, configuredPassword);
 
-        AdminBootstrap bootstrap = new AdminBootstrap(userRepository, userAccountService, passwordEncoder, "");
-        bootstrap.ensureInitialAdmin();
-
-        ArgumentCaptor<String> hashCaptor = ArgumentCaptor.forClass(String.class);
-        verify(userRepository).insertUser(eq("admin"), hashCaptor.capture(), eq(UserAccountService.ROLE_ADMIN));
-        String storedHash = hashCaptor.getValue();
-        assertTrue(storedHash.startsWith("$2a$"));
-        assertTrue(passwordEncoder.matches("RandomPass12", storedHash));
-        // 创建后把无主历史会话归属到超管。
-        verify(userRepository).adoptOrphanConversations(1L);
+        IllegalStateException error = assertThrows(IllegalStateException.class, bootstrap::ensureInitialAdmin);
+        assertEquals("尚无管理员，首次启动必须配置 ADMIN_INITIAL_PASSWORD；未创建初始超管", error.getMessage());
+        verify(userRepository, never()).insertUser(anyString(), anyString(), anyString());
+        verify(userRepository, never()).adoptOrphanConversations(anyLong());
+        verifyNoInteractions(userAccountService);
     }
 
     @Test
@@ -92,24 +97,41 @@ class AdminBootstrapTest {
 
         AdminBootstrap bootstrap =
                 new AdminBootstrap(userRepository, userAccountService, passwordEncoder, "ConfiguredPass1");
-        bootstrap.ensureInitialAdmin();
+        Logger logger = (Logger) LoggerFactory.getLogger(AdminBootstrap.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            bootstrap.ensureInitialAdmin();
 
-        ArgumentCaptor<String> hashCaptor = ArgumentCaptor.forClass(String.class);
-        verify(userRepository).insertUser(eq("admin"), hashCaptor.capture(), eq(UserAccountService.ROLE_ADMIN));
-        assertTrue(passwordEncoder.matches("ConfiguredPass1", hashCaptor.getValue()));
-        verify(userAccountService, never()).generateRandomPassword(12);
+            ArgumentCaptor<String> hashCaptor = ArgumentCaptor.forClass(String.class);
+            verify(userRepository).insertUser(eq("admin"), hashCaptor.capture(), eq(UserAccountService.ROLE_ADMIN));
+            String storedHash = hashCaptor.getValue();
+            assertTrue(storedHash.startsWith("$2a$"));
+            assertTrue(passwordEncoder.matches("ConfiguredPass1", storedHash));
+            verify(userRepository).adoptOrphanConversations(1L);
+            verifyNoInteractions(userAccountService);
+            assertTrue(appender.list.stream().anyMatch(event -> event.getFormattedMessage()
+                    .equals("初始超管已创建，用户名 admin，初始口令来源 ADMIN_INITIAL_PASSWORD")));
+            for (ILoggingEvent event : appender.list) {
+                assertFalse(event.getFormattedMessage().contains("ConfiguredPass1"));
+                assertFalse(event.getFormattedMessage().contains(storedHash));
+            }
+        } finally {
+            logger.detachAppender(appender);
+            appender.stop();
+        }
     }
 
     @Test
     void swallowsConcurrentCreationRaceAndStillAdoptsOrphans() {
         when(userRepository.countByRole(UserAccountService.ROLE_ADMIN)).thenReturn(0L);
-        when(userAccountService.generateRandomPassword(12)).thenReturn("RandomPass12");
         when(userRepository.insertUser(eq("admin"), anyString(), eq(UserAccountService.ROLE_ADMIN)))
                 .thenThrow(new DataIntegrityViolationException("unique violation"));
         // 冲突行确为 ADMIN（另一实例已引导）：按"已引导"处理并收养孤儿。
         when(userRepository.findByUsername("admin")).thenReturn(Optional.of(admin(1L, "$2a$10$x")));
 
-        AdminBootstrap bootstrap = new AdminBootstrap(userRepository, userAccountService, passwordEncoder, "");
+        AdminBootstrap bootstrap = new AdminBootstrap(userRepository, userAccountService, passwordEncoder, "ConfiguredPass1");
 
         assertDoesNotThrow(bootstrap::ensureInitialAdmin);
         verify(userRepository).adoptOrphanConversations(1L);
@@ -120,12 +142,11 @@ class AdminBootstrapTest {
         // 首启窗口抢注场景：攻击者先以 ROLE_USER 注册了 "admin"。唯一约束冲突后回查冲突行，
         // 发现非 ADMIN 占用 → 记 ERROR 返回，绝不把无主历史咨询会话归属到攻击者账号。
         when(userRepository.countByRole(UserAccountService.ROLE_ADMIN)).thenReturn(0L);
-        when(userAccountService.generateRandomPassword(12)).thenReturn("RandomPass12");
         when(userRepository.insertUser(eq("admin"), anyString(), eq(UserAccountService.ROLE_ADMIN)))
                 .thenThrow(new DataIntegrityViolationException("unique violation"));
         when(userRepository.findByUsername("admin")).thenReturn(Optional.of(nonAdminOccupant(2L)));
 
-        AdminBootstrap bootstrap = new AdminBootstrap(userRepository, userAccountService, passwordEncoder, "");
+        AdminBootstrap bootstrap = new AdminBootstrap(userRepository, userAccountService, passwordEncoder, "ConfiguredPass1");
 
         assertDoesNotThrow(bootstrap::ensureInitialAdmin);
         verify(userRepository, never()).adoptOrphanConversations(anyLong());

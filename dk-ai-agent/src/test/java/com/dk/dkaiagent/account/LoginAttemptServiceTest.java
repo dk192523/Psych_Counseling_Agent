@@ -161,16 +161,34 @@ class LoginAttemptServiceTest {
     }
 
     @Test
-    void recordSuccessClearsInFlightQuota() {
+    void recordSuccessOnlyReleasesItsOwnInFlightQuota() {
         for (int i = 0; i < LoginAttemptService.LOCK_THRESHOLD; i++) {
             assertTrue(service.tryBeginCheck("alice"));
         }
         assertFalse(service.tryBeginCheck("alice"));
-        // 成功登录整窗清零：在途名额一并释放，重新满阈值准入。
+        // 成功只释放当前请求，另外四个比对仍持有名额。
         service.recordSuccess("alice");
-        for (int i = 0; i < LoginAttemptService.LOCK_THRESHOLD; i++) {
-            assertTrue(service.tryBeginCheck("alice"));
-        }
         assertFalse(service.isLocked("alice"));
+        assertTrue(service.tryBeginCheck("alice"));
+        assertFalse(service.tryBeginCheck("alice"));
+    }
+
+    @Test
+    void oneFailureDoesNotReleaseOtherInflightComparisons() {
+        for (int i = 0; i < 5; i++) assertTrue(service.tryBeginCheck("alice"));
+        service.recordFailure("alice");
+        assertFalse(service.tryBeginCheck("alice"));
+        for (int i = 0; i < 4; i++) service.recordFailure("alice");
+        assertTrue(service.isLocked("alice"));
+    }
+
+    @Test
+    void failedComparisonCannotEraseAnExistingLock() {
+        for (int i = 0; i < 5; i++) assertTrue(service.tryBeginCheck("alice"));
+        assertFalse(service.tryBeginCheck("alice"));
+        service.recordFailure("alice");
+        service.releaseInFlight("alice");
+        assertTrue(service.isLocked("alice"));
+        assertFalse(service.tryBeginCheck("alice"));
     }
 }

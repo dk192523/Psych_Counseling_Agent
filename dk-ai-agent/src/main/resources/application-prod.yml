@@ -21,6 +21,19 @@ server:
   # 后端只暴露在 Compose 内网，信任前置 Nginx 传入的 Forwarded/X-Forwarded-*。
   forward-headers-strategy: framework
 app:
+  deployment:
+    # main 在 Spring 启动前校验环境变量；合并 YAML/命令行后、Bean 初始化前再次复核。
+    # 仅允许单副本，禁止重叠滚动发布；instance-id 仅用于启动观测，不是分布式锁。
+    mode: ${APP_DEPLOYMENT_MODE:single}
+    replica-count: ${APP_REPLICA_COUNT:1}
+    instance-id: ${APP_INSTANCE_ID:}
+  data-retention:
+    # No automatic business-data deletion until an explicit retention period and apply are set.
+    apply: ${DATA_RETENTION_APPLY:false}
+    conversation-days: ${DATA_RETENTION_CONVERSATION_DAYS:0}
+    batch-size: ${DATA_RETENTION_BATCH_SIZE:100}
+  chat-history:
+    replay-retention: ${CHAT_HISTORY_REPLAY_RETENTION:7d}
   registration:
     enabled: ${APP_REGISTRATION_ENABLED:false}
   docs:

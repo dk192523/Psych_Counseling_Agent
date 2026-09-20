@@ -10,7 +10,7 @@ $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
 
 $Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
-$RepoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\.."))
+$RepoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot "../.."))
 if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
     $ReleaseRoot = Join-Path $RepoRoot "release"
 } else {
@@ -91,12 +91,15 @@ $FrontendTarget = Join-Path $BackendTarget "dk-ai-agent-frontend"
 $FrontendEntries = @(
     ".dockerignore",
     "Dockerfile",
+    "eslint.config.js",
     "index.html",
     "nginx.conf",
     "package.json",
     "package-lock.json",
+    "security-headers.conf",
     "src",
-    "vite.config.js"
+    "vite.config.js",
+    "vitest.config.js"
 )
 foreach ($entry in $FrontendEntries) {
     Copy-RequiredEntry -Source (Join-Path $FrontendSource $entry) -Destination (Join-Path $FrontendTarget $entry)
@@ -116,7 +119,7 @@ foreach ($entry in $WorkerEntries) {
     Copy-RequiredEntry -Source (Join-Path $WorkerSource $entry) -Destination (Join-Path $WorkerTarget $entry)
 }
 
-Copy-RequiredEntry -Source (Join-Path $RepoRoot "counseling-kb\raw") -Destination (Join-Path $PackageRoot "counseling-kb\raw")
+Copy-RequiredEntry -Source (Join-Path $RepoRoot "counseling-kb/raw") -Destination (Join-Path $PackageRoot "counseling-kb/raw")
 Copy-RequiredEntry -Source (Join-Path $PSScriptRoot ".env.server.example") -Destination (Join-Path $BackendTarget ".env.example")
 Copy-RequiredEntry -Source (Join-Path $PSScriptRoot "manage.sh") -Destination (Join-Path $PackageRoot "manage.sh")
 Copy-RequiredEntry -Source (Join-Path $PSScriptRoot "nginx-site.conf.example") -Destination (Join-Path $PackageRoot "nginx-site.conf.example")
@@ -136,8 +139,8 @@ foreach ($directory in $GeneratedDirectories) {
 # Never ship developer-only Spring configuration. It is intentionally ignored by
 # Git and may contain local API keys even when the current checkout only has examples.
 $LocalConfigFiles = @(
-    (Join-Path $PackageRoot "dk-ai-agent\src\main\resources\application-local.yml"),
-    (Join-Path $PackageRoot "dk-ai-agent\src\main\resources\application-local.yaml")
+    (Join-Path $PackageRoot "dk-ai-agent/src/main/resources/application-local.yml"),
+    (Join-Path $PackageRoot "dk-ai-agent/src/main/resources/application-local.yaml")
 )
 foreach ($file in $LocalConfigFiles) {
     if (Test-Path -LiteralPath $file) {

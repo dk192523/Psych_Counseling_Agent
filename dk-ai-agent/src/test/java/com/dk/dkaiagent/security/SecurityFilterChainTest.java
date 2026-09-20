@@ -106,7 +106,7 @@ class SecurityFilterChainTest {
         String header = json.get("headerName").asText();
         when(userAccountService.authenticate("alice", "password-1")).thenReturn(
                 new UserAccountService.AuthResult(true, null, activeUser(7L, "alice"), null));
-        when(userAccountService.statusOf(7L)).thenReturn(UserAccountService.STATUS_ACTIVE);
+        when(userAccountService.sessionStatus(any())).thenReturn(UserAccountService.STATUS_ACTIVE);
         mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/auth/login")
                         .session(session).header(header, token).contentType(MediaType.APPLICATION_JSON)
                         .content("{\"username\":\"alice\",\"password\":\"password-1\"}"))
@@ -195,7 +195,7 @@ class SecurityFilterChainTest {
         when(userAccountService.authenticate("alice", "password-1")).thenReturn(
                 new UserAccountService.AuthResult(true, null, activeUser(7L, "alice"), null));
         // 会话登记后状态复核：ACTIVE 放行。
-        when(userAccountService.statusOf(7L)).thenReturn(UserAccountService.STATUS_ACTIVE);
+        when(userAccountService.sessionStatus(any())).thenReturn(UserAccountService.STATUS_ACTIVE);
 
         mockMvc.perform(post("/auth/login")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -211,7 +211,7 @@ class SecurityFilterChainTest {
         // 登录与停用并发：凭据校验通过后账号被停用 → 会话登记后的状态复核兜住，401 拒绝。
         when(userAccountService.authenticate("alice", "password-1")).thenReturn(
                 new UserAccountService.AuthResult(true, null, activeUser(7L, "alice"), null));
-        when(userAccountService.statusOf(7L)).thenReturn(UserAccountService.STATUS_DISABLED);
+        when(userAccountService.sessionStatus(any())).thenReturn(UserAccountService.STATUS_DISABLED);
 
         mockMvc.perform(post("/auth/login")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -223,7 +223,7 @@ class SecurityFilterChainTest {
     @Test
     void registerIsPublicAndCreatesUser() throws Exception {
         when(userAccountService.register("alice", "password-1")).thenReturn(activeUser(7L, "alice"));
-        when(userAccountService.statusOf(7L)).thenReturn(UserAccountService.STATUS_ACTIVE);
+        when(userAccountService.sessionStatus(any())).thenReturn(UserAccountService.STATUS_ACTIVE);
 
         mockMvc.perform(post("/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)

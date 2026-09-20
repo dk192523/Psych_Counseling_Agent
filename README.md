@@ -45,6 +45,7 @@ Psych_Counseling_Agent/
 1. 已安装并可启动 Docker Desktop。
 2. 系统已安装 Microsoft Edge 或 Google Chrome。
 3. 已在系统环境变量中设置 `DEEPSEEK_API_KEY`，或在 `dk-ai-agent/.env` 中填写有效 Key。
+4. 首次启动前，在系统环境变量或 `dk-ai-agent/.env` 中设置 `ADMIN_INITIAL_PASSWORD`（至少 8 位，UTF-8 不超过 72 字节）；生产和开发环境均需配置。已有管理员时无需重新配置，也不会重置其密码。
 
 双击：
 
@@ -77,10 +78,13 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d postgres ai
 
 ### 2. 启动 Java 后端
 
+首次启动前，将下面的密码占位值替换为自行设置的强口令。直接运行 Java 时须在当前 CMD 设置环境变量，Compose 的 `.env` 不会自动导入该进程；已有管理员时可省略密码设置行。
+
 ```cmd
 set JAVA_HOME=F:\.jdks\openjdk-25.0.1
 set PATH=%JAVA_HOME%\bin;%PATH%
 set AI_WORKER_BASE_URL=http://localhost:8001
+set "ADMIN_INITIAL_PASSWORD=REPLACE_WITH_YOUR_STRONG_PASSWORD"
 mvnw.cmd spring-boot:run
 ```
 
@@ -96,7 +100,7 @@ npm.cmd ci
 npm.cmd run dev
 ```
 
-访问 `http://localhost:3001`，先注册或登录，再进入 `/psych-master`。首次启动会自动创建超管账号 `admin`：初始口令取环境变量 `ADMIN_INITIAL_PASSWORD`，未设置时随机生成并在后端日志中以 WARN 级别输出一次，随后不再显示，操作步骤见[技术设计 · 部署与启动](docs/TECHNICAL_DESIGN.md)。
+访问 `http://localhost:3001`，先注册或登录，再进入 `/psych-master`。首次启动会自动创建超管账号 `admin`：必须提前设置环境变量 `ADMIN_INITIAL_PASSWORD`，尚无管理员且该值为空或仅含空白时后端拒绝启动，不创建账号。日志不会输出口令或哈希，操作步骤见[技术设计 · 部署与启动](docs/TECHNICAL_DESIGN.md)。
 
 主要接口：
 
@@ -115,7 +119,7 @@ npm.cmd run dev
 - 会话：登录后由 HttpOnly + SameSite=Lax Cookie 维持，默认 24 小时有效（`SESSION_TIMEOUT` 可调）。账号被停用后其全部在线会话立即失效。
 - 数据隔离：每个会话绑定创建者 `owner_id`，用户只能列出、读取和删除自己的会话；访问他人会话得到的结果与"会话不存在"完全相同，不泄露存在性。管理员删除用户时级联删除其会话、消息与记忆数据。
 - 登录保护：同一用户名 15 分钟内失败 5 次锁定 15 分钟；锁定与密码错误返回同一泛化提示，不区分账号是否存在。进程内限流，不支持多副本共享。
-- 超管：首次启动自动创建 `admin`。初始口令取 `ADMIN_INITIAL_PASSWORD`；未设置则随机生成 12 位口令，仅在后端日志 WARN 行显示一次，请立即记录并修改。已存在管理员时不重复创建。
+- 超管：首次启动自动创建 `admin`。必须设置 `ADMIN_INITIAL_PASSWORD`（至少 8 位，UTF-8 不超过 72 字节）；尚无管理员且未配置有效口令时拒绝启动。口令和哈希均不写日志，请妥善保管并在首次登录后修改。已存在管理员时不重复创建，也不要求重新配置初始口令。
 - 管理面板（ADMIN 可见，`/admin`）：统计卡片（用户总数/活跃/停用/会话总数/消息总数）；用户表（关键词搜索、状态筛选、分页、角色与状态徽标、最后登录时间）；行操作（停用并填原因、启用、一次性临时密码重置、删除并级联清理数据）；批量停用/启用；不能对自己执行停用或删除；可返回咨询页。
 
 ## 默认窗口
