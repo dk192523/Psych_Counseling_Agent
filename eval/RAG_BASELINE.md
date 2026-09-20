@@ -74,3 +74,47 @@ Linux：`RUN_RAG_BASELINE=true bash mvnw clean test -Dtest=RetrievalBaselineTest
 - `review_status` 为 pending、reviewed 或 adjudicated，配套 reviewers、adjudicator、reviewed_at 和 notes。空 expected 且 pending 仍是 unjudged；只有人工明确确认查询在约定语料/范围内无相关内容，才可设为 negative。
 
 先由独立评审给出相关性判断，处理分歧、确认多标签和负例依据，再冻结保留测试集。种子适合回归排查，不应反复用于调参后宣称独立验收提升。后续模型、混合检索、切块或阈值实验应在另行授权的范围开展。
+
+---
+
+## 第二轮测量（2026-09-20：embedding 换型 multilingual-e5-small）
+
+### 动机与决策依据
+
+离线对比实验（`eval/embedding_shootout.py`，语料 = 生产向量库导出的 851 文档，与线上检索同分布）：
+
+| 配置 | Document Hit@4 | Document MRR@4 | 正例 top1 区间 | 负例 top1 区间 |
+|---|---|---|---|---|
+| all-MiniLM-L6-v2（换型前生产） | 0.00 | 0.00 | 0.63–0.76 | 0.68–0.75 |
+| e5-small plain（本轮采用） | **0.72** | **0.60** | 0.887–0.935 | 0.838–0.854 |
+| e5-small + query:/passage: 前缀 | 0.72 | 0.61 | 0.886–0.935 | 0.835–0.863 |
+
+- MiniLM（英文模型）对中文语料正负例分数**完全重叠**——任何阈值都不可分，这就是
+  第一轮"负例零拒绝"的根因；
+- e5 下正例 p5（0.886）与负例 max（0.863）**完全分离**，生产 `similarityThreshold`
+  由 0.3 校准为 **0.87**（全拒 5 负例、放行 ≥95% 正例；5 条负例是小样本，窗口
+  [0.865, 0.885] 内取点，泛化留有余量）；
+- 前缀模式差异仅 0.01（document 级），首轮落地采用 plain（零代码改动）；
+  case 级评测建立后再评估是否值得引入前缀包装。
+
+### 落地变更（生产链路，Java 基线复核 `rag_baseline.json` 同步更新）
+
+- `application.yml`：model-uri / tokenizer 换 e5 远程 URI；`app.rag.embedding-version`
+  → `transformers-multilingual-e5-small-384-v2`（触发全量重灌）；维度 384 不变；
+- `CounselingApp.buildRagAdvisor`：similarityThreshold 0.3 → 0.87（校准依据见上表）；
+- **顺带清理幽灵副本**：生产库曾达 1670 条 = 同内容两套文件名（"大冰连麦案例-*"为
+  历史改名残留），检索在与幽灵竞争；手动 DELETE 819 条后重灌为 851（835 案例 + 16 框架）；
+- 教训记录：compose 与 yml 的 `ONNX_EMBEDDING_MODEL_URI` 默认值必须同步换——只改 yml
+  时 e5 tokenizer（词表 25 万）喂 MiniLM 模型（词表 30522）会 Gather 越界崩溃循环。
+
+### 复核数字（Java `RetrievalBaselineTest`，生产 loader + 生产模型）
+
+| 指标 | 换型前 | 换型后 |
+|---|---|---|
+| document_hit_at_4 | 0.04 | **0.72** |
+| document_mrr_at_4 | 0.02 | 0.563 |
+| case_hit_at_4 | null（未测） | 0.72 |
+| eval 端到端 | 9/9 | 9/9（换型后复验） |
+
+仍属 source-grounded seed（标签来自案例出处，未独立人工审核）——0.72 是回归基线数字，
+不是真实用户准确率；下一步仍是独立人工标注 golden set（`rag_review_template.json`）。

@@ -259,13 +259,15 @@ public class CounselingApp {
     /**
      * 构建知识库检索 Advisor。
      * 案例文档单节较长且总量 800+，topK 取 4 控制上下文规模；
-     * 阈值 0.3 过滤明显无关命中，避免闲聊类输入也强行塞进案例。
+     * 阈值 0.87 为 e5 换型后的校准值（embedding_shootout 实测：正例 top1 p5=0.886、
+     * 负例 max=0.863，0.87 全拒 5 负例且放行 ≥95% 正例）。MiniLM 时代两分布完全重叠，
+     * 任何阈值都不可分——换型让阈值第一次有了意义。
      */
     private QuestionAnswerAdvisor buildRagAdvisor() {
         return QuestionAnswerAdvisor.builder(pgVectorVectorStore)
                 .searchRequest(SearchRequest.builder()
                         .topK(4)
-                        .similarityThreshold(0.3)
+                        .similarityThreshold(0.87)
                         .filterExpression("knowledgeBase == '" +
                                 PgVectorVectorStoreConfig.KNOWLEDGE_BASE_NAME + "'")
                         .build())

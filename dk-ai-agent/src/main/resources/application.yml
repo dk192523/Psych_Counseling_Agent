@@ -49,9 +49,13 @@ spring:
     embedding:
       transformer:
         onnx:
-          model-uri: ${ONNX_EMBEDDING_MODEL_URI:https://media.githubusercontent.com/media/spring-projects/spring-ai/v1.0.0/models/spring-ai-transformers/src/main/resources/onnx/all-MiniLM-L6-v2/model.onnx}
+          # embedding 换型（RAG 调优第一轮）：all-MiniLM-L6-v2（英文）→ multilingual-e5-small（多语系）。
+          # 384 维不变（pgvector schema 零改动）；离线对比（eval/embedding_shootout.py，生产 851 文档）
+          # Hit@4: 0.00 → 0.72。e5 的 query:/passage: 前缀在 document 级评测差异仅 0.01，
+          # 首轮落地用 plain 模式（零代码改动），前缀优化留待 case 级评测后再评估。
+          model-uri: ${ONNX_EMBEDDING_MODEL_URI:https://huggingface.co/intfloat/multilingual-e5-small/resolve/main/onnx/model.onnx}
         tokenizer:
-          uri: classpath:/onnx/all-MiniLM-L6-v2/tokenizer.json
+          uri: ${EMBEDDING_TOKENIZER_URI:https://huggingface.co/intfloat/multilingual-e5-small/resolve/main/tokenizer.json}
         cache:
           enabled: true
 # 临时注释掉，便于大家开发调试和部署（实际需要启动 MCP 服务）
@@ -215,4 +219,5 @@ app:
     # 默认从 dk-ai-agent 工作目录读取兄弟目录中的 799 份 raw 逐字稿
     transcript-directory: ${COUNSELING_TRANSCRIPT_DIRECTORY:../counseling-kb/raw}
     embedding-dimensions: 384
-    embedding-version: transformers-all-MiniLM-L6-v2-384-v1
+    # 版本串参与知识库指纹：改动即触发全量重灌（新模型的向量必须重建）。
+    embedding-version: transformers-multilingual-e5-small-384-v2

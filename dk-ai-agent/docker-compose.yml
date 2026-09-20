@@ -103,7 +103,10 @@ services:
       SESSION_TIMEOUT: ${SESSION_TIMEOUT:-24h}
       SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-true}
       COUNSELING_TRANSCRIPT_DIRECTORY: /data/transcripts
-      ONNX_EMBEDDING_MODEL_URI: ${ONNX_EMBEDDING_MODEL_URI:-https://media.githubusercontent.com/media/spring-projects/spring-ai/v1.0.0/models/spring-ai-transformers/src/main/resources/onnx/all-MiniLM-L6-v2/model.onnx}
+      # 与 application.yml 的 ONNX_EMBEDDING_MODEL_URI 默认值保持一致（multilingual-e5-small）。
+      # 曾因 compose 默认值仍是 MiniLM 而 yml 已换 e5，tokenizer(e5 词表 25 万)喂给 MiniLM
+      # 模型(词表 30522)导致 Gather 越界崩溃循环——两端默认值必须同步换。
+      ONNX_EMBEDDING_MODEL_URI: ${ONNX_EMBEDDING_MODEL_URI:-https://huggingface.co/intfloat/multilingual-e5-small/resolve/main/onnx/model.onnx}
     volumes:
       - ../counseling-kb/raw:/data/transcripts:ro
       - onnx_cache:/tmp/spring-ai-onnx-generative

@@ -1,1264 +1,1689 @@
 {
-  "timestamp": "2026-09-17T05:54:09.906119500Z",
-  "label_status": "source-grounded seed; pending independent human relevance review",
-  "scope": "production Markdown loader and Transformers embedding; exact cosine; excludes pgvector ANN, deep planning/reranking and chat generation",
-  "model_uri": "https://media.githubusercontent.com/media/spring-projects/spring-ai/v1.0.0/models/spring-ai-transformers/src/main/resources/onnx/all-MiniLM-L6-v2/model.onnx",
-  "dimensions": 384,
-  "corpus_fingerprint": "abc35ec23e9d4722",
-  "documents": 835,
-  "top_k": 4,
-  "threshold": 0.3,
-  "positive_cases": 25,
-  "negative_cases": 5,
-  "recall_at_4": 0.04,
-  "mrr_at_4": null,
-  "no_hit_accuracy": 0.0,
-  "results": [
-    {
-      "expected": [
-        "2026-07-18-call-01"
-      ],
-      "id": "R01",
-      "candidates": [
-        {
-          "slugs": [],
-          "filename": "咨询案例 - 婚姻篇.md",
-          "rank": 1,
-          "score": 0.6505693897225449
-        },
-        {
-          "slugs": [],
-          "filename": "咨询案例 - 情感篇.md",
-          "rank": 2,
-          "score": 0.6505693897225449
-        },
-        {
-          "slugs": [],
-          "filename": "咨询案例 - 成长篇.md",
-          "rank": 3,
-          "score": 0.6499613688129314
-        },
-        {
-          "slugs": [],
-          "filename": "咨询案例 - 其他篇.md",
-          "rank": 4,
-          "score": 0.6484814682853518
-        }
-      ],
-      "first_relevant_rank": 0,
-      "sample_type": "positive",
-      "first_relevant_document_rank": 0,
-      "first_relevant_case_rank": null,
-      "matched_expected_cases": null,
-      "case_candidates": null,
-      "query_elapsed_ms": null
-    },
-    {
-      "expected": [
-        "2026-07-18-call-02"
-      ],
-      "id": "R02",
-      "candidates": [
-        {
-          "slugs": [],
-          "filename": "心理疏导通用框架 - 框架篇.md",
-          "rank": 1,
-          "score": 0.6047480247945174
-        },
-        {
-          "slugs": [
-            "2026-04-13-call-03"
-          ],
-          "filename": "咨询案例 - 子女篇.md",
-          "rank": 2,
-          "score": 0.6005715783234388
-        },
-        {
-          "slugs": [
-            "2026-04-13-call-10"
-          ],
-          "filename": "咨询案例 - 职场篇.md",
-          "rank": 3,
-          "score": 0.5946515555916418
-        },
-        {
-          "slugs": [
-            "2026-04-07-call-03"
-          ],
-          "filename": "咨询案例 - 心理篇.md",
-          "rank": 4,
-          "score": 0.5931561128959134
-        }
-      ],
-      "first_relevant_rank": 0,
-      "sample_type": "positive",
-      "first_relevant_document_rank": 0,
-      "first_relevant_case_rank": null,
-      "matched_expected_cases": null,
-      "case_candidates": null,
-      "query_elapsed_ms": null
-    },
-    {
-      "expected": [
-        "2026-07-18-call-03"
-      ],
-      "id": "R03",
-      "candidates": [
-        {
-          "slugs": [],
-          "filename": "咨询案例 - 成长篇.md",
-          "rank": 1,
-          "score": 0.7215806849653196
-        },
-        {
-          "slugs": [],
-          "filename": "咨询案例 - 心理篇.md",
-          "rank": 2,
-          "score": 0.709978072296177
-        },
-        {
-          "slugs": [],
-          "filename": "咨询案例 - 婚姻篇.md",
-          "rank": 3,
-          "score": 0.7089340996137932
-        },
-        {
-          "slugs": [],
-          "filename": "咨询案例 - 情感篇.md",
-          "rank": 4,
-          "score": 0.7089340996137932
-        }
-      ],
-      "first_relevant_rank": 0,
-      "sample_type": "positive",
-      "first_relevant_document_rank": 0,
-      "first_relevant_case_rank": null,
-      "matched_expected_cases": null,
-      "case_candidates": null,
-      "query_elapsed_ms": null
-    },
-    {
-      "expected": [
-        "2026-07-18-call-04"
-      ],
-      "id": "R04",
-      "candidates": [
-        {
-          "slugs": [],
-          "filename": "心理疏导通用框架 - 框架篇.md",
-          "rank": 1,
-          "score": 0.6317683822384703
-        },
-        {
-          "slugs": [],
-          "filename": "心理疏导通用框架 - 框架篇.md",
-          "rank": 2,
-          "score": 0.6093035066813988
-        },
-        {
-          "slugs": [],
-          "filename": "咨询案例 - 成长篇.md",
-          "rank": 3,
-          "score": 0.6083434363393416
-        },
-        {
-          "slugs": [],
-          "filename": "咨询案例 - 婚姻篇.md",
-          "rank": 4,
-          "score": 0.6037070288583456
-        }
-      ],
-      "first_relevant_rank": 0,
-      "sample_type": "positive",
-      "first_relevant_document_rank": 0,
-      "first_relevant_case_rank": null,
-      "matched_expected_cases": null,
-      "case_candidates": null,
-      "query_elapsed_ms": null
-    },
-    {
-      "expected": [
-        "2026-07-18-call-05"
-      ],
-      "id": "R05",
-      "candidates": [
-        {
-          "slugs": [],
-          "filename": "咨询案例 - 父母篇.md",
-          "rank": 1,
-          "score": 0.5932279665841371
-        },
-        {
-          "slugs": [],
-          "filename": "咨询案例 - 学业篇.md",
-          "rank": 2,
-          "score": 0.5892498727275625
-        },
-        {
-          "slugs": [],
-          "filename": "咨询案例 - 心理篇.md",
-          "rank": 3,
-          "score": 0.5883048743910975
-        },
-        {
-          "slugs": [
-            "2026-04-23-call-01"
-          ],
-          "filename": "咨询案例 - 学业篇.md",
-          "rank": 4,
-          "score": 0.5849982824678591
-        }
-      ],
-      "first_relevant_rank": 0,
-      "sample_type": "positive",
-      "first_relevant_document_rank": 0,
-      "first_relevant_case_rank": null,
-      "matched_expected_cases": null,
-      "case_candidates": null,
-      "query_elapsed_ms": null
-    },
-    {
-      "expected": [
-        "2026-07-18-call-06"
-      ],
-      "id": "R06",
-      "candidates": [
-        {
-          "slugs": [
-            "2026-07-10-call-08"
-          ],
-          "filename": "咨询案例 - 成长篇.md",
-          "rank": 1,
-          "score": 0.6855662321162715
-        },
-        {
-          "slugs": [],
-          "filename": "心理疏导通用框架 - 框架篇.md",
-          "rank": 2,
-          "score": 0.6808655518727448
-        },
-        {
-          "slugs": [
-            "2026-07-16-call-07"
-          ],
-          "filename": "咨询案例 - 心理篇.md",
-          "rank": 3,
-          "score": 0.6656336076744126
-        },
-        {
-          "slugs": [
-            "2026-07-10-call-07"
-          ],
-          "filename": "咨询案例 - 情感篇.md",
-          "rank": 4,
-          "score": 0.6514687966311153
-        }
-      ],
-      "first_relevant_rank": 0,
-      "sample_type": "positive",
-      "first_relevant_document_rank": 0,
-      "first_relevant_case_rank": null,
-      "matched_expected_cases": null,
-      "case_candidates": null,
-      "query_elapsed_ms": null
-    },
-    {
-      "expected": [
-        "2026-07-18-call-07"
-      ],
-      "id": "R07",
-      "candidates": [
-        {
-          "slugs": [],
-          "filename": "心理疏导通用框架 - 框架篇.md",
-          "rank": 1,
-          "score": 0.6834955674403373
-        },
-        {
-          "slugs": [],
-          "filename": "心理疏导通用框架 - 框架篇.md",
-          "rank": 2,
-          "score": 0.6119358952336564
-        },
-        {
-          "slugs": [
-            "2026-06-04-call-08"
-          ],
-          "filename": "咨询案例 - 情感篇.md",
-          "rank": 3,
-          "score": 0.5909134591959858
-        },
-        {
-          "slugs": [
-            "2026-03-24-call-20"
-          ],
-          "filename": "咨询案例 - 心理篇.md",
-          "rank": 4,
-          "score": 0.5863383961369729
-        }
-      ],
-      "first_relevant_rank": 0,
-      "sample_type": "positive",
-      "first_relevant_document_rank": 0,
-      "first_relevant_case_rank": null,
-      "matched_expected_cases": null,
-      "case_candidates": null,
-      "query_elapsed_ms": null
-    },
-    {
-      "expected": [
-        "2026-07-18-call-08"
-      ],
-      "id": "R08",
-      "candidates": [
-        {
-          "slugs": [],
-          "filename": "咨询案例 - 心理篇.md",
-          "rank": 1,
-          "score": 0.6342371621407983
-        },
-        {
-          "slugs": [],
-          "filename": "咨询案例 - 成长篇.md",
-          "rank": 2,
-          "score": 0.6263897721023647
-        },
-        {
-          "slugs": [],
-          "filename": "咨询案例 - 父母篇.md",
-          "rank": 3,
-          "score": 0.6242935908690419
-        },
-        {
-          "slugs": [],
-          "filename": "咨询案例 - 婚姻篇.md",
-          "rank": 4,
-          "score": 0.618001784699621
-        }
-      ],
-      "first_relevant_rank": 0,
-      "sample_type": "positive",
-      "first_relevant_document_rank": 0,
-      "first_relevant_case_rank": null,
-      "matched_expected_cases": null,
-      "case_candidates": null,
-      "query_elapsed_ms": null
-    },
-    {
-      "expected": [
-        "2026-07-18-call-09"
-      ],
-      "id": "R09",
-      "candidates": [
-        {
-          "slugs": [],
-          "filename": "心理疏导通用框架 - 框架篇.md",
-          "rank": 1,
-          "score": 0.7007201177601428
-        },
-        {
-          "slugs": [],
-          "filename": "心理疏导通用框架 - 框架篇.md",
-          "rank": 2,
-          "score": 0.656155746916188
-        },
-        {
-          "slugs": [],
-          "filename": "心理疏导通用框架 - 框架篇.md",
-          "rank": 3,
-          "score": 0.6499078003883048
-        },
-        {
-          "slugs": [],
-          "filename": "心理疏导通用框架 - 框架篇.md",
-          "rank": 4,
-          "score": 0.641978092181944
-        }
-      ],
-      "first_relevant_rank": 0,
-      "sample_type": "positive",
-      "first_relevant_document_rank": 0,
-      "first_relevant_case_rank": null,
-      "matched_expected_cases": null,
-      "case_candidates": null,
-      "query_elapsed_ms": null
-    },
-    {
-      "expected": [
-        "2026-07-18-call-10"
-      ],
-      "id": "R10",
-      "candidates": [
-        {
-          "slugs": [],
-          "filename": "心理疏导通用框架 - 框架篇.md",
-          "rank": 1,
-          "score": 0.6984732430137107
-        },
-        {
-          "slugs": [],
-          "filename": "咨询案例 - 成长篇.md",
-          "rank": 2,
-          "score": 0.6623133222971181
-        },
-        {
-          "slugs": [],
-          "filename": "心理疏导通用框架 - 框架篇.md",
-          "rank": 3,
-          "score": 0.6588943650247042
-        },
-        {
-          "slugs": [],
-          "filename": "咨询案例 - 婚姻篇.md",
-          "rank": 4,
-          "score": 0.6576140140481316
-        }
-      ],
-      "first_relevant_rank": 0,
-      "sample_type": "positive",
-      "first_relevant_document_rank": 0,
-      "first_relevant_case_rank": null,
-      "matched_expected_cases": null,
-      "case_candidates": null,
-      "query_elapsed_ms": null
-    },
-    {
-      "expected": [
-        "2026-07-18-call-11"
-      ],
-      "id": "R11",
-      "candidates": [
-        {
-          "slugs": [],
-          "filename": "心理疏导通用框架 - 框架篇.md",
-          "rank": 1,
-          "score": 0.7136929240180659
-        },
-        {
-          "slugs": [],
-          "filename": "心理疏导通用框架 - 框架篇.md",
-          "rank": 2,
-          "score": 0.6613511500081489
-        },
-        {
-          "slugs": [],
-          "filename": "心理疏导通用框架 - 框架篇.md",
-          "rank": 3,
-          "score": 0.6413787157511273
-        },
-        {
-          "slugs": [],
-          "filename": "心理疏导通用框架 - 框架篇.md",
-          "rank": 4,
-          "score": 0.6408173597562979
-        }
-      ],
-      "first_relevant_rank": 0,
-      "sample_type": "positive",
-      "first_relevant_document_rank": 0,
-      "first_relevant_case_rank": null,
-      "matched_expected_cases": null,
-      "case_candidates": null,
-      "query_elapsed_ms": null
-    },
-    {
-      "expected": [
-        "2026-07-16-call-01"
-      ],
-      "id": "R12",
-      "candidates": [
-        {
-          "slugs": [
-            "2026-04-13-call-16"
-          ],
-          "filename": "咨询案例 - 子女篇.md",
-          "rank": 1,
-          "score": 0.6176492097905306
-        },
-        {
-          "slugs": [
-            "2026-07-16-call-07"
-          ],
-          "filename": "咨询案例 - 心理篇.md",
-          "rank": 2,
-          "score": 0.6087323776942003
-        },
-        {
-          "slugs": [
-            "2026-03-18-call-20"
-          ],
-          "filename": "咨询案例 - 子女篇.md",
-          "rank": 3,
-          "score": 0.60761573968763
-        },
-        {
-          "slugs": [
-            "2026-03-26-call-11"
-          ],
-          "filename": "咨询案例 - 心理篇.md",
-          "rank": 4,
-          "score": 0.6037376094920773
-        }
-      ],
-      "first_relevant_rank": 0,
-      "sample_type": "positive",
-      "first_relevant_document_rank": 0,
-      "first_relevant_case_rank": null,
-      "matched_expected_cases": null,
-      "case_candidates": null,
-      "query_elapsed_ms": null
-    },
-    {
-      "expected": [
-        "2026-07-16-call-02"
-      ],
-      "id": "R13",
-      "candidates": [
-        {
-          "slugs": [
-            "2026-07-16-call-07"
-          ],
-          "filename": "咨询案例 - 心理篇.md",
-          "rank": 1,
-          "score": 0.5927392742551022
-        },
-        {
-          "slugs": [],
-          "filename": "心理疏导通用框架 - 框架篇.md",
-          "rank": 2,
-          "score": 0.5663679545376631
-        },
-        {
-          "slugs": [
-            "2026-05-11-call-01"
-          ],
-          "filename": "咨询案例 - 职场篇.md",
-          "rank": 3,
-          "score": 0.5614884698924494
-        },
-        {
-          "slugs": [
-            "2026-07-08-call-04"
-          ],
-          "filename": "咨询案例 - 父母篇.md",
-          "rank": 4,
-          "score": 0.5576588607514447
-        }
-      ],
-      "first_relevant_rank": 0,
-      "sample_type": "positive",
-      "first_relevant_document_rank": 0,
-      "first_relevant_case_rank": null,
-      "matched_expected_cases": null,
-      "case_candidates": null,
-      "query_elapsed_ms": null
-    },
-    {
-      "expected": [
-        "2026-07-16-call-04"
-      ],
-      "id": "R14",
-      "candidates": [
-        {
-          "slugs": [],
-          "filename": "咨询案例 - 成长篇.md",
-          "rank": 1,
-          "score": 0.6453607918564782
-        },
-        {
-          "slugs": [
-            "2026-04-13-call-08"
-          ],
-          "filename": "咨询案例 - 心理篇.md",
-          "rank": 2,
-          "score": 0.635674076303502
-        },
-        {
-          "slugs": [],
-          "filename": "咨询案例 - 心理篇.md",
-          "rank": 3,
-          "score": 0.6324898095481211
-        },
-        {
-          "slugs": [],
-          "filename": "咨询案例 - 婚姻篇.md",
-          "rank": 4,
-          "score": 0.6296503054892
-        }
-      ],
-      "first_relevant_rank": 0,
-      "sample_type": "positive",
-      "first_relevant_document_rank": 0,
-      "first_relevant_case_rank": null,
-      "matched_expected_cases": null,
-      "case_candidates": null,
-      "query_elapsed_ms": null
-    },
-    {
-      "expected": [
-        "2026-07-16-call-05"
-      ],
-      "id": "R15",
-      "candidates": [
-        {
-          "slugs": [],
-          "filename": "心理疏导通用框架 - 框架篇.md",
-          "rank": 1,
-          "score": 0.68010782106552
-        },
-        {
-          "slugs": [
-            "2026-07-16-call-05"
-          ],
-          "filename": "咨询案例 - 职场篇.md",
-          "rank": 2,
-          "score": 0.6586375369777213
-        },
-        {
-          "slugs": [],
-          "filename": "心理疏导通用框架 - 框架篇.md",
-          "rank": 3,
-          "score": 0.6577944043062823
-        },
-        {
-          "slugs": [
-            "2026-07-12-call-01"
-          ],
-          "filename": "咨询案例 - 职场篇.md",
-          "rank": 4,
-          "score": 0.6368894499098943
-        }
-      ],
-      "first_relevant_rank": 2,
-      "sample_type": "positive",
-      "first_relevant_document_rank": 2,
-      "first_relevant_case_rank": null,
-      "matched_expected_cases": null,
-      "case_candidates": null,
-      "query_elapsed_ms": null
-    },
-    {
-      "expected": [
-        "2026-07-16-call-06"
-      ],
-      "id": "R16",
-      "candidates": [
-        {
-          "slugs": [],
-          "filename": "咨询案例 - 婚姻篇.md",
-          "rank": 1,
-          "score": 0.6846388375940311
-        },
-        {
-          "slugs": [],
-          "filename": "咨询案例 - 情感篇.md",
-          "rank": 2,
-          "score": 0.6846388375940311
-        },
-        {
-          "slugs": [],
-          "filename": "咨询案例 - 心理篇.md",
-          "rank": 3,
-          "score": 0.6828420762875245
-        },
-        {
-          "slugs": [],
-          "filename": "咨询案例 - 其他篇.md",
-          "rank": 4,
-          "score": 0.6817195832427548
-        }
-      ],
-      "first_relevant_rank": 0,
-      "sample_type": "positive",
-      "first_relevant_document_rank": 0,
-      "first_relevant_case_rank": null,
-      "matched_expected_cases": null,
-      "case_candidates": null,
-      "query_elapsed_ms": null
-    },
-    {
-      "expected": [
-        "2026-07-16-call-07"
-      ],
-      "id": "R17",
-      "candidates": [
-        {
-          "slugs": [],
-          "filename": "心理疏导通用框架 - 框架篇.md",
-          "rank": 1,
-          "score": 0.6224322473265688
-        },
-        {
-          "slugs": [],
-          "filename": "咨询案例 - 成长篇.md",
-          "rank": 2,
-          "score": 0.6187699469763056
-        },
-        {
-          "slugs": [],
-          "filename": "咨询案例 - 心理篇.md",
-          "rank": 3,
-          "score": 0.6172807698088189
-        },
-        {
-          "slugs": [],
-          "filename": "咨询案例 - 婚姻篇.md",
-          "rank": 4,
-          "score": 0.6146932181140903
-        }
-      ],
-      "first_relevant_rank": 0,
-      "sample_type": "positive",
-      "first_relevant_document_rank": 0,
-      "first_relevant_case_rank": null,
-      "matched_expected_cases": null,
-      "case_candidates": null,
-      "query_elapsed_ms": null
-    },
-    {
-      "expected": [
-        "2026-07-14-call-01"
-      ],
-      "id": "R18",
-      "candidates": [
-        {
-          "slugs": [
-            "2026-03-08-call-14"
-          ],
-          "filename": "咨询案例 - 心理篇.md",
-          "rank": 1,
-          "score": 0.7305842943676858
-        },
-        {
-          "slugs": [
-            "2026-04-07-call-11"
-          ],
-          "filename": "咨询案例 - 心理篇.md",
-          "rank": 2,
-          "score": 0.676239613705067
-        },
-        {
-          "slugs": [
-            "2026-05-11-call-02"
-          ],
-          "filename": "咨询案例 - 心理篇.md",
-          "rank": 3,
-          "score": 0.6716684504634183
-        },
-        {
-          "slugs": [
-            "2026-04-13-call-08"
-          ],
-          "filename": "咨询案例 - 心理篇.md",
-          "rank": 4,
-          "score": 0.667205743403612
-        }
-      ],
-      "first_relevant_rank": 0,
-      "sample_type": "positive",
-      "first_relevant_document_rank": 0,
-      "first_relevant_case_rank": null,
-      "matched_expected_cases": null,
-      "case_candidates": null,
-      "query_elapsed_ms": null
-    },
-    {
-      "expected": [
-        "2026-07-14-call-02"
-      ],
-      "id": "R19",
-      "candidates": [
-        {
-          "slugs": [
-            "2026-04-13-call-08"
-          ],
-          "filename": "咨询案例 - 心理篇.md",
-          "rank": 1,
-          "score": 0.570924608136263
-        },
-        {
-          "slugs": [],
-          "filename": "心理疏导通用框架 - 框架篇.md",
-          "rank": 2,
-          "score": 0.5608939790114664
-        },
-        {
-          "slugs": [],
-          "filename": "心理疏导通用框架 - 框架篇.md",
-          "rank": 3,
-          "score": 0.5566966376441672
-        },
-        {
-          "slugs": [],
-          "filename": "咨询案例 - 成长篇.md",
-          "rank": 4,
-          "score": 0.5416114174125668
-        }
-      ],
-      "first_relevant_rank": 0,
-      "sample_type": "positive",
-      "first_relevant_document_rank": 0,
-      "first_relevant_case_rank": null,
-      "matched_expected_cases": null,
-      "case_candidates": null,
-      "query_elapsed_ms": null
-    },
-    {
-      "expected": [
-        "2026-07-14-call-03"
-      ],
-      "id": "R20",
-      "candidates": [
-        {
-          "slugs": [],
-          "filename": "心理疏导通用框架 - 框架篇.md",
-          "rank": 1,
-          "score": 0.6644900131230285
-        },
-        {
-          "slugs": [],
-          "filename": "咨询案例 - 心理篇.md",
-          "rank": 2,
-          "score": 0.6550916777518375
-        },
-        {
-          "slugs": [],
-          "filename": "咨询案例 - 父母篇.md",
-          "rank": 3,
-          "score": 0.6534545002545015
-        },
-        {
-          "slugs": [],
-          "filename": "咨询案例 - 其他篇.md",
-          "rank": 4,
-          "score": 0.6527324021666628
-        }
-      ],
-      "first_relevant_rank": 0,
-      "sample_type": "positive",
-      "first_relevant_document_rank": 0,
-      "first_relevant_case_rank": null,
-      "matched_expected_cases": null,
-      "case_candidates": null,
-      "query_elapsed_ms": null
-    },
-    {
-      "expected": [
-        "2026-07-14-call-04"
-      ],
-      "id": "R21",
-      "candidates": [
-        {
-          "slugs": [],
-          "filename": "咨询案例 - 婚姻篇.md",
-          "rank": 1,
-          "score": 0.6836221074982961
-        },
-        {
-          "slugs": [],
-          "filename": "咨询案例 - 情感篇.md",
-          "rank": 2,
-          "score": 0.6836221074982961
-        },
-        {
-          "slugs": [],
-          "filename": "咨询案例 - 心理篇.md",
-          "rank": 3,
-          "score": 0.680906736010185
-        },
-        {
-          "slugs": [],
-          "filename": "咨询案例 - 父母篇.md",
-          "rank": 4,
-          "score": 0.6791819942771063
-        }
-      ],
-      "first_relevant_rank": 0,
-      "sample_type": "positive",
-      "first_relevant_document_rank": 0,
-      "first_relevant_case_rank": null,
-      "matched_expected_cases": null,
-      "case_candidates": null,
-      "query_elapsed_ms": null
-    },
-    {
-      "expected": [
-        "2026-07-14-call-05"
-      ],
-      "id": "R22",
-      "candidates": [
-        {
-          "slugs": [],
-          "filename": "心理疏导通用框架 - 框架篇.md",
-          "rank": 1,
-          "score": 0.6318054730800895
-        },
-        {
-          "slugs": [],
-          "filename": "心理疏导通用框架 - 框架篇.md",
-          "rank": 2,
-          "score": 0.5559604566924932
-        },
-        {
-          "slugs": [],
-          "filename": "咨询案例 - 婚姻篇.md",
-          "rank": 3,
-          "score": 0.548438886595569
-        },
-        {
-          "slugs": [],
-          "filename": "咨询案例 - 情感篇.md",
-          "rank": 4,
-          "score": 0.548438886595569
-        }
-      ],
-      "first_relevant_rank": 0,
-      "sample_type": "positive",
-      "first_relevant_document_rank": 0,
-      "first_relevant_case_rank": null,
-      "matched_expected_cases": null,
-      "case_candidates": null,
-      "query_elapsed_ms": null
-    },
-    {
-      "expected": [
-        "2026-07-14-call-06"
-      ],
-      "id": "R23",
-      "candidates": [
-        {
-          "slugs": [
-            "2026-04-13-call-10"
-          ],
-          "filename": "咨询案例 - 职场篇.md",
-          "rank": 1,
-          "score": 0.6495017116222991
-        },
-        {
-          "slugs": [
-            "2026-03-12-call-02"
-          ],
-          "filename": "咨询案例 - 职场篇.md",
-          "rank": 2,
-          "score": 0.6135945083007835
-        },
-        {
-          "slugs": [
-            "2026-04-29-call-03"
-          ],
-          "filename": "咨询案例 - 婚姻篇.md",
-          "rank": 3,
-          "score": 0.6135621387909747
-        },
-        {
-          "slugs": [
-            "2026-05-27-call-02"
-          ],
-          "filename": "咨询案例 - 职场篇.md",
-          "rank": 4,
-          "score": 0.6126395017780529
-        }
-      ],
-      "first_relevant_rank": 0,
-      "sample_type": "positive",
-      "first_relevant_document_rank": 0,
-      "first_relevant_case_rank": null,
-      "matched_expected_cases": null,
-      "case_candidates": null,
-      "query_elapsed_ms": null
-    },
-    {
-      "expected": [
-        "2026-07-14-call-08"
-      ],
-      "id": "R24",
-      "candidates": [
-        {
-          "slugs": [],
-          "filename": "心理疏导通用框架 - 框架篇.md",
-          "rank": 1,
-          "score": 0.5876612300292413
-        },
-        {
-          "slugs": [],
-          "filename": "咨询案例 - 成长篇.md",
-          "rank": 2,
-          "score": 0.5872323521606757
-        },
-        {
-          "slugs": [],
-          "filename": "咨询案例 - 其他篇.md",
-          "rank": 3,
-          "score": 0.5856396597467288
-        },
-        {
-          "slugs": [],
-          "filename": "咨询案例 - 婚姻篇.md",
-          "rank": 4,
-          "score": 0.5841716539681924
-        }
-      ],
-      "first_relevant_rank": 0,
-      "sample_type": "positive",
-      "first_relevant_document_rank": 0,
-      "first_relevant_case_rank": null,
-      "matched_expected_cases": null,
-      "case_candidates": null,
-      "query_elapsed_ms": null
-    },
-    {
-      "expected": [
-        "2026-07-14-call-09"
-      ],
-      "id": "R25",
-      "candidates": [
-        {
-          "slugs": [],
-          "filename": "咨询案例 - 心理篇.md",
-          "rank": 1,
-          "score": 0.6300376747426873
-        },
-        {
-          "slugs": [],
-          "filename": "咨询案例 - 婚姻篇.md",
-          "rank": 2,
-          "score": 0.6264910617441833
-        },
-        {
-          "slugs": [],
-          "filename": "咨询案例 - 情感篇.md",
-          "rank": 3,
-          "score": 0.6264910617441833
-        },
-        {
-          "slugs": [],
-          "filename": "咨询案例 - 成长篇.md",
-          "rank": 4,
-          "score": 0.6264031892242756
-        }
-      ],
-      "first_relevant_rank": 0,
-      "sample_type": "positive",
-      "first_relevant_document_rank": 0,
-      "first_relevant_case_rank": null,
-      "matched_expected_cases": null,
-      "case_candidates": null,
-      "query_elapsed_ms": null
-    },
-    {
-      "expected": [],
-      "id": "N01",
-      "candidates": [
-        {
-          "slugs": [],
-          "filename": "咨询案例 - 父母篇.md",
-          "rank": 1,
-          "score": 0.6847034872635046
-        },
-        {
-          "slugs": [],
-          "filename": "咨询案例 - 学业篇.md",
-          "rank": 2,
-          "score": 0.6825950152145484
-        },
-        {
-          "slugs": [],
-          "filename": "咨询案例 - 职场篇.md",
-          "rank": 3,
-          "score": 0.6814275760858213
-        },
-        {
-          "slugs": [],
-          "filename": "咨询案例 - 其他篇.md",
-          "rank": 4,
-          "score": 0.6787163017043751
-        }
-      ],
-      "first_relevant_rank": 0,
-      "sample_type": "negative",
-      "first_relevant_document_rank": 0,
-      "first_relevant_case_rank": null,
-      "matched_expected_cases": null,
-      "case_candidates": null,
-      "query_elapsed_ms": null
-    },
-    {
-      "expected": [],
-      "id": "N02",
-      "candidates": [
-        {
-          "slugs": [],
-          "filename": "心理疏导通用框架 - 框架篇.md",
-          "rank": 1,
-          "score": 0.4749831998762642
-        },
-        {
-          "slugs": [],
-          "filename": "咨询案例 - 父母篇.md",
-          "rank": 2,
-          "score": 0.4566597977461872
-        },
-        {
-          "slugs": [],
-          "filename": "咨询案例 - 心理篇.md",
-          "rank": 3,
-          "score": 0.45300210855874773
-        },
-        {
-          "slugs": [],
-          "filename": "咨询案例 - 子女篇.md",
-          "rank": 4,
-          "score": 0.4515042699590684
-        }
-      ],
-      "first_relevant_rank": 0,
-      "sample_type": "negative",
-      "first_relevant_document_rank": 0,
-      "first_relevant_case_rank": null,
-      "matched_expected_cases": null,
-      "case_candidates": null,
-      "query_elapsed_ms": null
-    },
-    {
-      "expected": [],
-      "id": "N03",
-      "candidates": [
-        {
-          "slugs": [],
-          "filename": "咨询案例 - 心理篇.md",
-          "rank": 1,
-          "score": 0.6155666279778532
-        },
-        {
-          "slugs": [],
-          "filename": "咨询案例 - 婚姻篇.md",
-          "rank": 2,
-          "score": 0.6150530079705782
-        },
-        {
-          "slugs": [],
-          "filename": "咨询案例 - 情感篇.md",
-          "rank": 3,
-          "score": 0.6150530079705782
-        },
-        {
-          "slugs": [],
-          "filename": "咨询案例 - 成长篇.md",
-          "rank": 4,
-          "score": 0.6133215311708217
-        }
-      ],
-      "first_relevant_rank": 0,
-      "sample_type": "negative",
-      "first_relevant_document_rank": 0,
-      "first_relevant_case_rank": null,
-      "matched_expected_cases": null,
-      "case_candidates": null,
-      "query_elapsed_ms": null
-    },
-    {
-      "expected": [],
-      "id": "N04",
-      "candidates": [
-        {
-          "slugs": [],
-          "filename": "咨询案例 - 成长篇.md",
-          "rank": 1,
-          "score": 0.5717539345012648
-        },
-        {
-          "slugs": [],
-          "filename": "咨询案例 - 婚姻篇.md",
-          "rank": 2,
-          "score": 0.5674475411917532
-        },
-        {
-          "slugs": [],
-          "filename": "咨询案例 - 情感篇.md",
-          "rank": 3,
-          "score": 0.5674475411917532
-        },
-        {
-          "slugs": [],
-          "filename": "咨询案例 - 学业篇.md",
-          "rank": 4,
-          "score": 0.5643637279521844
-        }
-      ],
-      "first_relevant_rank": 0,
-      "sample_type": "negative",
-      "first_relevant_document_rank": 0,
-      "first_relevant_case_rank": null,
-      "matched_expected_cases": null,
-      "case_candidates": null,
-      "query_elapsed_ms": null
-    },
-    {
-      "expected": [],
-      "id": "N05",
-      "candidates": [
-        {
-          "slugs": [],
-          "filename": "咨询案例 - 成长篇.md",
-          "rank": 1,
-          "score": 0.6441137162725712
-        },
-        {
-          "slugs": [],
-          "filename": "咨询案例 - 心理篇.md",
-          "rank": 2,
-          "score": 0.6403912653947503
-        },
-        {
-          "slugs": [],
-          "filename": "咨询案例 - 婚姻篇.md",
-          "rank": 3,
-          "score": 0.6402757612352306
-        },
-        {
-          "slugs": [],
-          "filename": "咨询案例 - 情感篇.md",
-          "rank": 4,
-          "score": 0.6402757612352306
-        }
-      ],
-      "first_relevant_rank": 0,
-      "sample_type": "negative",
-      "first_relevant_document_rank": 0,
-      "first_relevant_case_rank": null,
-      "matched_expected_cases": null,
-      "case_candidates": null,
-      "query_elapsed_ms": null
-    }
-  ],
-  "report_schema_version": 2,
-  "measurement_status": "legacy_measurement_with_contract_migration; not rerun",
-  "seed_schema_version": 1,
-  "seed_sha256": null,
-  "tokenizer_uri": null,
-  "unjudged_cases": 0,
-  "document_hit_at_4": 0.04,
-  "document_mrr_at_4": 0.02,
-  "case_hit_at_4": null,
-  "case_recall_at_4": null,
-  "mrr_ranking_unit": "case; legacy Document MRR preserved as document_mrr_at_4",
-  "positive_rejection_rate": 0,
-  "negative_false_hit_rate": 1,
-  "total_elapsed_ms": null,
-  "document_tie_break": "legacy: score DESC, loader index ASC; canonical source/text tie-break applies only to future runs",
-  "case_ranking": "not measured; future runs use max score per slug over all threshold-qualified Documents, score DESC then slug ASC, deduplicate before topK",
-  "compatibility": {
-    "recall_at_4": "deprecated alias of document_hit_at_4, never Recall",
-    "no_hit_accuracy": "negative rejection rate",
-    "first_relevant_rank": "deprecated document rank alias",
-    "mrr_at_4": "schema v2 uses case ranks; schema v1 used Document ranks, now document_mrr_at_4"
+  "report_schema_version" : 2,
+  "measurement_status" : "measured",
+  "timestamp" : "2026-09-20T03:54:37.795613300Z",
+  "seed_schema_version" : 2,
+  "seed_sha256" : "5c4f950d7815c9ee9fe9f72bc2370b5a9793adcab8b2f8197a511a8f2dab27de",
+  "label_status" : "source-grounded seed; pending independent human relevance review",
+  "scope" : "source-grounded seed regression; production Markdown loader and Transformers embedding; exact cosine; excludes pgvector ANN, deep planning/reranking and chat generation",
+  "model_uri" : "https://huggingface.co/intfloat/multilingual-e5-small/resolve/main/onnx/model.onnx",
+  "tokenizer_uri" : "https://huggingface.co/intfloat/multilingual-e5-small/resolve/main/tokenizer.json",
+  "dimensions" : 384,
+  "corpus_fingerprint" : "abc35ec23e9d4722",
+  "documents" : 835,
+  "top_k" : 4,
+  "threshold" : 0.3,
+  "document_tie_break" : "score DESC, filename ASC, status ASC, full text ASC (Java String order); identical source/text Documents are interchangeable",
+  "case_ranking" : "max score per slug over all threshold-qualified Documents; score DESC, slug ASC; deduplicate before topK",
+  "mrr_ranking_unit" : "case",
+  "positive_cases" : 25,
+  "negative_cases" : 5,
+  "unjudged_cases" : 0,
+  "document_hit_at_4" : 0.72,
+  "recall_at_4" : 0.72,
+  "document_mrr_at_4" : 0.5633333333333332,
+  "case_hit_at_4" : 0.72,
+  "case_recall_at_4" : 0.72,
+  "mrr_at_4" : 0.5633333333333332,
+  "positive_rejection_rate" : 0.0,
+  "negative_false_hit_rate" : 1.0,
+  "no_hit_accuracy" : 0.0,
+  "compatibility" : {
+    "first_relevant_rank" : "deprecated document rank alias",
+    "recall_at_4" : "deprecated alias of document_hit_at_4, never Recall",
+    "no_hit_accuracy" : "negative rejection rate",
+    "mrr_at_4" : "schema v2 uses case ranks; schema v1 used Document ranks, now document_mrr_at_4"
   },
-  "migration_notes": [
-    "Original measurement timestamp, scores, Document ranks and corpus fingerprint preserved; no new embedding run.",
-    "Legacy seed had no schema_version (reported as implicit v1); current rag_seed.json is v2 with unchanged queries and expected labels.",
-    "Full threshold-qualified Document rankings were not saved: deduplicated case top4, case recall and case MRR cannot be reconstructed and remain null.",
-    "Tokenizer URI, seed hash and elapsed times were not captured by the old run and remain null.",
-    "Rejection rates are derived only from saved candidate counts and the existing explicit seed positive/negative split; unlabelled candidates are not new negatives.",
-    "Query text removed from this report; source-grounded seed queries remain in rag_seed.json."
-  ]
+  "results" : [ {
+    "id" : "R01",
+    "sample_type" : "positive",
+    "expected" : [ "2026-07-18-call-01" ],
+    "first_relevant_rank" : 3,
+    "first_relevant_document_rank" : 3,
+    "first_relevant_case_rank" : 3,
+    "matched_expected_cases" : 1,
+    "candidates" : [ {
+      "score" : 0.8952873605387258,
+      "slugs" : [ "2026-05-25-call-09" ],
+      "rank" : 1,
+      "document_key" : "5a77659ef7bed4fdefd0b06f919f33d2fc1aaad4cba171345236e2b3fdb48c34",
+      "filename" : "咨询案例 - 父母篇.md"
+    }, {
+      "score" : 0.8951858837242045,
+      "slugs" : [ "2026-06-02-call-01" ],
+      "rank" : 2,
+      "document_key" : "91b4b6f7261bbe8b92d018f8b1bac9878712c7e475307b4b22659cb9397a0f92",
+      "filename" : "咨询案例 - 父母篇.md"
+    }, {
+      "score" : 0.8949124847999543,
+      "slugs" : [ "2026-07-18-call-01" ],
+      "rank" : 3,
+      "document_key" : "c05cb104a95f88c17ea41800202c98871f61527346ecb21ebdb31452c0cffbab",
+      "filename" : "咨询案例 - 父母篇.md"
+    }, {
+      "score" : 0.8936038391835126,
+      "slugs" : [ "2026-07-10-call-13" ],
+      "rank" : 4,
+      "document_key" : "0047003ce57b4edb4fd8f5d0c0232d8301d2c8eac01d169b8d165414e42953f5",
+      "filename" : "咨询案例 - 父母篇.md"
+    } ],
+    "case_candidates" : [ {
+      "best_document_key" : "5a77659ef7bed4fdefd0b06f919f33d2fc1aaad4cba171345236e2b3fdb48c34",
+      "rank" : 1,
+      "slug" : "2026-05-25-call-09",
+      "score" : 0.8952873605387258
+    }, {
+      "best_document_key" : "91b4b6f7261bbe8b92d018f8b1bac9878712c7e475307b4b22659cb9397a0f92",
+      "rank" : 2,
+      "slug" : "2026-06-02-call-01",
+      "score" : 0.8951858837242045
+    }, {
+      "best_document_key" : "c05cb104a95f88c17ea41800202c98871f61527346ecb21ebdb31452c0cffbab",
+      "rank" : 3,
+      "slug" : "2026-07-18-call-01",
+      "score" : 0.8949124847999543
+    }, {
+      "best_document_key" : "0047003ce57b4edb4fd8f5d0c0232d8301d2c8eac01d169b8d165414e42953f5",
+      "rank" : 4,
+      "slug" : "2026-07-10-call-13",
+      "score" : 0.8936038391835126
+    } ],
+    "query_elapsed_ms" : 19.0774
+  }, {
+    "id" : "R02",
+    "sample_type" : "positive",
+    "expected" : [ "2026-07-18-call-02" ],
+    "first_relevant_rank" : 1,
+    "first_relevant_document_rank" : 1,
+    "first_relevant_case_rank" : 1,
+    "matched_expected_cases" : 1,
+    "candidates" : [ {
+      "score" : 0.9010141903697299,
+      "slugs" : [ "2026-07-18-call-02" ],
+      "rank" : 1,
+      "document_key" : "b3c86c4cb40a273c9ec779173946b04d89d1e62295b9f44148633c57f255da53",
+      "filename" : "咨询案例 - 情感篇.md"
+    }, {
+      "score" : 0.8962935672035636,
+      "slugs" : [ "2026-04-01-call-05" ],
+      "rank" : 2,
+      "document_key" : "61de9fc23811473f22b0eaf3120bf4fd8c6ac2f5bc5dc477fccd1a5f39fead10",
+      "filename" : "咨询案例 - 心理篇.md"
+    }, {
+      "score" : 0.895162289171743,
+      "slugs" : [ "2026-06-12-call-05" ],
+      "rank" : 3,
+      "document_key" : "ecc2b68fe7c70600ec0ae331bcf03d77ca925b54055fde4edee32c77407990b1",
+      "filename" : "咨询案例 - 心理篇.md"
+    }, {
+      "score" : 0.8943290558392121,
+      "slugs" : [ "2026-05-11-call-09" ],
+      "rank" : 4,
+      "document_key" : "ffdc47dcdc3b5354fc0bc8749b9cbaf41257df1a9f36f8dec4701a3dbffc9387",
+      "filename" : "咨询案例 - 子女篇.md"
+    } ],
+    "case_candidates" : [ {
+      "best_document_key" : "b3c86c4cb40a273c9ec779173946b04d89d1e62295b9f44148633c57f255da53",
+      "rank" : 1,
+      "slug" : "2026-07-18-call-02",
+      "score" : 0.9010141903697299
+    }, {
+      "best_document_key" : "61de9fc23811473f22b0eaf3120bf4fd8c6ac2f5bc5dc477fccd1a5f39fead10",
+      "rank" : 2,
+      "slug" : "2026-04-01-call-05",
+      "score" : 0.8962935672035636
+    }, {
+      "best_document_key" : "ecc2b68fe7c70600ec0ae331bcf03d77ca925b54055fde4edee32c77407990b1",
+      "rank" : 3,
+      "slug" : "2026-06-12-call-05",
+      "score" : 0.895162289171743
+    }, {
+      "best_document_key" : "ffdc47dcdc3b5354fc0bc8749b9cbaf41257df1a9f36f8dec4701a3dbffc9387",
+      "rank" : 4,
+      "slug" : "2026-05-11-call-09",
+      "score" : 0.8943290558392121
+    } ],
+    "query_elapsed_ms" : 10.7919
+  }, {
+    "id" : "R03",
+    "sample_type" : "positive",
+    "expected" : [ "2026-07-18-call-03" ],
+    "first_relevant_rank" : 2,
+    "first_relevant_document_rank" : 2,
+    "first_relevant_case_rank" : 2,
+    "matched_expected_cases" : 1,
+    "candidates" : [ {
+      "score" : 0.8874799552444728,
+      "slugs" : [ "2026-05-11-call-10" ],
+      "rank" : 1,
+      "document_key" : "04aee534d63abea490faa2c574950e612a689c23b160ca99b28fdd1c6e90edeb",
+      "filename" : "咨询案例 - 学业篇.md"
+    }, {
+      "score" : 0.8872921087023997,
+      "slugs" : [ "2026-07-18-call-03" ],
+      "rank" : 2,
+      "document_key" : "c2ffea871a9b5ec7cda0237e1811de1aff0984e42453426b9cfbc0d5863c3a90",
+      "filename" : "咨询案例 - 职场篇.md"
+    }, {
+      "score" : 0.8866950685329478,
+      "slugs" : [ "2026-03-10-call-06" ],
+      "rank" : 3,
+      "document_key" : "5f23fb730646b9f938466d29a3b7ffe49b134e454a4c665906bd8a6d74d35b22",
+      "filename" : "咨询案例 - 心理篇.md"
+    }, {
+      "score" : 0.8845709598568646,
+      "slugs" : [ "2026-03-08-call-06" ],
+      "rank" : 4,
+      "document_key" : "95d55965f7656933cf41e192f3d66654545def08f1df3dff11c9c56a91d78139",
+      "filename" : "咨询案例 - 职场篇.md"
+    } ],
+    "case_candidates" : [ {
+      "best_document_key" : "04aee534d63abea490faa2c574950e612a689c23b160ca99b28fdd1c6e90edeb",
+      "rank" : 1,
+      "slug" : "2026-05-11-call-10",
+      "score" : 0.8874799552444728
+    }, {
+      "best_document_key" : "c2ffea871a9b5ec7cda0237e1811de1aff0984e42453426b9cfbc0d5863c3a90",
+      "rank" : 2,
+      "slug" : "2026-07-18-call-03",
+      "score" : 0.8872921087023997
+    }, {
+      "best_document_key" : "5f23fb730646b9f938466d29a3b7ffe49b134e454a4c665906bd8a6d74d35b22",
+      "rank" : 3,
+      "slug" : "2026-03-10-call-06",
+      "score" : 0.8866950685329478
+    }, {
+      "best_document_key" : "95d55965f7656933cf41e192f3d66654545def08f1df3dff11c9c56a91d78139",
+      "rank" : 4,
+      "slug" : "2026-03-08-call-06",
+      "score" : 0.8845709598568646
+    } ],
+    "query_elapsed_ms" : 9.2329
+  }, {
+    "id" : "R04",
+    "sample_type" : "positive",
+    "expected" : [ "2026-07-18-call-04" ],
+    "first_relevant_rank" : 1,
+    "first_relevant_document_rank" : 1,
+    "first_relevant_case_rank" : 1,
+    "matched_expected_cases" : 1,
+    "candidates" : [ {
+      "score" : 0.8994430332256831,
+      "slugs" : [ "2026-07-18-call-04" ],
+      "rank" : 1,
+      "document_key" : "99cbb8d02731ab3e9e6cc7570897ec4cf3b3397abe4a1ca56feb655c95613e69",
+      "filename" : "咨询案例 - 情感篇.md"
+    }, {
+      "score" : 0.8978095350780317,
+      "slugs" : [ "2026-07-04-call-09" ],
+      "rank" : 2,
+      "document_key" : "503bb8d9c6baec55543ee2ff6cae65f86155f9aa4a5fc52258a93aa03b526bce",
+      "filename" : "咨询案例 - 职场篇.md"
+    }, {
+      "score" : 0.8976628900327093,
+      "slugs" : [ "2026-05-31-call-07" ],
+      "rank" : 3,
+      "document_key" : "52c94267dc13dfa8de697b9b94fce9001867c54a0615ec0c30b56d0b472245ee",
+      "filename" : "咨询案例 - 职场篇.md"
+    }, {
+      "score" : 0.8963309305728694,
+      "slugs" : [ "2026-05-19-call-02" ],
+      "rank" : 4,
+      "document_key" : "8545f9b1d112a361687b56603d7d1bb1849987ddbcd4491a321d900697cc7c47",
+      "filename" : "咨询案例 - 职场篇.md"
+    } ],
+    "case_candidates" : [ {
+      "best_document_key" : "99cbb8d02731ab3e9e6cc7570897ec4cf3b3397abe4a1ca56feb655c95613e69",
+      "rank" : 1,
+      "slug" : "2026-07-18-call-04",
+      "score" : 0.8994430332256831
+    }, {
+      "best_document_key" : "503bb8d9c6baec55543ee2ff6cae65f86155f9aa4a5fc52258a93aa03b526bce",
+      "rank" : 2,
+      "slug" : "2026-07-04-call-09",
+      "score" : 0.8978095350780317
+    }, {
+      "best_document_key" : "52c94267dc13dfa8de697b9b94fce9001867c54a0615ec0c30b56d0b472245ee",
+      "rank" : 3,
+      "slug" : "2026-05-31-call-07",
+      "score" : 0.8976628900327093
+    }, {
+      "best_document_key" : "8545f9b1d112a361687b56603d7d1bb1849987ddbcd4491a321d900697cc7c47",
+      "rank" : 4,
+      "slug" : "2026-05-19-call-02",
+      "score" : 0.8963309305728694
+    } ],
+    "query_elapsed_ms" : 8.7274
+  }, {
+    "id" : "R05",
+    "sample_type" : "positive",
+    "expected" : [ "2026-07-18-call-05" ],
+    "first_relevant_rank" : 0,
+    "first_relevant_document_rank" : 0,
+    "first_relevant_case_rank" : 0,
+    "matched_expected_cases" : 0,
+    "candidates" : [ {
+      "score" : 0.8961739825007491,
+      "slugs" : [ "2026-04-07-call-13" ],
+      "rank" : 1,
+      "document_key" : "7f0356f6b5bb65ac2401a4e14d81fba0c6860ce88007da05a63ccc4e35c2dffa",
+      "filename" : "咨询案例 - 父母篇.md"
+    }, {
+      "score" : 0.8913765260500945,
+      "slugs" : [ "2026-07-06-call-05" ],
+      "rank" : 2,
+      "document_key" : "f1f235fb49fd567b3a0e9c4924a9cd93e7a49a582cbf201f321e45554c78af22",
+      "filename" : "咨询案例 - 父母篇.md"
+    }, {
+      "score" : 0.8853316862388361,
+      "slugs" : [ "2026-03-12-call-10" ],
+      "rank" : 3,
+      "document_key" : "b42009bae65c815694499bd40bfa5849aab7e8c6b54032b5632fe6be14189250",
+      "filename" : "咨询案例 - 心理篇.md"
+    }, {
+      "score" : 0.8845656136362942,
+      "slugs" : [ "2026-03-12-call-01" ],
+      "rank" : 4,
+      "document_key" : "87b37094f1c2729d73566d7cedb938d331ba90943ba75852a36b28a0121114ba",
+      "filename" : "咨询案例 - 父母篇.md"
+    } ],
+    "case_candidates" : [ {
+      "best_document_key" : "7f0356f6b5bb65ac2401a4e14d81fba0c6860ce88007da05a63ccc4e35c2dffa",
+      "rank" : 1,
+      "slug" : "2026-04-07-call-13",
+      "score" : 0.8961739825007491
+    }, {
+      "best_document_key" : "f1f235fb49fd567b3a0e9c4924a9cd93e7a49a582cbf201f321e45554c78af22",
+      "rank" : 2,
+      "slug" : "2026-07-06-call-05",
+      "score" : 0.8913765260500945
+    }, {
+      "best_document_key" : "b42009bae65c815694499bd40bfa5849aab7e8c6b54032b5632fe6be14189250",
+      "rank" : 3,
+      "slug" : "2026-03-12-call-10",
+      "score" : 0.8853316862388361
+    }, {
+      "best_document_key" : "87b37094f1c2729d73566d7cedb938d331ba90943ba75852a36b28a0121114ba",
+      "rank" : 4,
+      "slug" : "2026-03-12-call-01",
+      "score" : 0.8845656136362942
+    } ],
+    "query_elapsed_ms" : 9.0415
+  }, {
+    "id" : "R06",
+    "sample_type" : "positive",
+    "expected" : [ "2026-07-18-call-06" ],
+    "first_relevant_rank" : 0,
+    "first_relevant_document_rank" : 0,
+    "first_relevant_case_rank" : 0,
+    "matched_expected_cases" : 0,
+    "candidates" : [ {
+      "score" : 0.9033776578519592,
+      "slugs" : [ "2026-03-12-call-01" ],
+      "rank" : 1,
+      "document_key" : "87b37094f1c2729d73566d7cedb938d331ba90943ba75852a36b28a0121114ba",
+      "filename" : "咨询案例 - 父母篇.md"
+    }, {
+      "score" : 0.9004698891663746,
+      "slugs" : [ "2026-04-05-call-15" ],
+      "rank" : 2,
+      "document_key" : "36e24e6e9065efb950671c7bfaab252c1196324ce15a2f208c0aed6cf16f025b",
+      "filename" : "咨询案例 - 父母篇.md"
+    }, {
+      "score" : 0.8924567873466215,
+      "slugs" : [ "2026-06-20-call-02" ],
+      "rank" : 3,
+      "document_key" : "98708aba00ff01f090aeb0ec56b7b22beb1dde589c2558e4116a0bc347017810",
+      "filename" : "咨询案例 - 父母篇.md"
+    }, {
+      "score" : 0.8911483468421952,
+      "slugs" : [ "2026-07-04-call-15" ],
+      "rank" : 4,
+      "document_key" : "731c5ca7d862bd563867ddbf5678e294d3768efccf150c68e1add8092e0c3ab5",
+      "filename" : "咨询案例 - 子女篇.md"
+    } ],
+    "case_candidates" : [ {
+      "best_document_key" : "87b37094f1c2729d73566d7cedb938d331ba90943ba75852a36b28a0121114ba",
+      "rank" : 1,
+      "slug" : "2026-03-12-call-01",
+      "score" : 0.9033776578519592
+    }, {
+      "best_document_key" : "36e24e6e9065efb950671c7bfaab252c1196324ce15a2f208c0aed6cf16f025b",
+      "rank" : 2,
+      "slug" : "2026-04-05-call-15",
+      "score" : 0.9004698891663746
+    }, {
+      "best_document_key" : "98708aba00ff01f090aeb0ec56b7b22beb1dde589c2558e4116a0bc347017810",
+      "rank" : 3,
+      "slug" : "2026-06-20-call-02",
+      "score" : 0.8924567873466215
+    }, {
+      "best_document_key" : "731c5ca7d862bd563867ddbf5678e294d3768efccf150c68e1add8092e0c3ab5",
+      "rank" : 4,
+      "slug" : "2026-07-04-call-15",
+      "score" : 0.8911483468421952
+    } ],
+    "query_elapsed_ms" : 7.357
+  }, {
+    "id" : "R07",
+    "sample_type" : "positive",
+    "expected" : [ "2026-07-18-call-07" ],
+    "first_relevant_rank" : 0,
+    "first_relevant_document_rank" : 0,
+    "first_relevant_case_rank" : 0,
+    "matched_expected_cases" : 0,
+    "candidates" : [ {
+      "score" : 0.8982958423348086,
+      "slugs" : [ "2026-04-05-call-08" ],
+      "rank" : 1,
+      "document_key" : "4fd63a5b3110aa67316491b15d4296795e11d628e5bb34ace6c44d30eae908c6",
+      "filename" : "咨询案例 - 父母篇.md"
+    }, {
+      "score" : 0.8969390774742865,
+      "slugs" : [ "2026-07-12-call-03" ],
+      "rank" : 2,
+      "document_key" : "9566c5f97817d6cbb0f1d4b0ba3c7161b44c8525bb33cca8855848f2a59b422b",
+      "filename" : "咨询案例 - 心理篇.md"
+    }, {
+      "score" : 0.8953340950654191,
+      "slugs" : [ "2026-07-04-call-15" ],
+      "rank" : 3,
+      "document_key" : "731c5ca7d862bd563867ddbf5678e294d3768efccf150c68e1add8092e0c3ab5",
+      "filename" : "咨询案例 - 子女篇.md"
+    }, {
+      "score" : 0.8950004554219732,
+      "slugs" : [ "2026-07-18-call-06" ],
+      "rank" : 4,
+      "document_key" : "e9dee0b3f13c16985da41ba6d46a80c8395260d091bff651644d78200884f1af",
+      "filename" : "咨询案例 - 父母篇.md"
+    } ],
+    "case_candidates" : [ {
+      "best_document_key" : "4fd63a5b3110aa67316491b15d4296795e11d628e5bb34ace6c44d30eae908c6",
+      "rank" : 1,
+      "slug" : "2026-04-05-call-08",
+      "score" : 0.8982958423348086
+    }, {
+      "best_document_key" : "9566c5f97817d6cbb0f1d4b0ba3c7161b44c8525bb33cca8855848f2a59b422b",
+      "rank" : 2,
+      "slug" : "2026-07-12-call-03",
+      "score" : 0.8969390774742865
+    }, {
+      "best_document_key" : "731c5ca7d862bd563867ddbf5678e294d3768efccf150c68e1add8092e0c3ab5",
+      "rank" : 3,
+      "slug" : "2026-07-04-call-15",
+      "score" : 0.8953340950654191
+    }, {
+      "best_document_key" : "e9dee0b3f13c16985da41ba6d46a80c8395260d091bff651644d78200884f1af",
+      "rank" : 4,
+      "slug" : "2026-07-18-call-06",
+      "score" : 0.8950004554219732
+    } ],
+    "query_elapsed_ms" : 6.9746
+  }, {
+    "id" : "R08",
+    "sample_type" : "positive",
+    "expected" : [ "2026-07-18-call-08" ],
+    "first_relevant_rank" : 1,
+    "first_relevant_document_rank" : 1,
+    "first_relevant_case_rank" : 1,
+    "matched_expected_cases" : 1,
+    "candidates" : [ {
+      "score" : 0.9071910718124891,
+      "slugs" : [ "2026-07-18-call-08" ],
+      "rank" : 1,
+      "document_key" : "94d4b70fba55ad3eadb80bdb873e99ea25fc2ebe3ad4d8852f0744af99e3fda4",
+      "filename" : "咨询案例 - 子女篇.md"
+    }, {
+      "score" : 0.9068250796488231,
+      "slugs" : [ "2026-05-03-call-15" ],
+      "rank" : 2,
+      "document_key" : "06803db4b4e10ea019f72778667fe29c9d9d7370dd7465da0ec192cfccb2e451",
+      "filename" : "咨询案例 - 父母篇.md"
+    }, {
+      "score" : 0.9065495525348212,
+      "slugs" : [ "2026-06-12-call-06" ],
+      "rank" : 3,
+      "document_key" : "a17e9119f6b244b04095515ff22c51c5a61713fedfd40d5b109d61240d31d1a1",
+      "filename" : "咨询案例 - 子女篇.md"
+    }, {
+      "score" : 0.9043114048235834,
+      "slugs" : [ "2026-07-04-call-15" ],
+      "rank" : 4,
+      "document_key" : "731c5ca7d862bd563867ddbf5678e294d3768efccf150c68e1add8092e0c3ab5",
+      "filename" : "咨询案例 - 子女篇.md"
+    } ],
+    "case_candidates" : [ {
+      "best_document_key" : "94d4b70fba55ad3eadb80bdb873e99ea25fc2ebe3ad4d8852f0744af99e3fda4",
+      "rank" : 1,
+      "slug" : "2026-07-18-call-08",
+      "score" : 0.9071910718124891
+    }, {
+      "best_document_key" : "06803db4b4e10ea019f72778667fe29c9d9d7370dd7465da0ec192cfccb2e451",
+      "rank" : 2,
+      "slug" : "2026-05-03-call-15",
+      "score" : 0.9068250796488231
+    }, {
+      "best_document_key" : "a17e9119f6b244b04095515ff22c51c5a61713fedfd40d5b109d61240d31d1a1",
+      "rank" : 3,
+      "slug" : "2026-06-12-call-06",
+      "score" : 0.9065495525348212
+    }, {
+      "best_document_key" : "731c5ca7d862bd563867ddbf5678e294d3768efccf150c68e1add8092e0c3ab5",
+      "rank" : 4,
+      "slug" : "2026-07-04-call-15",
+      "score" : 0.9043114048235834
+    } ],
+    "query_elapsed_ms" : 7.2085
+  }, {
+    "id" : "R09",
+    "sample_type" : "positive",
+    "expected" : [ "2026-07-18-call-09" ],
+    "first_relevant_rank" : 0,
+    "first_relevant_document_rank" : 0,
+    "first_relevant_case_rank" : 0,
+    "matched_expected_cases" : 0,
+    "candidates" : [ {
+      "score" : 0.9007511509208402,
+      "slugs" : [ "2026-06-28-call-04" ],
+      "rank" : 1,
+      "document_key" : "8ff1620f19069a54fa767d0ddfaf77b5d396f9330d167e1a8586bb0abc7c7f9e",
+      "filename" : "咨询案例 - 成长篇.md"
+    }, {
+      "score" : 0.8972843784326064,
+      "slugs" : [ "2026-06-26-call-02" ],
+      "rank" : 2,
+      "document_key" : "dd373b748f947559b65a105c316f12f8044dbf1338ef52533bed687e0146a36f",
+      "filename" : "咨询案例 - 心理篇.md"
+    }, {
+      "score" : 0.8971246774165567,
+      "slugs" : [ "2026-07-10-call-03" ],
+      "rank" : 3,
+      "document_key" : "d23d19f339049250ef9025ecdbfff5348e4e67baac739e2b5a71251c046f7e55",
+      "filename" : "咨询案例 - 职场篇.md"
+    }, {
+      "score" : 0.8966850341527557,
+      "slugs" : [ "2026-07-02-call-08" ],
+      "rank" : 4,
+      "document_key" : "140fe733da863d15fe654d86ccd6b607a24e96bb37664902aed74f2d25f7503c",
+      "filename" : "咨询案例 - 职场篇.md"
+    } ],
+    "case_candidates" : [ {
+      "best_document_key" : "8ff1620f19069a54fa767d0ddfaf77b5d396f9330d167e1a8586bb0abc7c7f9e",
+      "rank" : 1,
+      "slug" : "2026-06-28-call-04",
+      "score" : 0.9007511509208402
+    }, {
+      "best_document_key" : "dd373b748f947559b65a105c316f12f8044dbf1338ef52533bed687e0146a36f",
+      "rank" : 2,
+      "slug" : "2026-06-26-call-02",
+      "score" : 0.8972843784326064
+    }, {
+      "best_document_key" : "d23d19f339049250ef9025ecdbfff5348e4e67baac739e2b5a71251c046f7e55",
+      "rank" : 3,
+      "slug" : "2026-07-10-call-03",
+      "score" : 0.8971246774165567
+    }, {
+      "best_document_key" : "140fe733da863d15fe654d86ccd6b607a24e96bb37664902aed74f2d25f7503c",
+      "rank" : 4,
+      "slug" : "2026-07-02-call-08",
+      "score" : 0.8966850341527557
+    } ],
+    "query_elapsed_ms" : 6.6894
+  }, {
+    "id" : "R10",
+    "sample_type" : "positive",
+    "expected" : [ "2026-07-18-call-10" ],
+    "first_relevant_rank" : 2,
+    "first_relevant_document_rank" : 2,
+    "first_relevant_case_rank" : 2,
+    "matched_expected_cases" : 1,
+    "candidates" : [ {
+      "score" : 0.9083577364911489,
+      "slugs" : [ "2026-04-07-call-10" ],
+      "rank" : 1,
+      "document_key" : "871204629f6b4fcfc64dff8d5a902973d07fa8ed5da30b2ef78fca16ec721602",
+      "filename" : "咨询案例 - 父母篇.md"
+    }, {
+      "score" : 0.9081945422411658,
+      "slugs" : [ "2026-07-18-call-10" ],
+      "rank" : 2,
+      "document_key" : "ed79d43660844edd3d596ff05a9cd4424ba1cb439d246d7d59efdd1f0ef6e213",
+      "filename" : "咨询案例 - 职场篇.md"
+    }, {
+      "score" : 0.9068379115567105,
+      "slugs" : [ "2026-04-05-call-08" ],
+      "rank" : 3,
+      "document_key" : "4fd63a5b3110aa67316491b15d4296795e11d628e5bb34ace6c44d30eae908c6",
+      "filename" : "咨询案例 - 父母篇.md"
+    }, {
+      "score" : 0.905574218438573,
+      "slugs" : [ "2026-04-13-call-15" ],
+      "rank" : 4,
+      "document_key" : "1b03cf15ab59e38adec5ba0d056e4c6b76158727d9946f9884c565c47a0c0a0c",
+      "filename" : "咨询案例 - 父母篇.md"
+    } ],
+    "case_candidates" : [ {
+      "best_document_key" : "871204629f6b4fcfc64dff8d5a902973d07fa8ed5da30b2ef78fca16ec721602",
+      "rank" : 1,
+      "slug" : "2026-04-07-call-10",
+      "score" : 0.9083577364911489
+    }, {
+      "best_document_key" : "ed79d43660844edd3d596ff05a9cd4424ba1cb439d246d7d59efdd1f0ef6e213",
+      "rank" : 2,
+      "slug" : "2026-07-18-call-10",
+      "score" : 0.9081945422411658
+    }, {
+      "best_document_key" : "4fd63a5b3110aa67316491b15d4296795e11d628e5bb34ace6c44d30eae908c6",
+      "rank" : 3,
+      "slug" : "2026-04-05-call-08",
+      "score" : 0.9068379115567105
+    }, {
+      "best_document_key" : "1b03cf15ab59e38adec5ba0d056e4c6b76158727d9946f9884c565c47a0c0a0c",
+      "rank" : 4,
+      "slug" : "2026-04-13-call-15",
+      "score" : 0.905574218438573
+    } ],
+    "query_elapsed_ms" : 7.1289
+  }, {
+    "id" : "R11",
+    "sample_type" : "positive",
+    "expected" : [ "2026-07-18-call-11" ],
+    "first_relevant_rank" : 2,
+    "first_relevant_document_rank" : 2,
+    "first_relevant_case_rank" : 2,
+    "matched_expected_cases" : 1,
+    "candidates" : [ {
+      "score" : 0.9038967841535043,
+      "slugs" : [ "2026-06-30-call-04" ],
+      "rank" : 1,
+      "document_key" : "456a5c04323c9025ca58a2c7d52546702291d39ded6fecbb8d2ad4f35282bdf8",
+      "filename" : "咨询案例 - 职场篇.md"
+    }, {
+      "score" : 0.9016121320937515,
+      "slugs" : [ "2026-07-18-call-11" ],
+      "rank" : 2,
+      "document_key" : "d990d19f5a828ddfb3634ae1f5df7cd8d7e7086e2307eec9f02a3fa6ce9b9d00",
+      "filename" : "咨询案例 - 职场篇.md"
+    }, {
+      "score" : 0.8978514684157772,
+      "slugs" : [ "2026-05-05-call-04" ],
+      "rank" : 3,
+      "document_key" : "e7c5ab3b43b5805e6399826b0adb9c94aefc77ded185041a3310499b0658297c",
+      "filename" : "咨询案例 - 职场篇.md"
+    }, {
+      "score" : 0.8971842732658216,
+      "slugs" : [ "2026-06-26-call-02" ],
+      "rank" : 4,
+      "document_key" : "dd373b748f947559b65a105c316f12f8044dbf1338ef52533bed687e0146a36f",
+      "filename" : "咨询案例 - 心理篇.md"
+    } ],
+    "case_candidates" : [ {
+      "best_document_key" : "456a5c04323c9025ca58a2c7d52546702291d39ded6fecbb8d2ad4f35282bdf8",
+      "rank" : 1,
+      "slug" : "2026-06-30-call-04",
+      "score" : 0.9038967841535043
+    }, {
+      "best_document_key" : "d990d19f5a828ddfb3634ae1f5df7cd8d7e7086e2307eec9f02a3fa6ce9b9d00",
+      "rank" : 2,
+      "slug" : "2026-07-18-call-11",
+      "score" : 0.9016121320937515
+    }, {
+      "best_document_key" : "e7c5ab3b43b5805e6399826b0adb9c94aefc77ded185041a3310499b0658297c",
+      "rank" : 3,
+      "slug" : "2026-05-05-call-04",
+      "score" : 0.8978514684157772
+    }, {
+      "best_document_key" : "dd373b748f947559b65a105c316f12f8044dbf1338ef52533bed687e0146a36f",
+      "rank" : 4,
+      "slug" : "2026-06-26-call-02",
+      "score" : 0.8971842732658216
+    } ],
+    "query_elapsed_ms" : 6.7168
+  }, {
+    "id" : "R12",
+    "sample_type" : "positive",
+    "expected" : [ "2026-07-16-call-01" ],
+    "first_relevant_rank" : 1,
+    "first_relevant_document_rank" : 1,
+    "first_relevant_case_rank" : 1,
+    "matched_expected_cases" : 1,
+    "candidates" : [ {
+      "score" : 0.8959342129275211,
+      "slugs" : [ "2026-07-16-call-01" ],
+      "rank" : 1,
+      "document_key" : "b02571fa146e0c07566d72b06e7470644b82baeef21bfdccde223cf9d306c751",
+      "filename" : "咨询案例 - 心理篇.md"
+    }, {
+      "score" : 0.8874203332161821,
+      "slugs" : [ "2026-05-15-call-05" ],
+      "rank" : 2,
+      "document_key" : "4d3f37423a2293ec1da7f33a4c2779a759d98833965a86073e1dcba1156e3c4c",
+      "filename" : "咨询案例 - 父母篇.md"
+    }, {
+      "score" : 0.8866177987679588,
+      "slugs" : [ "2026-04-01-call-08" ],
+      "rank" : 3,
+      "document_key" : "e3dbabfa079be661bdcb97b82f705278cc02b97ca0d00c9fd756adb2a6e85f3a",
+      "filename" : "咨询案例 - 情感篇.md"
+    }, {
+      "score" : 0.8865410985130622,
+      "slugs" : [ "2026-07-04-call-15" ],
+      "rank" : 4,
+      "document_key" : "731c5ca7d862bd563867ddbf5678e294d3768efccf150c68e1add8092e0c3ab5",
+      "filename" : "咨询案例 - 子女篇.md"
+    } ],
+    "case_candidates" : [ {
+      "best_document_key" : "b02571fa146e0c07566d72b06e7470644b82baeef21bfdccde223cf9d306c751",
+      "rank" : 1,
+      "slug" : "2026-07-16-call-01",
+      "score" : 0.8959342129275211
+    }, {
+      "best_document_key" : "4d3f37423a2293ec1da7f33a4c2779a759d98833965a86073e1dcba1156e3c4c",
+      "rank" : 2,
+      "slug" : "2026-05-15-call-05",
+      "score" : 0.8874203332161821
+    }, {
+      "best_document_key" : "e3dbabfa079be661bdcb97b82f705278cc02b97ca0d00c9fd756adb2a6e85f3a",
+      "rank" : 3,
+      "slug" : "2026-04-01-call-08",
+      "score" : 0.8866177987679588
+    }, {
+      "best_document_key" : "731c5ca7d862bd563867ddbf5678e294d3768efccf150c68e1add8092e0c3ab5",
+      "rank" : 4,
+      "slug" : "2026-07-04-call-15",
+      "score" : 0.8865410985130622
+    } ],
+    "query_elapsed_ms" : 8.6193
+  }, {
+    "id" : "R13",
+    "sample_type" : "positive",
+    "expected" : [ "2026-07-16-call-02" ],
+    "first_relevant_rank" : 1,
+    "first_relevant_document_rank" : 1,
+    "first_relevant_case_rank" : 1,
+    "matched_expected_cases" : 1,
+    "candidates" : [ {
+      "score" : 0.9099899686938102,
+      "slugs" : [ "2026-07-16-call-02" ],
+      "rank" : 1,
+      "document_key" : "a87949b480660dfcb254f7751f1ceb05994657c17c559d8b988a2cd447afd010",
+      "filename" : "咨询案例 - 婚姻篇.md"
+    }, {
+      "score" : 0.9063753878937244,
+      "slugs" : [ "2026-06-20-call-01" ],
+      "rank" : 2,
+      "document_key" : "aff93d152f920656f885fb27791e1a81a0289fe3537875deadbae20ece68006d",
+      "filename" : "咨询案例 - 职场篇.md"
+    }, {
+      "score" : 0.9007349110412539,
+      "slugs" : [ "2026-06-22-call-13" ],
+      "rank" : 3,
+      "document_key" : "4079bd00176c70a361e3001c12c7734e4e63fe00449705622210679ba4829888",
+      "filename" : "咨询案例 - 情感篇.md"
+    }, {
+      "score" : 0.8979850561237499,
+      "slugs" : [ "2026-04-01-call-01" ],
+      "rank" : 4,
+      "document_key" : "feb8edde1e6e0ac26acd233279fded7e844358d37fc5ce06dfd7345300b5a4e1",
+      "filename" : "咨询案例 - 职场篇.md"
+    } ],
+    "case_candidates" : [ {
+      "best_document_key" : "a87949b480660dfcb254f7751f1ceb05994657c17c559d8b988a2cd447afd010",
+      "rank" : 1,
+      "slug" : "2026-07-16-call-02",
+      "score" : 0.9099899686938102
+    }, {
+      "best_document_key" : "aff93d152f920656f885fb27791e1a81a0289fe3537875deadbae20ece68006d",
+      "rank" : 2,
+      "slug" : "2026-06-20-call-01",
+      "score" : 0.9063753878937244
+    }, {
+      "best_document_key" : "4079bd00176c70a361e3001c12c7734e4e63fe00449705622210679ba4829888",
+      "rank" : 3,
+      "slug" : "2026-06-22-call-13",
+      "score" : 0.9007349110412539
+    }, {
+      "best_document_key" : "feb8edde1e6e0ac26acd233279fded7e844358d37fc5ce06dfd7345300b5a4e1",
+      "rank" : 4,
+      "slug" : "2026-04-01-call-01",
+      "score" : 0.8979850561237499
+    } ],
+    "query_elapsed_ms" : 6.6928
+  }, {
+    "id" : "R14",
+    "sample_type" : "positive",
+    "expected" : [ "2026-07-16-call-04" ],
+    "first_relevant_rank" : 0,
+    "first_relevant_document_rank" : 0,
+    "first_relevant_case_rank" : 0,
+    "matched_expected_cases" : 0,
+    "candidates" : [ {
+      "score" : 0.8957490716603027,
+      "slugs" : [ "2026-03-12-call-01" ],
+      "rank" : 1,
+      "document_key" : "87b37094f1c2729d73566d7cedb938d331ba90943ba75852a36b28a0121114ba",
+      "filename" : "咨询案例 - 父母篇.md"
+    }, {
+      "score" : 0.8899590969622041,
+      "slugs" : [ "2026-06-30-call-11" ],
+      "rank" : 2,
+      "document_key" : "0bed371f30a54c697c61edf28c3a9d116a53a492e86e213a988e4588e8c8d4d7",
+      "filename" : "咨询案例 - 婚姻篇.md"
+    }, {
+      "score" : 0.8895268215743635,
+      "slugs" : [ "2026-04-07-call-10" ],
+      "rank" : 3,
+      "document_key" : "871204629f6b4fcfc64dff8d5a902973d07fa8ed5da30b2ef78fca16ec721602",
+      "filename" : "咨询案例 - 父母篇.md"
+    }, {
+      "score" : 0.8883062660907514,
+      "slugs" : [ "2026-03-14-call-21" ],
+      "rank" : 4,
+      "document_key" : "96faddd99cc328265b5b374ef8cbec4989b3345f283e43e3a1e8792f9ed3dfe2",
+      "filename" : "咨询案例 - 婚姻篇.md"
+    } ],
+    "case_candidates" : [ {
+      "best_document_key" : "87b37094f1c2729d73566d7cedb938d331ba90943ba75852a36b28a0121114ba",
+      "rank" : 1,
+      "slug" : "2026-03-12-call-01",
+      "score" : 0.8957490716603027
+    }, {
+      "best_document_key" : "0bed371f30a54c697c61edf28c3a9d116a53a492e86e213a988e4588e8c8d4d7",
+      "rank" : 2,
+      "slug" : "2026-06-30-call-11",
+      "score" : 0.8899590969622041
+    }, {
+      "best_document_key" : "871204629f6b4fcfc64dff8d5a902973d07fa8ed5da30b2ef78fca16ec721602",
+      "rank" : 3,
+      "slug" : "2026-04-07-call-10",
+      "score" : 0.8895268215743635
+    }, {
+      "best_document_key" : "96faddd99cc328265b5b374ef8cbec4989b3345f283e43e3a1e8792f9ed3dfe2",
+      "rank" : 4,
+      "slug" : "2026-03-14-call-21",
+      "score" : 0.8883062660907514
+    } ],
+    "query_elapsed_ms" : 6.6826
+  }, {
+    "id" : "R15",
+    "sample_type" : "positive",
+    "expected" : [ "2026-07-16-call-05" ],
+    "first_relevant_rank" : 1,
+    "first_relevant_document_rank" : 1,
+    "first_relevant_case_rank" : 1,
+    "matched_expected_cases" : 1,
+    "candidates" : [ {
+      "score" : 0.9346645704651296,
+      "slugs" : [ "2026-07-16-call-05" ],
+      "rank" : 1,
+      "document_key" : "2eda4703e705864085909e73aa0d29e634bcd21d193e5659848d2d16a91483ed",
+      "filename" : "咨询案例 - 职场篇.md"
+    }, {
+      "score" : 0.9151731656386285,
+      "slugs" : [ "2026-04-29-call-04" ],
+      "rank" : 2,
+      "document_key" : "aadff37220eeb0f9f4a0aff55a4ae5d43c94a68d3c730d4bc8fc2776ad2f0df0",
+      "filename" : "咨询案例 - 职场篇.md"
+    }, {
+      "score" : 0.9063233288289911,
+      "slugs" : [ "2026-05-01-call-06" ],
+      "rank" : 3,
+      "document_key" : "0ceab42a6e0b181a773c2287bf8dfa91ce80b222d274263d0a82aec53001578e",
+      "filename" : "咨询案例 - 职场篇.md"
+    }, {
+      "score" : 0.9024623770874427,
+      "slugs" : [ "2026-07-12-call-01" ],
+      "rank" : 4,
+      "document_key" : "5d230bf85e2bfb7ea30f4289f037ce896656bde93888026b5baa360daf6a783a",
+      "filename" : "咨询案例 - 职场篇.md"
+    } ],
+    "case_candidates" : [ {
+      "best_document_key" : "2eda4703e705864085909e73aa0d29e634bcd21d193e5659848d2d16a91483ed",
+      "rank" : 1,
+      "slug" : "2026-07-16-call-05",
+      "score" : 0.9346645704651296
+    }, {
+      "best_document_key" : "aadff37220eeb0f9f4a0aff55a4ae5d43c94a68d3c730d4bc8fc2776ad2f0df0",
+      "rank" : 2,
+      "slug" : "2026-04-29-call-04",
+      "score" : 0.9151731656386285
+    }, {
+      "best_document_key" : "0ceab42a6e0b181a773c2287bf8dfa91ce80b222d274263d0a82aec53001578e",
+      "rank" : 3,
+      "slug" : "2026-05-01-call-06",
+      "score" : 0.9063233288289911
+    }, {
+      "best_document_key" : "5d230bf85e2bfb7ea30f4289f037ce896656bde93888026b5baa360daf6a783a",
+      "rank" : 4,
+      "slug" : "2026-07-12-call-01",
+      "score" : 0.9024623770874427
+    } ],
+    "query_elapsed_ms" : 8.2985
+  }, {
+    "id" : "R16",
+    "sample_type" : "positive",
+    "expected" : [ "2026-07-16-call-06" ],
+    "first_relevant_rank" : 1,
+    "first_relevant_document_rank" : 1,
+    "first_relevant_case_rank" : 1,
+    "matched_expected_cases" : 1,
+    "candidates" : [ {
+      "score" : 0.905543373384339,
+      "slugs" : [ "2026-07-16-call-06" ],
+      "rank" : 1,
+      "document_key" : "6627e705227847eb77b2ee49f43cbd2155587b4d65856bc65fd572989ab41a22",
+      "filename" : "咨询案例 - 职场篇.md"
+    }, {
+      "score" : 0.9045757895319728,
+      "slugs" : [ "2026-04-29-call-01" ],
+      "rank" : 2,
+      "document_key" : "e94ea75aee5ee8b6abad3fe02414e508683bdc80ec61bc5dc78aa6e0d59967e3",
+      "filename" : "咨询案例 - 学业篇.md"
+    }, {
+      "score" : 0.9038618429776236,
+      "slugs" : [ "2026-04-07-call-15" ],
+      "rank" : 3,
+      "document_key" : "137725da4f22eef9032b6eb0370659827732cd7c72d228c0973ae50d3adee2ce",
+      "filename" : "咨询案例 - 职场篇.md"
+    }, {
+      "score" : 0.9032745426881414,
+      "slugs" : [ "2026-07-10-call-10" ],
+      "rank" : 4,
+      "document_key" : "7f2cba7d452810cbd225c0cd6c213694a4518bff4074b6550eeae3a35fcc7023",
+      "filename" : "咨询案例 - 心理篇.md"
+    } ],
+    "case_candidates" : [ {
+      "best_document_key" : "6627e705227847eb77b2ee49f43cbd2155587b4d65856bc65fd572989ab41a22",
+      "rank" : 1,
+      "slug" : "2026-07-16-call-06",
+      "score" : 0.905543373384339
+    }, {
+      "best_document_key" : "e94ea75aee5ee8b6abad3fe02414e508683bdc80ec61bc5dc78aa6e0d59967e3",
+      "rank" : 2,
+      "slug" : "2026-04-29-call-01",
+      "score" : 0.9045757895319728
+    }, {
+      "best_document_key" : "137725da4f22eef9032b6eb0370659827732cd7c72d228c0973ae50d3adee2ce",
+      "rank" : 3,
+      "slug" : "2026-04-07-call-15",
+      "score" : 0.9038618429776236
+    }, {
+      "best_document_key" : "7f2cba7d452810cbd225c0cd6c213694a4518bff4074b6550eeae3a35fcc7023",
+      "rank" : 4,
+      "slug" : "2026-07-10-call-10",
+      "score" : 0.9032745426881414
+    } ],
+    "query_elapsed_ms" : 7.676
+  }, {
+    "id" : "R17",
+    "sample_type" : "positive",
+    "expected" : [ "2026-07-16-call-07" ],
+    "first_relevant_rank" : 1,
+    "first_relevant_document_rank" : 1,
+    "first_relevant_case_rank" : 1,
+    "matched_expected_cases" : 1,
+    "candidates" : [ {
+      "score" : 0.9187874829245558,
+      "slugs" : [ "2026-07-16-call-07" ],
+      "rank" : 1,
+      "document_key" : "5f10566588ebbc2ffbcdaa3fa01c301c2f1dab45c431353b0549b08c152333ee",
+      "filename" : "咨询案例 - 心理篇.md"
+    }, {
+      "score" : 0.9000336078768645,
+      "slugs" : [ "2026-07-18-call-07" ],
+      "rank" : 2,
+      "document_key" : "c607b47c376684fe0cbae6919e7ec67e82bda45c14f486558c6f0f5a464988ca",
+      "filename" : "咨询案例 - 子女篇.md"
+    }, {
+      "score" : 0.8993324221984406,
+      "slugs" : [ "2026-04-07-call-08" ],
+      "rank" : 3,
+      "document_key" : "83f5a7274e318fb3afc9875fce2a9bf85a9b56c7131b3996328ddc368ebf505a",
+      "filename" : "咨询案例 - 职场篇.md"
+    }, {
+      "score" : 0.8976949031620601,
+      "slugs" : [ "2026-03-14-call-10" ],
+      "rank" : 4,
+      "document_key" : "13ba04f3b4a5d49da61edc31b49554709da6de7634f4965a2b4090e73cc86ff5",
+      "filename" : "咨询案例 - 心理篇.md"
+    } ],
+    "case_candidates" : [ {
+      "best_document_key" : "5f10566588ebbc2ffbcdaa3fa01c301c2f1dab45c431353b0549b08c152333ee",
+      "rank" : 1,
+      "slug" : "2026-07-16-call-07",
+      "score" : 0.9187874829245558
+    }, {
+      "best_document_key" : "c607b47c376684fe0cbae6919e7ec67e82bda45c14f486558c6f0f5a464988ca",
+      "rank" : 2,
+      "slug" : "2026-07-18-call-07",
+      "score" : 0.9000336078768645
+    }, {
+      "best_document_key" : "83f5a7274e318fb3afc9875fce2a9bf85a9b56c7131b3996328ddc368ebf505a",
+      "rank" : 3,
+      "slug" : "2026-04-07-call-08",
+      "score" : 0.8993324221984406
+    }, {
+      "best_document_key" : "13ba04f3b4a5d49da61edc31b49554709da6de7634f4965a2b4090e73cc86ff5",
+      "rank" : 4,
+      "slug" : "2026-03-14-call-10",
+      "score" : 0.8976949031620601
+    } ],
+    "query_elapsed_ms" : 8.0863
+  }, {
+    "id" : "R18",
+    "sample_type" : "positive",
+    "expected" : [ "2026-07-14-call-01" ],
+    "first_relevant_rank" : 1,
+    "first_relevant_document_rank" : 1,
+    "first_relevant_case_rank" : 1,
+    "matched_expected_cases" : 1,
+    "candidates" : [ {
+      "score" : 0.9133292122183178,
+      "slugs" : [ "2026-07-14-call-01" ],
+      "rank" : 1,
+      "document_key" : "a742de851d056f581b480f3392048e4e74dc29e68974b875c57254f75f16f932",
+      "filename" : "咨询案例 - 心理篇.md"
+    }, {
+      "score" : 0.8966682279901654,
+      "slugs" : [ "2026-04-05-call-14" ],
+      "rank" : 2,
+      "document_key" : "35628512e898954a3d803bc2c6cfaf75e365ebda20ea1ccd1334ba4bb4a0b72f",
+      "filename" : "咨询案例 - 心理篇.md"
+    }, {
+      "score" : 0.8958225700457053,
+      "slugs" : [ "2026-04-05-call-08" ],
+      "rank" : 3,
+      "document_key" : "4fd63a5b3110aa67316491b15d4296795e11d628e5bb34ace6c44d30eae908c6",
+      "filename" : "咨询案例 - 父母篇.md"
+    }, {
+      "score" : 0.8954202582857884,
+      "slugs" : [ "2026-07-18-call-10" ],
+      "rank" : 4,
+      "document_key" : "ed79d43660844edd3d596ff05a9cd4424ba1cb439d246d7d59efdd1f0ef6e213",
+      "filename" : "咨询案例 - 职场篇.md"
+    } ],
+    "case_candidates" : [ {
+      "best_document_key" : "a742de851d056f581b480f3392048e4e74dc29e68974b875c57254f75f16f932",
+      "rank" : 1,
+      "slug" : "2026-07-14-call-01",
+      "score" : 0.9133292122183178
+    }, {
+      "best_document_key" : "35628512e898954a3d803bc2c6cfaf75e365ebda20ea1ccd1334ba4bb4a0b72f",
+      "rank" : 2,
+      "slug" : "2026-04-05-call-14",
+      "score" : 0.8966682279901654
+    }, {
+      "best_document_key" : "4fd63a5b3110aa67316491b15d4296795e11d628e5bb34ace6c44d30eae908c6",
+      "rank" : 3,
+      "slug" : "2026-04-05-call-08",
+      "score" : 0.8958225700457053
+    }, {
+      "best_document_key" : "ed79d43660844edd3d596ff05a9cd4424ba1cb439d246d7d59efdd1f0ef6e213",
+      "rank" : 4,
+      "slug" : "2026-07-18-call-10",
+      "score" : 0.8954202582857884
+    } ],
+    "query_elapsed_ms" : 6.9394
+  }, {
+    "id" : "R19",
+    "sample_type" : "positive",
+    "expected" : [ "2026-07-14-call-02" ],
+    "first_relevant_rank" : 0,
+    "first_relevant_document_rank" : 0,
+    "first_relevant_case_rank" : 0,
+    "matched_expected_cases" : 0,
+    "candidates" : [ {
+      "score" : 0.897714589998316,
+      "slugs" : [ "2026-04-07-call-10" ],
+      "rank" : 1,
+      "document_key" : "871204629f6b4fcfc64dff8d5a902973d07fa8ed5da30b2ef78fca16ec721602",
+      "filename" : "咨询案例 - 父母篇.md"
+    }, {
+      "score" : 0.8962753971256513,
+      "slugs" : [ "2026-04-05-call-15" ],
+      "rank" : 2,
+      "document_key" : "36e24e6e9065efb950671c7bfaab252c1196324ce15a2f208c0aed6cf16f025b",
+      "filename" : "咨询案例 - 父母篇.md"
+    }, {
+      "score" : 0.8939203335935004,
+      "slugs" : [ "2026-04-07-call-14" ],
+      "rank" : 3,
+      "document_key" : "a913fc122948f2e5dc9cfb2f9164df8b32c7abb973f7b1610e7407d4bb649fb2",
+      "filename" : "咨询案例 - 父母篇.md"
+    }, {
+      "score" : 0.8937413860707953,
+      "slugs" : [ "2026-05-07-call-17" ],
+      "rank" : 4,
+      "document_key" : "a53ae4542ede0bb515a9df50b541e9dd92b25bc18476b852b0302931545073c5",
+      "filename" : "咨询案例 - 职场篇.md"
+    } ],
+    "case_candidates" : [ {
+      "best_document_key" : "871204629f6b4fcfc64dff8d5a902973d07fa8ed5da30b2ef78fca16ec721602",
+      "rank" : 1,
+      "slug" : "2026-04-07-call-10",
+      "score" : 0.897714589998316
+    }, {
+      "best_document_key" : "36e24e6e9065efb950671c7bfaab252c1196324ce15a2f208c0aed6cf16f025b",
+      "rank" : 2,
+      "slug" : "2026-04-05-call-15",
+      "score" : 0.8962753971256513
+    }, {
+      "best_document_key" : "a913fc122948f2e5dc9cfb2f9164df8b32c7abb973f7b1610e7407d4bb649fb2",
+      "rank" : 3,
+      "slug" : "2026-04-07-call-14",
+      "score" : 0.8939203335935004
+    }, {
+      "best_document_key" : "a53ae4542ede0bb515a9df50b541e9dd92b25bc18476b852b0302931545073c5",
+      "rank" : 4,
+      "slug" : "2026-05-07-call-17",
+      "score" : 0.8937413860707953
+    } ],
+    "query_elapsed_ms" : 7.4087
+  }, {
+    "id" : "R20",
+    "sample_type" : "positive",
+    "expected" : [ "2026-07-14-call-03" ],
+    "first_relevant_rank" : 0,
+    "first_relevant_document_rank" : 0,
+    "first_relevant_case_rank" : 0,
+    "matched_expected_cases" : 0,
+    "candidates" : [ {
+      "score" : 0.9003723924951932,
+      "slugs" : [ "2026-03-10-call-16" ],
+      "rank" : 1,
+      "document_key" : "ff30158f0d69ad4d21e30c864564efbffb435efab4e83dd5b49e6075e766b7af",
+      "filename" : "咨询案例 - 子女篇.md"
+    }, {
+      "score" : 0.8978545253002342,
+      "slugs" : [ "2026-03-20-call-01" ],
+      "rank" : 2,
+      "document_key" : "6741dc2fdc5ed04eac43d38cd862edb97e6e13275e44cc4a3c4bb7882358d4c2",
+      "filename" : "咨询案例 - 心理篇.md"
+    }, {
+      "score" : 0.896653390309441,
+      "slugs" : [ "2026-07-18-call-05" ],
+      "rank" : 3,
+      "document_key" : "322ccf035cde65f2629ab71db9fae57571ab3f6c8210c19db57a6aeb1eb6e885",
+      "filename" : "咨询案例 - 学业篇.md"
+    }, {
+      "score" : 0.896569236080432,
+      "slugs" : [ "2026-07-06-call-05" ],
+      "rank" : 4,
+      "document_key" : "f1f235fb49fd567b3a0e9c4924a9cd93e7a49a582cbf201f321e45554c78af22",
+      "filename" : "咨询案例 - 父母篇.md"
+    } ],
+    "case_candidates" : [ {
+      "best_document_key" : "ff30158f0d69ad4d21e30c864564efbffb435efab4e83dd5b49e6075e766b7af",
+      "rank" : 1,
+      "slug" : "2026-03-10-call-16",
+      "score" : 0.9003723924951932
+    }, {
+      "best_document_key" : "6741dc2fdc5ed04eac43d38cd862edb97e6e13275e44cc4a3c4bb7882358d4c2",
+      "rank" : 2,
+      "slug" : "2026-03-20-call-01",
+      "score" : 0.8978545253002342
+    }, {
+      "best_document_key" : "322ccf035cde65f2629ab71db9fae57571ab3f6c8210c19db57a6aeb1eb6e885",
+      "rank" : 3,
+      "slug" : "2026-07-18-call-05",
+      "score" : 0.896653390309441
+    }, {
+      "best_document_key" : "f1f235fb49fd567b3a0e9c4924a9cd93e7a49a582cbf201f321e45554c78af22",
+      "rank" : 4,
+      "slug" : "2026-07-06-call-05",
+      "score" : 0.896569236080432
+    } ],
+    "query_elapsed_ms" : 7.0163
+  }, {
+    "id" : "R21",
+    "sample_type" : "positive",
+    "expected" : [ "2026-07-14-call-04" ],
+    "first_relevant_rank" : 4,
+    "first_relevant_document_rank" : 4,
+    "first_relevant_case_rank" : 4,
+    "matched_expected_cases" : 1,
+    "candidates" : [ {
+      "score" : 0.9036803588090766,
+      "slugs" : [ "2026-07-18-call-10" ],
+      "rank" : 1,
+      "document_key" : "ed79d43660844edd3d596ff05a9cd4424ba1cb439d246d7d59efdd1f0ef6e213",
+      "filename" : "咨询案例 - 职场篇.md"
+    }, {
+      "score" : 0.9026614593234117,
+      "slugs" : [ "2026-05-29-call-01" ],
+      "rank" : 2,
+      "document_key" : "f74a93d36cf7e4890435da558e97b23bedcd0de13572758ce3aa67e0128bb703",
+      "filename" : "咨询案例 - 婚姻篇.md"
+    }, {
+      "score" : 0.9025816134392027,
+      "slugs" : [ "2026-07-04-call-15" ],
+      "rank" : 3,
+      "document_key" : "731c5ca7d862bd563867ddbf5678e294d3768efccf150c68e1add8092e0c3ab5",
+      "filename" : "咨询案例 - 子女篇.md"
+    }, {
+      "score" : 0.9007739122238408,
+      "slugs" : [ "2026-07-14-call-04" ],
+      "rank" : 4,
+      "document_key" : "4aba1678a03d1e57539dd512c9c53dd24d2f1b4dd7a5b66367f0fc6503ec92ba",
+      "filename" : "咨询案例 - 职场篇.md"
+    } ],
+    "case_candidates" : [ {
+      "best_document_key" : "ed79d43660844edd3d596ff05a9cd4424ba1cb439d246d7d59efdd1f0ef6e213",
+      "rank" : 1,
+      "slug" : "2026-07-18-call-10",
+      "score" : 0.9036803588090766
+    }, {
+      "best_document_key" : "f74a93d36cf7e4890435da558e97b23bedcd0de13572758ce3aa67e0128bb703",
+      "rank" : 2,
+      "slug" : "2026-05-29-call-01",
+      "score" : 0.9026614593234117
+    }, {
+      "best_document_key" : "731c5ca7d862bd563867ddbf5678e294d3768efccf150c68e1add8092e0c3ab5",
+      "rank" : 3,
+      "slug" : "2026-07-04-call-15",
+      "score" : 0.9025816134392027
+    }, {
+      "best_document_key" : "4aba1678a03d1e57539dd512c9c53dd24d2f1b4dd7a5b66367f0fc6503ec92ba",
+      "rank" : 4,
+      "slug" : "2026-07-14-call-04",
+      "score" : 0.9007739122238408
+    } ],
+    "query_elapsed_ms" : 8.5938
+  }, {
+    "id" : "R22",
+    "sample_type" : "positive",
+    "expected" : [ "2026-07-14-call-05" ],
+    "first_relevant_rank" : 2,
+    "first_relevant_document_rank" : 2,
+    "first_relevant_case_rank" : 2,
+    "matched_expected_cases" : 1,
+    "candidates" : [ {
+      "score" : 0.8985792663165894,
+      "slugs" : [ "2026-03-10-call-09" ],
+      "rank" : 1,
+      "document_key" : "b8c0a25252df0c3b801f149c79289f7d058671d6d9cb9ea58ca9a71d489c6701",
+      "filename" : "咨询案例 - 成长篇.md"
+    }, {
+      "score" : 0.8983639884664605,
+      "slugs" : [ "2026-07-14-call-05" ],
+      "rank" : 2,
+      "document_key" : "eb12797542294ece187efb5daa628d4b188cc4e8ced7e5f9222f8926d5c98b1a",
+      "filename" : "咨询案例 - 情感篇.md"
+    }, {
+      "score" : 0.8978129447243453,
+      "slugs" : [ "2026-07-12-call-12" ],
+      "rank" : 3,
+      "document_key" : "825f30973017a9d1930a4ee54c757b8d82f2e629a447ff47137bd2d37aff932d",
+      "filename" : "咨询案例 - 成长篇.md"
+    }, {
+      "score" : 0.8973382920006895,
+      "slugs" : [ "2026-07-04-call-16" ],
+      "rank" : 4,
+      "document_key" : "873e0b618fbb4b11e3c6c009ab133cb62fbc3645567b8c8b0246a010949ed3bd",
+      "filename" : "咨询案例 - 情感篇.md"
+    } ],
+    "case_candidates" : [ {
+      "best_document_key" : "b8c0a25252df0c3b801f149c79289f7d058671d6d9cb9ea58ca9a71d489c6701",
+      "rank" : 1,
+      "slug" : "2026-03-10-call-09",
+      "score" : 0.8985792663165894
+    }, {
+      "best_document_key" : "eb12797542294ece187efb5daa628d4b188cc4e8ced7e5f9222f8926d5c98b1a",
+      "rank" : 2,
+      "slug" : "2026-07-14-call-05",
+      "score" : 0.8983639884664605
+    }, {
+      "best_document_key" : "825f30973017a9d1930a4ee54c757b8d82f2e629a447ff47137bd2d37aff932d",
+      "rank" : 3,
+      "slug" : "2026-07-12-call-12",
+      "score" : 0.8978129447243453
+    }, {
+      "best_document_key" : "873e0b618fbb4b11e3c6c009ab133cb62fbc3645567b8c8b0246a010949ed3bd",
+      "rank" : 4,
+      "slug" : "2026-07-04-call-16",
+      "score" : 0.8973382920006895
+    } ],
+    "query_elapsed_ms" : 6.813
+  }, {
+    "id" : "R23",
+    "sample_type" : "positive",
+    "expected" : [ "2026-07-14-call-06" ],
+    "first_relevant_rank" : 1,
+    "first_relevant_document_rank" : 1,
+    "first_relevant_case_rank" : 1,
+    "matched_expected_cases" : 1,
+    "candidates" : [ {
+      "score" : 0.910252327898631,
+      "slugs" : [ "2026-07-14-call-06" ],
+      "rank" : 1,
+      "document_key" : "82d1cfbd2c168c67d244bbdd39e349747e989401cde0f754212d83e89e48d7c5",
+      "filename" : "咨询案例 - 职场篇.md"
+    }, {
+      "score" : 0.9021646688465265,
+      "slugs" : [ "2026-04-03-call-12" ],
+      "rank" : 2,
+      "document_key" : "0e0cbd1737da3ba209eb5e7a93cae0eaa77195071d3b3c8e3d63233b76251aad",
+      "filename" : "咨询案例 - 职场篇.md"
+    }, {
+      "score" : 0.9014533121241451,
+      "slugs" : [ "2026-05-25-call-01" ],
+      "rank" : 3,
+      "document_key" : "85ac0f55f03dccb920f32011a4ec266e5a3960a066935c1d133ee6f7688e9162",
+      "filename" : "咨询案例 - 子女篇.md"
+    }, {
+      "score" : 0.8973826513773806,
+      "slugs" : [ "2026-03-24-call-01" ],
+      "rank" : 4,
+      "document_key" : "67723ec89e78072fc2186b2d49d684a60ff8950b7f9b36714f8659a14d661cf7",
+      "filename" : "咨询案例 - 婚姻篇.md"
+    } ],
+    "case_candidates" : [ {
+      "best_document_key" : "82d1cfbd2c168c67d244bbdd39e349747e989401cde0f754212d83e89e48d7c5",
+      "rank" : 1,
+      "slug" : "2026-07-14-call-06",
+      "score" : 0.910252327898631
+    }, {
+      "best_document_key" : "0e0cbd1737da3ba209eb5e7a93cae0eaa77195071d3b3c8e3d63233b76251aad",
+      "rank" : 2,
+      "slug" : "2026-04-03-call-12",
+      "score" : 0.9021646688465265
+    }, {
+      "best_document_key" : "85ac0f55f03dccb920f32011a4ec266e5a3960a066935c1d133ee6f7688e9162",
+      "rank" : 3,
+      "slug" : "2026-05-25-call-01",
+      "score" : 0.9014533121241451
+    }, {
+      "best_document_key" : "67723ec89e78072fc2186b2d49d684a60ff8950b7f9b36714f8659a14d661cf7",
+      "rank" : 4,
+      "slug" : "2026-03-24-call-01",
+      "score" : 0.8973826513773806
+    } ],
+    "query_elapsed_ms" : 8.055
+  }, {
+    "id" : "R24",
+    "sample_type" : "positive",
+    "expected" : [ "2026-07-14-call-08" ],
+    "first_relevant_rank" : 2,
+    "first_relevant_document_rank" : 2,
+    "first_relevant_case_rank" : 2,
+    "matched_expected_cases" : 1,
+    "candidates" : [ {
+      "score" : 0.8944916680520939,
+      "slugs" : [ "2026-07-04-call-15" ],
+      "rank" : 1,
+      "document_key" : "731c5ca7d862bd563867ddbf5678e294d3768efccf150c68e1add8092e0c3ab5",
+      "filename" : "咨询案例 - 子女篇.md"
+    }, {
+      "score" : 0.8925111370399217,
+      "slugs" : [ "2026-07-14-call-08" ],
+      "rank" : 2,
+      "document_key" : "235747822d931ee8abd08cd56d655825ab487e36744b9e0b98132b3052a39cb3",
+      "filename" : "咨询案例 - 婚姻篇.md"
+    }, {
+      "score" : 0.8903344213250339,
+      "slugs" : [ "2026-04-27-call-04" ],
+      "rank" : 3,
+      "document_key" : "488c171b9abd32818a32b5dd67ba98a7122a20e9ca3999073a45cf61a6a658f5",
+      "filename" : "咨询案例 - 子女篇.md"
+    }, {
+      "score" : 0.8903153849262382,
+      "slugs" : [ "2026-03-20-call-11" ],
+      "rank" : 4,
+      "document_key" : "87f4727b01bc1c6f061ba857682ffae2946e0c478da5dfdc29e70eac9c7776df",
+      "filename" : "咨询案例 - 婚姻篇.md"
+    } ],
+    "case_candidates" : [ {
+      "best_document_key" : "731c5ca7d862bd563867ddbf5678e294d3768efccf150c68e1add8092e0c3ab5",
+      "rank" : 1,
+      "slug" : "2026-07-04-call-15",
+      "score" : 0.8944916680520939
+    }, {
+      "best_document_key" : "235747822d931ee8abd08cd56d655825ab487e36744b9e0b98132b3052a39cb3",
+      "rank" : 2,
+      "slug" : "2026-07-14-call-08",
+      "score" : 0.8925111370399217
+    }, {
+      "best_document_key" : "488c171b9abd32818a32b5dd67ba98a7122a20e9ca3999073a45cf61a6a658f5",
+      "rank" : 3,
+      "slug" : "2026-04-27-call-04",
+      "score" : 0.8903344213250339
+    }, {
+      "best_document_key" : "87f4727b01bc1c6f061ba857682ffae2946e0c478da5dfdc29e70eac9c7776df",
+      "rank" : 4,
+      "slug" : "2026-03-20-call-11",
+      "score" : 0.8903153849262382
+    } ],
+    "query_elapsed_ms" : 6.7388
+  }, {
+    "id" : "R25",
+    "sample_type" : "positive",
+    "expected" : [ "2026-07-14-call-09" ],
+    "first_relevant_rank" : 1,
+    "first_relevant_document_rank" : 1,
+    "first_relevant_case_rank" : 1,
+    "matched_expected_cases" : 1,
+    "candidates" : [ {
+      "score" : 0.8916938417923007,
+      "slugs" : [ "2026-07-14-call-09" ],
+      "rank" : 1,
+      "document_key" : "29ceecdbd46455fec934f32ea9086125a53f710c0e921ff0d05d382c7c50bc86",
+      "filename" : "咨询案例 - 心理篇.md"
+    }, {
+      "score" : 0.8897559136054995,
+      "slugs" : [ ],
+      "rank" : 2,
+      "document_key" : "a6b6c280aa233a19a5ed79dd3df0373193d98a0425e7d2b3391326fc47c22098",
+      "filename" : "心理疏导通用框架 - 框架篇.md"
+    }, {
+      "score" : 0.880982254734468,
+      "slugs" : [ ],
+      "rank" : 3,
+      "document_key" : "2a9c5ed446d6e5420b3ccea20504682079ff33f3f860266fc4e9b23e61d76cf1",
+      "filename" : "心理疏导通用框架 - 框架篇.md"
+    }, {
+      "score" : 0.8798776173331722,
+      "slugs" : [ "2026-03-08-call-16" ],
+      "rank" : 4,
+      "document_key" : "41bfa490cb615a8c0367e9dba6a982549fe4bf9f0ff9f2622d63962ec41be935",
+      "filename" : "咨询案例 - 职场篇.md"
+    } ],
+    "case_candidates" : [ {
+      "best_document_key" : "29ceecdbd46455fec934f32ea9086125a53f710c0e921ff0d05d382c7c50bc86",
+      "rank" : 1,
+      "slug" : "2026-07-14-call-09",
+      "score" : 0.8916938417923007
+    }, {
+      "best_document_key" : "41bfa490cb615a8c0367e9dba6a982549fe4bf9f0ff9f2622d63962ec41be935",
+      "rank" : 2,
+      "slug" : "2026-03-08-call-16",
+      "score" : 0.8798776173331722
+    }, {
+      "best_document_key" : "bb8bc8aac54bcaf7a0588fcb46fd4097ea1b59aada3df78f0a035675eb79b5ff",
+      "rank" : 3,
+      "slug" : "2026-03-13-call-03",
+      "score" : 0.8784201822829334
+    }, {
+      "best_document_key" : "072856236b687e2d16bfa622822c01a73363ac4f2d8a7d09621e808d0f59cd62",
+      "rank" : 4,
+      "slug" : "2026-06-16-call-05",
+      "score" : 0.8759156995424459
+    } ],
+    "query_elapsed_ms" : 7.3165
+  }, {
+    "id" : "N01",
+    "sample_type" : "negative",
+    "expected" : [ ],
+    "first_relevant_rank" : 0,
+    "first_relevant_document_rank" : 0,
+    "first_relevant_case_rank" : 0,
+    "matched_expected_cases" : 0,
+    "candidates" : [ {
+      "score" : 0.8546765321465704,
+      "slugs" : [ "2026-05-03-call-09" ],
+      "rank" : 1,
+      "document_key" : "ffeb74157da5e285604d8f31bf4470beb0c2443ac2a58fc890ff70cdd12b2e4f",
+      "filename" : "咨询案例 - 成长篇.md"
+    }, {
+      "score" : 0.8542479024703465,
+      "slugs" : [ "2026-07-02-call-05" ],
+      "rank" : 2,
+      "document_key" : "b7ebe0122d025dca3d0eac547094edf5a19285ff8498fe3ce9baea86ae403f20",
+      "filename" : "咨询案例 - 其他篇.md"
+    }, {
+      "score" : 0.8494500863310915,
+      "slugs" : [ "2026-04-29-call-05" ],
+      "rank" : 3,
+      "document_key" : "c6c32b99958890fe984a48bb0ed1948067351904224ef7164cff566799375664",
+      "filename" : "咨询案例 - 职场篇.md"
+    }, {
+      "score" : 0.8480114775106964,
+      "slugs" : [ "2026-06-28-call-08" ],
+      "rank" : 4,
+      "document_key" : "d88abf5f34c39bef36b5e5a24dde6dd057572e213b943569db85e70b33119c26",
+      "filename" : "咨询案例 - 子女篇.md"
+    } ],
+    "case_candidates" : [ {
+      "best_document_key" : "ffeb74157da5e285604d8f31bf4470beb0c2443ac2a58fc890ff70cdd12b2e4f",
+      "rank" : 1,
+      "slug" : "2026-05-03-call-09",
+      "score" : 0.8546765321465704
+    }, {
+      "best_document_key" : "b7ebe0122d025dca3d0eac547094edf5a19285ff8498fe3ce9baea86ae403f20",
+      "rank" : 2,
+      "slug" : "2026-07-02-call-05",
+      "score" : 0.8542479024703465
+    }, {
+      "best_document_key" : "c6c32b99958890fe984a48bb0ed1948067351904224ef7164cff566799375664",
+      "rank" : 3,
+      "slug" : "2026-04-29-call-05",
+      "score" : 0.8494500863310915
+    }, {
+      "best_document_key" : "d88abf5f34c39bef36b5e5a24dde6dd057572e213b943569db85e70b33119c26",
+      "rank" : 4,
+      "slug" : "2026-06-28-call-08",
+      "score" : 0.8480114775106964
+    } ],
+    "query_elapsed_ms" : 8.5337
+  }, {
+    "id" : "N02",
+    "sample_type" : "negative",
+    "expected" : [ ],
+    "first_relevant_rank" : 0,
+    "first_relevant_document_rank" : 0,
+    "first_relevant_case_rank" : 0,
+    "matched_expected_cases" : 0,
+    "candidates" : [ {
+      "score" : 0.8381673529394731,
+      "slugs" : [ "2026-07-08-call-02" ],
+      "rank" : 1,
+      "document_key" : "ff05cb91e7f40debeb19f97f6a90033f0d08b86dc67eaba514e7d0b0a6aef002",
+      "filename" : "咨询案例 - 心理篇.md"
+    }, {
+      "score" : 0.8353592533171831,
+      "slugs" : [ "2026-07-02-call-01" ],
+      "rank" : 2,
+      "document_key" : "dacca63b8a578c37a26d83f2783a78268a770b66e6aef0cb356313f67159d686",
+      "filename" : "咨询案例 - 学业篇.md"
+    }, {
+      "score" : 0.8333611951209658,
+      "slugs" : [ "2026-07-02-call-05" ],
+      "rank" : 3,
+      "document_key" : "b7ebe0122d025dca3d0eac547094edf5a19285ff8498fe3ce9baea86ae403f20",
+      "filename" : "咨询案例 - 其他篇.md"
+    }, {
+      "score" : 0.832424817943532,
+      "slugs" : [ "2026-05-23-call-07" ],
+      "rank" : 4,
+      "document_key" : "8524b1d75a6763cea00ab06b12ef8b2b5faca3936ec2b85c2c0fd000dfd0c237",
+      "filename" : "咨询案例 - 心理篇.md"
+    } ],
+    "case_candidates" : [ {
+      "best_document_key" : "ff05cb91e7f40debeb19f97f6a90033f0d08b86dc67eaba514e7d0b0a6aef002",
+      "rank" : 1,
+      "slug" : "2026-07-08-call-02",
+      "score" : 0.8381673529394731
+    }, {
+      "best_document_key" : "dacca63b8a578c37a26d83f2783a78268a770b66e6aef0cb356313f67159d686",
+      "rank" : 2,
+      "slug" : "2026-07-02-call-01",
+      "score" : 0.8353592533171831
+    }, {
+      "best_document_key" : "b7ebe0122d025dca3d0eac547094edf5a19285ff8498fe3ce9baea86ae403f20",
+      "rank" : 3,
+      "slug" : "2026-07-02-call-05",
+      "score" : 0.8333611951209658
+    }, {
+      "best_document_key" : "8524b1d75a6763cea00ab06b12ef8b2b5faca3936ec2b85c2c0fd000dfd0c237",
+      "rank" : 4,
+      "slug" : "2026-05-23-call-07",
+      "score" : 0.832424817943532
+    } ],
+    "query_elapsed_ms" : 6.7667
+  }, {
+    "id" : "N03",
+    "sample_type" : "negative",
+    "expected" : [ ],
+    "first_relevant_rank" : 0,
+    "first_relevant_document_rank" : 0,
+    "first_relevant_case_rank" : 0,
+    "matched_expected_cases" : 0,
+    "candidates" : [ {
+      "score" : 0.8543236082836793,
+      "slugs" : [ "2026-07-14-call-08" ],
+      "rank" : 1,
+      "document_key" : "235747822d931ee8abd08cd56d655825ab487e36744b9e0b98132b3052a39cb3",
+      "filename" : "咨询案例 - 婚姻篇.md"
+    }, {
+      "score" : 0.8533849619823337,
+      "slugs" : [ "2026-05-21-call-09" ],
+      "rank" : 2,
+      "document_key" : "0f7b133d288adcb8fea851cfc60ebdb59a809af1a1ad9d99e7d156bb46b81b54",
+      "filename" : "咨询案例 - 职场篇.md"
+    }, {
+      "score" : 0.8509907222055616,
+      "slugs" : [ "2026-04-13-call-15" ],
+      "rank" : 3,
+      "document_key" : "1b03cf15ab59e38adec5ba0d056e4c6b76158727d9946f9884c565c47a0c0a0c",
+      "filename" : "咨询案例 - 父母篇.md"
+    }, {
+      "score" : 0.848982098305438,
+      "slugs" : [ "2026-03-28-call-14" ],
+      "rank" : 4,
+      "document_key" : "331ea8a0332e34847004da193b00d1796127c837de9bbc4e7c9e2a0ecf37bd94",
+      "filename" : "咨询案例 - 心理篇.md"
+    } ],
+    "case_candidates" : [ {
+      "best_document_key" : "235747822d931ee8abd08cd56d655825ab487e36744b9e0b98132b3052a39cb3",
+      "rank" : 1,
+      "slug" : "2026-07-14-call-08",
+      "score" : 0.8543236082836793
+    }, {
+      "best_document_key" : "0f7b133d288adcb8fea851cfc60ebdb59a809af1a1ad9d99e7d156bb46b81b54",
+      "rank" : 2,
+      "slug" : "2026-05-21-call-09",
+      "score" : 0.8533849619823337
+    }, {
+      "best_document_key" : "1b03cf15ab59e38adec5ba0d056e4c6b76158727d9946f9884c565c47a0c0a0c",
+      "rank" : 3,
+      "slug" : "2026-04-13-call-15",
+      "score" : 0.8509907222055616
+    }, {
+      "best_document_key" : "331ea8a0332e34847004da193b00d1796127c837de9bbc4e7c9e2a0ecf37bd94",
+      "rank" : 4,
+      "slug" : "2026-03-28-call-14",
+      "score" : 0.848982098305438
+    } ],
+    "query_elapsed_ms" : 5.8687
+  }, {
+    "id" : "N04",
+    "sample_type" : "negative",
+    "expected" : [ ],
+    "first_relevant_rank" : 0,
+    "first_relevant_document_rank" : 0,
+    "first_relevant_case_rank" : 0,
+    "matched_expected_cases" : 0,
+    "candidates" : [ {
+      "score" : 0.852821157920499,
+      "slugs" : [ "2026-06-10-call-12" ],
+      "rank" : 1,
+      "document_key" : "c2f7e110b75d70337dc2f87603985a8b94fac18bf56204b79d307e5b3e0dc9f8",
+      "filename" : "咨询案例 - 成长篇.md"
+    }, {
+      "score" : 0.8509689666735496,
+      "slugs" : [ "2026-07-02-call-05" ],
+      "rank" : 2,
+      "document_key" : "b7ebe0122d025dca3d0eac547094edf5a19285ff8498fe3ce9baea86ae403f20",
+      "filename" : "咨询案例 - 其他篇.md"
+    }, {
+      "score" : 0.8501980329500163,
+      "slugs" : [ "2026-03-10-call-05" ],
+      "rank" : 3,
+      "document_key" : "c862d594923d97d5d8a4eb9864a1bffe9fe4e54ed450f0f0acc0db1d6f675068",
+      "filename" : "咨询案例 - 心理篇.md"
+    }, {
+      "score" : 0.8487735075164433,
+      "slugs" : [ "2026-06-22-call-03" ],
+      "rank" : 4,
+      "document_key" : "3540d299805aa1bb5ea0e83035664f874efcd5c821eeeccb766cc5eb25a44f60",
+      "filename" : "咨询案例 - 心理篇.md"
+    } ],
+    "case_candidates" : [ {
+      "best_document_key" : "c2f7e110b75d70337dc2f87603985a8b94fac18bf56204b79d307e5b3e0dc9f8",
+      "rank" : 1,
+      "slug" : "2026-06-10-call-12",
+      "score" : 0.852821157920499
+    }, {
+      "best_document_key" : "b7ebe0122d025dca3d0eac547094edf5a19285ff8498fe3ce9baea86ae403f20",
+      "rank" : 2,
+      "slug" : "2026-07-02-call-05",
+      "score" : 0.8509689666735496
+    }, {
+      "best_document_key" : "c862d594923d97d5d8a4eb9864a1bffe9fe4e54ed450f0f0acc0db1d6f675068",
+      "rank" : 3,
+      "slug" : "2026-03-10-call-05",
+      "score" : 0.8501980329500163
+    }, {
+      "best_document_key" : "3540d299805aa1bb5ea0e83035664f874efcd5c821eeeccb766cc5eb25a44f60",
+      "rank" : 4,
+      "slug" : "2026-06-22-call-03",
+      "score" : 0.8487735075164433
+    } ],
+    "query_elapsed_ms" : 5.7117
+  }, {
+    "id" : "N05",
+    "sample_type" : "negative",
+    "expected" : [ ],
+    "first_relevant_rank" : 0,
+    "first_relevant_document_rank" : 0,
+    "first_relevant_case_rank" : 0,
+    "matched_expected_cases" : 0,
+    "candidates" : [ {
+      "score" : 0.8399198210512172,
+      "slugs" : [ "2026-07-02-call-05" ],
+      "rank" : 1,
+      "document_key" : "b7ebe0122d025dca3d0eac547094edf5a19285ff8498fe3ce9baea86ae403f20",
+      "filename" : "咨询案例 - 其他篇.md"
+    }, {
+      "score" : 0.8368878489669148,
+      "slugs" : [ "2026-03-24-call-20" ],
+      "rank" : 2,
+      "document_key" : "5462305c43a3f381f2d886c86b26aa5a72be7bc4460470768f6783a2d4da30af",
+      "filename" : "咨询案例 - 心理篇.md"
+    }, {
+      "score" : 0.8366280108441747,
+      "slugs" : [ "2026-06-24-call-04" ],
+      "rank" : 3,
+      "document_key" : "4266778467ee197bef4adf07416b98a3c266695d3adf42f9d0cf9e7acc0de8cc",
+      "filename" : "咨询案例 - 心理篇.md"
+    }, {
+      "score" : 0.8352663014491025,
+      "slugs" : [ "2026-07-14-call-01" ],
+      "rank" : 4,
+      "document_key" : "a742de851d056f581b480f3392048e4e74dc29e68974b875c57254f75f16f932",
+      "filename" : "咨询案例 - 心理篇.md"
+    } ],
+    "case_candidates" : [ {
+      "best_document_key" : "b7ebe0122d025dca3d0eac547094edf5a19285ff8498fe3ce9baea86ae403f20",
+      "rank" : 1,
+      "slug" : "2026-07-02-call-05",
+      "score" : 0.8399198210512172
+    }, {
+      "best_document_key" : "5462305c43a3f381f2d886c86b26aa5a72be7bc4460470768f6783a2d4da30af",
+      "rank" : 2,
+      "slug" : "2026-03-24-call-20",
+      "score" : 0.8368878489669148
+    }, {
+      "best_document_key" : "4266778467ee197bef4adf07416b98a3c266695d3adf42f9d0cf9e7acc0de8cc",
+      "rank" : 3,
+      "slug" : "2026-06-24-call-04",
+      "score" : 0.8366280108441747
+    }, {
+      "best_document_key" : "a742de851d056f581b480f3392048e4e74dc29e68974b875c57254f75f16f932",
+      "rank" : 4,
+      "slug" : "2026-07-14-call-01",
+      "score" : 0.8352663014491025
+    } ],
+    "query_elapsed_ms" : 5.3742
+  } ],
+  "total_elapsed_ms" : 77953.5954
 }
