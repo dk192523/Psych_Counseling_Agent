@@ -1,5 +1,6 @@
 import { createSSEConnection } from './sse'
 import { createCsrfClient } from './csrf'
+import { logoutSession } from './logout'
 import axios from 'axios'
 import router from '../router'
 import { clearAuth, setAuthNotice } from '../stores/auth'
@@ -115,7 +116,7 @@ export const register = async (username, password) => {
 
 // 登出：销毁会话，204。
 export const logout = async () => {
-  try { await request.post('/auth/logout') } finally { csrf.clear() }
+  await logoutSession(() => request.post('/auth/logout'), csrf.clear)
 }
 
 // 当前登录用户信息；未认证 401。

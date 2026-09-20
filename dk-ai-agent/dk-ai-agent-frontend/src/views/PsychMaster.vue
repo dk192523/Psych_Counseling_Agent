@@ -182,10 +182,14 @@ const avatarChar = computed(() => (me.value?.username || '?').charAt(0).toUpperC
 const handleLogout = async () => {
   if (loggingOut.value) return
   loggingOut.value = true
+  suspendConversationReads()
   try {
     stopStream()
     await logout()
     await router.push('/login')
+  } catch {
+    if (!disposed) readsEnabled = true
+    historyError.value = '尚未确认退出，请检查网络后重试。不要在共享设备上保留此页面。'
   } finally {
     loggingOut.value = false
   }
@@ -259,6 +263,7 @@ const submitPasswordChange = async () => {
     // 改密成功后后端会吊销该用户全部会话（含当前会话），
     // 不能留在原页面：停流 → 清空本地登录态 → 跳登录页并提示重新登录。
     stopStream()
+    suspendConversationReads()
     clearAuth()
     setAuthNotice('密码已修改，请使用新密码重新登录')
     passwordModalOpen.value = false
@@ -321,6 +326,32 @@ const retryableTurn = ref(null)
 let eventSource = null
 let streamVersion = 0
 let conversationVersion = 0
+let listVersion = 0
+let memoryVersion = 0
+let settleVersion = 0
+let cancelMemoryWait = null
+let disposed = false
+let readsEnabled = true
+
+const cancelMemoryRefresh = () => {
+  memoryVersion += 1
+  settleVersion += 1
+  cancelMemoryWait?.()
+  cancelMemoryWait = null
+}
+
+const invalidateConversationList = () => {
+  listVersion += 1
+  historyLoading.value = false
+}
+
+const suspendConversationReads = () => {
+  readsEnabled = false
+  conversationVersion += 1
+  invalidateConversationList()
+  cancelMemoryRefresh()
+  conversationLoading.value = false
+}
 
 const isBusy = computed(() => (
   historyLoading.value ||
@@ -419,6 +450,7 @@ const addMessage = (content, isUser) => {
 }
 
 const stopStream = () => {
+  cancelMemoryRefresh()
   streamVersion += 1
   if (eventSource) {
     eventSource.close()
@@ -439,30 +471,41 @@ const setResponseMode = (mode) => {
 }
 
 const refreshConversations = async ({ silent = false } = {}) => {
+  if (!readsEnabled) return false
+  const version = ++listVersion
   if (!silent) historyLoading.value = true
 
   try {
-    conversations.value = normalizeConversationList(await getConversations())
+    const data = await getConversations()
+    if (!readsEnabled || version !== listVersion) return false
+    conversations.value = normalizeConversationList(data)
     if (!silent) historyError.value = ''
+    return true
   } catch (error) {
+    if (!readsEnabled || version !== listVersion) return false
     console.error('读取历史会话失败:', error)
     historyError.value = '历史会话暂时无法读取，请稍后重试。'
+    return false
   } finally {
-    if (!silent) historyLoading.value = false
+    if (readsEnabled && version === listVersion) historyLoading.value = false
   }
 }
 
 const refreshCurrentMemory = async () => {
   const targetId = chatId.value
-  if (!targetId) return
+  if (!readsEnabled || !targetId || conversationLoading.value) return null
+  const contextVersion = conversationVersion
+  const version = ++memoryVersion
+  const isCurrent = () => readsEnabled && contextVersion === conversationVersion && version === memoryVersion
 
   try {
     const detail = await getConversation(targetId)
     // 请求返回前用户可能已切换会话，过期结果直接丢弃。
-    if (chatId.value !== targetId) return
+    if (!isCurrent()) return null
     memoryStats.value = detail.memory || null
     return detail.memory || null
   } catch (error) {
+    if (!isCurrent()) return null
     console.error('刷新会话记忆状态失败:', error)
     return null
   }
@@ -483,23 +526,38 @@ const refreshCurrentMemory = async () => {
 const MEMORY_SETTLE_DELAYS_MS = [1200, 3000, 6000]
 
 const refreshMemoryUntilSettled = async () => {
-  const targetId = chatId.value
+  if (!readsEnabled || !chatId.value) return
+  cancelMemoryWait?.()
+  const version = ++settleVersion
+  const contextVersion = conversationVersion
+  const isCurrent = () => readsEnabled && version === settleVersion && contextVersion === conversationVersion
   const before = memoryStats.value
   const baseline = `${before?.updatedAt ?? ''}|${before?.digestedCount ?? -1}`
 
   for (const delay of MEMORY_SETTLE_DELAYS_MS) {
-    await new Promise(resolve => setTimeout(resolve, delay))
+    const elapsed = await new Promise(resolve => {
+      const timer = setTimeout(() => {
+        cancelMemoryWait = null
+        resolve(true)
+      }, delay)
+      cancelMemoryWait = () => {
+        clearTimeout(timer)
+        resolve(false)
+      }
+    })
     // 期间用户切了会话或又发了一轮，这条重试链就没有意义了。
-    if (chatId.value !== targetId || connectionStatus.value === 'connecting') return
+    if (!elapsed || !isCurrent() || connectionStatus.value === 'connecting') return
 
     const memory = await refreshCurrentMemory()
-    if (!memory) return
+    if (!isCurrent() || !memory) return
     if (`${memory.updatedAt ?? ''}|${memory.digestedCount ?? -1}` !== baseline) return
   }
 }
 
 const loadConversation = async (conversationId) => {
+  if (!readsEnabled) return
   const version = ++conversationVersion
+  invalidateConversationList()
   stopStream()
   conversationLoading.value = true
 
@@ -522,7 +580,7 @@ const loadConversation = async (conversationId) => {
 
 const selectConversation = async (conversationId) => {
   if (!conversationId) return
-  if (conversationId === chatId.value) {
+  if (conversationId === chatId.value && !conversationLoading.value) {
     mobileHistoryOpen.value = false
     return
   }
@@ -530,7 +588,9 @@ const selectConversation = async (conversationId) => {
 }
 
 const createNewConversation = async () => {
+  if (!readsEnabled) return
   const version = ++conversationVersion
+  invalidateConversationList()
   stopStream()
   conversationLoading.value = true
 
@@ -555,10 +615,14 @@ const createNewConversation = async () => {
 }
 
 const confirmDeleteConversation = async (conversation) => {
+  if (!readsEnabled) return
   const title = conversation.title || '这段会话'
   if (!window.confirm(`确认删除“${title}”吗？删除后无法恢复。`)) return
 
   const version = ++conversationVersion
+  invalidateConversationList()
+  cancelMemoryRefresh()
+  if (conversation.id === chatId.value) stopStream()
   conversationLoading.value = true
   try {
     await deleteConversation(conversation.id)
@@ -601,7 +665,7 @@ const newClientMsgId = () => {
 }
 
 const sendMessage = (message) => {
-  if (!chatId.value || connectionStatus.value === 'connecting') return
+  if (!readsEnabled || !chatId.value || connectionStatus.value === 'connecting') return
 
   addMessage(message, true)
   stopStream()
@@ -624,7 +688,7 @@ const sendMessage = (message) => {
 // 后端按幂等键去重归档。手动重发自带 retryCount>1，不再触发自动重试。
 const retryFailedTurn = () => {
   const turn = retryableTurn.value
-  if (!turn || turn.chatId !== chatId.value || connectionStatus.value === 'connecting') return
+  if (!readsEnabled || !turn || turn.chatId !== chatId.value || connectionStatus.value === 'connecting') return
 
   stopStream()
   const aiMessage = messages.value[turn.aiMessageIndex]
@@ -772,7 +836,8 @@ const exportConversation = () => {
 }
 
 const initializeConversations = async () => {
-  await refreshConversations()
+  const version = conversationVersion
+  if (!await refreshConversations() || !readsEnabled || version !== conversationVersion) return
   if (conversations.value.length > 0) {
     await loadConversation(conversations.value[0].id)
   } else if (!historyError.value) {
@@ -824,6 +889,8 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  disposed = true
+  suspendConversationReads()
   stopStream()
   unbindViewportListeners()
 })

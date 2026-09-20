@@ -492,3 +492,13 @@ cd "$CURRENT_DIR"
 6. **应用层安全头**（本轮补齐）：Spring Security `headers()` 现输出 nosniff / DENY /
    Referrer-Policy / HSTS，与 nginx `security-headers.conf` 双层兜底；CSP 仍未启用（v-html
    与内联场景需单独设计），上 TLS 后建议一并评估。
+
+## 单副本启动门禁（2026-09-20）
+
+Java 后端仅支持 `APP_DEPLOYMENT_MODE=single`、`APP_REPLICA_COUNT=1`（默认值）；其他模式、空值、非整数、零、负数及任何不等于 1 的副本数都会拒绝启动。`DkAiAgentApplication.main` 首先检查环境变量，再于 Spring 环境准备事件中复核 YAML/profile/命令行最终值；拒绝发生在 Bean 初始化前，避免启动时全库 RUNNING 恢复及向量库灌注先执行。
+
+`APP_INSTANCE_ID` 可选，空白或未配置时每次进程启动生成新 UUID；显式值允许 1..128 位 ASCII 字母、数字、点、下划线、冒号和连字符。解析后的值供启动日志和 `app.deployment.instance-id` 观测使用，不进入咨询正文，也不是分布式锁或 fencing token。不要在所有实例中复用固定默认 ID。
+
+部署与升级必须先停止旧 Java 后端、确认进程完全退出，再启动新后端，接受短暂中断；禁止重叠滚动发布、双实例蓝绿切流和 `--scale backend=2`。Compose 变量只是部署声明，不能测量真实副本数：两个连接同一数据库的实例即使都声明 single/1，门禁也无法自动发现。
+
+真正多副本仍需共享 Session/跨实例吊销、全局限流、turn lease/fencing、记忆整合协调和按所有权恢复 RUNNING 轮次；sticky session 与 instance ID 均不能替代这些能力。本次门禁和纯单元测试已添加，但本次未运行测试或真实数据库验证。

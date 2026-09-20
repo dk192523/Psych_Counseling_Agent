@@ -1,0 +1,21 @@
+{
+  "review_schema_version": 1,
+  "dataset_status": "template_only; not a labelled dataset",
+  "corpus_fingerprint": null,
+  "cases": [
+    {
+      "id": null,
+      "query": null,
+      "split": null,
+      "sample_type": "unjudged",
+      "expected": [],
+      "judgment_scope": null,
+      "candidate_judgments": [],
+      "review_status": "pending",
+      "reviewers": [],
+      "adjudicator": null,
+      "reviewed_at": null,
+      "notes": null
+    }
+  ]
+}

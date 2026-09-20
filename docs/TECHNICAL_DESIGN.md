@@ -110,6 +110,8 @@ Psych_Counseling_Agent/
 
 `backend` 另设 `stop_grace_period: 45s`（配合 `server.shutdown=graceful` 与 `spring.lifecycle.timeout-per-shutdown-phase=${SPRING_LIFECYCLE_TIMEOUT_PER_SHUTDOWN_PHASE:30s}`）。dev overlay（`docker-compose.dev.yml`）还给 backend 显式透传 `ADMIN_INITIAL_PASSWORD`/`SESSION_TIMEOUT`，保证任意文件组合下开发自洽。基础 Compose 只向宿主机发布前端端口；backend/worker 仅内网可达。
 
+生产和开发环境首次启动均须配置 `ADMIN_INITIAL_PASSWORD`。两个 Compose 文件保留 `${ADMIN_INITIAL_PASSWORD:-}` 空值透传，由 `AdminBootstrap` 查询数据库后执行条件必填校验；不能使用无条件 `:?` 必填表达式，否则已有管理员但未配置初始口令的部署也会被 Compose 拦截。已有 ADMIN 时不校验或重置初始口令。
+
 ### 3.2 建表与初始化顺序
 
 | 序 | 时机 | 组件 | 做什么 | 为什么这个顺序 |
@@ -155,8 +157,12 @@ Psych_Counseling_Agent/
 
 | 变量 | 默认 | 作用 | 消费方 |
 |---|---|---|---|
-| `CHAT_HISTORY_MAX_MESSAGES` | `1000` | 每会话原文保留上限（触限前必先整合再滚动） | `ConversationHistoryService`、`ConversationMemoryService`（构造注入） |
+| `CHAT_HISTORY_MAX_MESSAGES` | `1000` | 每会话原文工作集目标（触限前先整合再滚动；不是业务数据保留期限） | `ConversationHistoryService`、`ConversationMemoryService`（构造注入） |
 | `CHAT_HISTORY_CONTEXT_WINDOW` | `30` | 进程内模型窗口近期原文条数 | `CounselingApp` |
+| `CHAT_HISTORY_REPLAY_RETENTION` | `7d` | 终态轮次重放缓存期限，允许 `1h..3650d`；不删除主历史或摘要 | `ReplayRetentionProperties`、`ChatTurnService` |
+| `DATA_RETENTION_APPLY` | `false` | 整会话清理默认 dry-run，显式启用才删除 | `RetentionProperties`、`ConversationRetentionService` |
+| `DATA_RETENTION_CONVERSATION_DAYS` | `0` | `0` 表示尚未配置；显式期限为 `1..36500` 天，按会话 `updated_at` 判断 | `RetentionProperties` |
+| `DATA_RETENTION_BATCH_SIZE` | `100` | 每次最多处理的会话候选数，范围 `1..500` | `RetentionProperties` |
 | `CHAT_HISTORY_TITLE_MAX_LENGTH` | `30` | 会话标题码点上限（仅 yml，compose 不透传） | `ConversationHistoryService` |
 | `CHAT_MEMORY_ENABLED` | `true` | 记忆层总开关（关闭后 `onTurnArchived` 全 no-op） | `memory/MemoryProperties` |
 | `CHAT_MEMORY_DIGEST_MAX_CHARS` | `1200` | digest 软上限（合约 200..3000，启动期校验） | `MemoryProperties` |
@@ -207,7 +213,7 @@ Psych_Counseling_Agent/
 | `SESSION_TIMEOUT` | `24h` | 登录会话超时（Spring Duration 语法） |
 | `SESSION_COOKIE_SECURE` | prod/compose 为 `true`，本地示例为 `false` | HTTPS 使用 Secure Cookie；本地 HTTP 显式关闭 |
 | `APP_REGISTRATION_ENABLED` | prod/compose 为 `false`，本地为 `true` | 关闭时注册端点返回 403，前端隐藏注册入口 |
-| `ADMIN_INITIAL_PASSWORD` | 空 | 初始超管口令；空则首启随机 12 位并 WARN 日志输出一次 |
+| `ADMIN_INITIAL_PASSWORD` | 空 | 尚无 ADMIN 时必须配置；未设置、空白或不合规则启动失败；口令与哈希均不写日志。已有 ADMIN 时不要求配置 |
 | `APP_CORS_ALLOWED_ORIGIN_PATTERNS` | `http://localhost:3001,http://127.0.0.1:3001`（compose 缺省透传**空值**） | CORS 显式 Origin 白名单，严禁 `*`；空即不注册任何 CORS 映射（`config/CorsConfig`） |
 | `APP_DOCS_ENABLED` | `true` | SecurityConfig 文档白名单开关（prod profile 强制 false） |
 | `SERVER_PORT` | `8123` | 后端端口（compose 内固定 8123） |
@@ -567,7 +573,7 @@ score(id) = 1/(60+vector_rank)
 ### 6.1 凭据：BCrypt 与输入校验
 
 - `account/AccountSecurityBeans.passwordEncoder` = `BCryptPasswordEncoder(10)`，全项目唯一 PasswordEncoder Bean。明文不落库/不落日志/不进 DTO。
-- **BCrypt 72 字节上限**：`account/AuthValidation.validatePassword` 在入口显式拒绝——长度 ≥8，且 UTF-8 编码后 ≤72 字节（超出 BCrypt 会静默截断）。同一事实源约束注册、改密、管理端重置与 `ADMIN_INITIAL_PASSWORD`（启动期 fail-closed 抛出，异常消息不含口令本身；生成的 12 位 `[A-Za-z0-9]` 口令恒合规）。用户名正则 `^[A-Za-z0-9_一-龥]{3,32}$`，先 trim 再校验。
+- **BCrypt 72 字节上限**：`account/AuthValidation.validatePassword` 在入口显式拒绝——长度 ≥8，且 UTF-8 编码后 ≤72 字节（超出 BCrypt 会静默截断）。同一事实源约束注册、改密、管理端重置与 `ADMIN_INITIAL_PASSWORD`（尚无 ADMIN 时必须配置，启动期 fail-closed 抛出，异常消息不含口令本身；管理端重置生成的 12 位 `[A-Za-z0-9]` 临时口令恒合规）。用户名正则 `^[A-Za-z0-9_一-龥]{3,32}$`，先 trim 再校验。
 - **时序旁路拉平**：`UserAccountService` 构造时预生成哑哈希 `dummyPasswordHash`，不存在的账号比对哑哈希；注册重名命中后补一次哑 `encode`，拉平与 201 路径（含真实 encode）的耗时差。主枚举面由注册限流兜住。
 
 ### 6.2 登录限流：原子准入（`account/LoginAttemptService`）
@@ -594,8 +600,8 @@ tryBeginCheck(username):                    // 单次 ConcurrentHashMap.compute 
 ### 6.4 初始超管引导（`account/AdminBootstrap`，`@PostConstruct`）
 
 1. 已存在任何 ADMIN → 跳过创建，直接无主会话归属。
-2. 口令优先 `ADMIN_INITIAL_PASSWORD`（经 `AuthValidation.validatePassword` 同一事实源），否则 `SecureRandom` 生成 12 位 `[A-Za-z0-9]`，BCrypt 落库。
-3. 成功以 WARN 输出**一次** `初始超管已创建，用户名 admin，密码 xxx（仅显示一次，请尽快修改）`；env 配置口令时不打口令。口令绝不写入文件/异常/接口返回。
+2. 尚无 ADMIN 时必须配置 `ADMIN_INITIAL_PASSWORD`；未设置、为空或仅含空白则抛出不含口令的 `IllegalStateException`，阻止启动且不创建账号。配置口令经 `AuthValidation.validatePassword` 同一事实源校验后 BCrypt 落库，不生成随机初始口令。
+3. 成功以 INFO 记录 `初始超管已创建，用户名 admin，初始口令来源 ADMIN_INITIAL_PASSWORD`。日志绝不输出口令或哈希，初始口令绝不写入文件/异常/接口返回。
 4. 用户名冲突回查裁决：冲突行确为 ADMIN（多实例并发首启）→ 按已引导处理；`admin` 被非管理员占用（首启窗口抢注）→ 记 ERROR 要求人工介入并返回，**绝不把无主会话 adopt 到非 ADMIN 账号**。
 5. 无主会话归属：`UPDATE psych_conversation SET owner_id=? WHERE owner_id IS NULL`（幂等），归属前断言目标 role 为 ADMIN。
 
@@ -944,7 +950,7 @@ SSE delta → markdown-it({html:false, breaks:true, linkify:true, typographer:fa
 |---|---|
 | Java | 原行为测试 + Web 安全切片 + 轮次生命周期 + PostgreSQL 事务；完整数字见 REPAIR_REPORT |
 | Python | Worker 30 项 + eval 11 项，本轮全部通过 |
-| 前端 | Vitest 13 项：CSRF/SSE、中文输入法、停止、重试幂等键、会话切换竞态和 HTML 清洗；ESLint、构建通过 |
+| 前端 | Vitest 6 个测试文件、35 项通过（当前本地验收）：CSRF/SSE、中文输入法、停止、重试幂等键、会话切换竞态和 HTML 清洗；ESLint、构建通过。这不是浏览器 E2E |
 | 检索 | RUN_RAG_BASELINE=true 单独启用；835 文档、30 个种子用例，见 eval/RAG_BASELINE.md |
 | 外部服务集成 | 原 6 项真实 LLM/pgvector 测试未执行；不能由 MockMvc 或单独 SQL 测试替代其结论 |
 
@@ -1009,7 +1015,7 @@ docker ps -a --filter "name=psych-counseling-e2e"
 | Compose 项目名 | `psych-counseling-agent`（`COMPOSE_PROJECT_NAME` 可覆盖）；启动器以 `-p psych-counseling-agent -f dk-ai-agent\docker-compose.yml` 执行，E2E 用 `-p psych-counseling-e2e` 隔离 |
 | 端口 | 前端 `${FRONTEND_BIND_ADDRESS}:${FRONTEND_PORT}:80`（默认 127.0.0.1:3001，dev overlay 另有 5432/8123/8001）；backend/worker 基础 Compose 仅 expose |
 | 首次启动等待 | backend readiness `start_period=120s`、15s 轮询 ×40；启动器健康检查 `http://127.0.0.1:<port>/api/health`（经 nginx，故 `/api/health` 必须 permitAll），2s 轮询、单次 3s 超时、上限 **20 分钟**、每 15s 一条进度日志 |
-| 超管密码丢失 | 随机口令仅首启 WARN 输出一次，无法找回。两条路：(a) 用管理面板为其他管理员重置；(b) 直接改库——`CREATE EXTENSION IF NOT EXISTS pgcrypto; UPDATE psych_user SET password_hash = crypt('<新密码>', gen_salt('bf',10)) WHERE username='admin';`（`bf,10` 与 `BCryptPasswordEncoder(10)` 兼容；新密码仍需满足 ≥8 位）。**注意**：直接改库不触发 `killSessions`，旧会话仍有效到自然过期，需重启 backend 清进程内会话注册表 |
+| 超管密码丢失 | 初始口令由 `ADMIN_INITIAL_PASSWORD` 配置且从不写日志；已有 ADMIN 时更改该变量不会重置密码。两条路：(a) 用管理面板为其他管理员重置；(b) 直接改库——`CREATE EXTENSION IF NOT EXISTS pgcrypto; UPDATE psych_user SET password_hash = crypt('<新密码>', gen_salt('bf',10)) WHERE username='admin';`（`bf,10` 与 `BCryptPasswordEncoder(10)` 兼容；新密码仍需满足 ≥8 位且 UTF-8 ≤72 字节）。**注意**：直接改库不触发 `killSessions`，旧会话仍有效到自然过期，需重启 backend 清进程内会话注册表 |
 | 服务器部署 | `FRONTEND_BIND_ADDRESS=0.0.0.0`、`FRONTEND_PORT=3004`（deploy 模板口径）；宿主机 nginx 反代 `127.0.0.1:3004` 并 `proxy_buffering off` + 600s 超时（`deploy/tencent-cloud/nginx-site.conf.example`）；`manage.sh` 子命令 check/deploy/start/restart/stop/status/logs/backup，自我约束“从不删 volume、从不杀占端口进程”；打包用 `build-package.ps1`（产出 zip + sha256） |
 | prod profile 文档收口 | 三重：`springdoc.api-docs/swagger-ui enabled=false`（端点不注册）+ `knife4j.production=true` + `app.docs.enabled=false`（移出安全白名单）。以非 prod profile 暴露公网仍开放 |
 | 反代头 | prod profile `server.forward-headers-strategy=framework`：backend 只在内网，信任前置 nginx 的 XFF（注册限流取首跳真实 IP 依赖此） |
@@ -1027,8 +1033,30 @@ docker ps -a --filter "name=psych-counseling-e2e"
 
 回答与终态在同一数据库事务中提交，提交成功之后才发 done。错误或取消尽量保存已向下游发出的部分；若数据库写入失败，客户端收到 error 而非虚假 done。部分回答不可变，同键重试只重放部分并返回 partial 错误，用户可用新消息继续。没有已生成文本的失败可以同键重试。网络断开并不保证浏览器收到每个已发出的 chunk。
 
-生成硬期限 180 秒，未完成预留 5 分钟后可恢复；启动时清理 RUNNING，因此部署严格限制单副本。重放缓存七天后按小时清理，不删除主历史；删除整个会话通过 FK 级联清除缓存。幂等保障限于缓存保留窗口，客户端不得长期复用消息键。
+生成硬期限 180 秒，未完成预留 5 分钟后可恢复；启动时清理 RUNNING，因此部署严格限制单副本。终态重放缓存按小时清理，期限由 `app.chat-history.replay-retention` 配置，默认仍为 `7d`（允许 `1h..3650d`）；通过绑定毫秒参数计算 SQL 截止时间，不拼接配置输入。该机制不删除主历史或摘要，也不受整会话 dry-run 开关控制；删除整个会话通过 FK 级联清除缓存。幂等保障限于缓存保留窗口，客户端不得长期复用消息键。
+
+### 业务数据保留与整会话删除
+
+三种窗口必须分别配置：`1000` 条原文工作集在摘要成功后滚动裁剪，摘要本身可以持续存在；模型上下文默认只带近期 `30` 条；默认七天的 `psych_chat_turn` 清理只限制回答重放副本。它们都不能替代产品和法律要求的业务数据保留期限。
+
+`ConversationRetentionService` 提供内部 `runOnce()` 和启动一分钟后、每小时一次的定时批处理。默认 `app.data-retention.apply=false`、`conversation-days=0`，只写 `unconfigured` 审计，不查询候选、不删除整会话。确定产品/法律保留期限后，先设置正数天数并保持 `apply=false`，查看 dry-run 的候选数量与 ID 指纹摘要；确认范围后才显式开启 apply。`apply=true` 且期限为 `0`、负数或超上限时启动失败；批量默认 `100`、硬上限 `500`。Compose 显式透传这组环境变量，开发 override 继承主文件。
+
+候选按数据库时间计算截止点，以会话 `updated_at` 严格早于截止点为准；按时间和 ID 排序，跳过 `RUNNING` 轮次和尚无 owner 的旧会话。apply 对每个候选开启独立 `READ COMMITTED` 事务，使用 `FOR UPDATE SKIP LOCKED` 锁父行，再次核验更新时间和 RUNNING 状态；先写 `psych_conversation_tombstone`，再删除会话，由 FK 级联删除消息、摘要和轮次缓存。它与 begin/finish 使用相同父行锁；若 begin 先取得锁，清理跳过活动轮次；若清理先提交，begin 查不到父行。既有 bootstrap 的墓碑复核阻止旧 ID 复活。失败的单个事务回滚，不影响已提交项，下次批处理可重试；繁忙父行跳过，不持锁等待。默认 dry-run 的候选统计最多一批，不是全库总量。
+
+审计只包含批次 ID、模式、期限、截止点、候选/删除/跳过/失败计数，以及最多十个截断 SHA-256 会话 ID 指纹；apply 成功提交后另记单项 ID 指纹，失败仅记异常类型，不输出正文、摘要、标题、owner 或 SQL 异常正文。日志属于运维记录，应按部署环境的访问权限与日志保留策略管理，不宣称具有独立不可篡改审计能力。
+
+墓碑永不被该任务清理。业务数据库删除不等于备份、快照、WAL、日志或磁盘介质擦除；部署方仍须独立确定备份到期与恢复后删除策略、加密和访问控制。本机制不实施正文列级加密，也不自动擦除磁盘。
 
 风险达到 PASSIVE/IMMINENT 时先缓冲并检查完整模型文本，再输出：应和自伤的规则命中会替换文本，缺少资源会补充资源。实际通过检查的文本由 pipeline 统一落库。普通轮次仍流式输出；规则的漏报与误报未被消除。
 
 每轮开始从已提交历史重建模型窗口，剔除当前用户消息，避免重试导致上下文重复；旧的水合脏标记与 doFinally 成功归档入口已删除。可观测性新增请求 ID、轮次数量/时长/归档失败计数及 ChatClient 回复 usage 计数，`/api/actuator/metrics/**` 仅 ADMIN 可访问。尚不等于所有异步日志贯通或全链路账单统计。
+
+## 单副本启动门禁（2026-09-20）
+
+Java 后端仅支持 `APP_DEPLOYMENT_MODE=single`、`APP_REPLICA_COUNT=1`（默认值）；其他模式、空值、非整数、零、负数及任何不等于 1 的副本数都会拒绝启动。`DkAiAgentApplication.main` 首先检查环境变量，再于 Spring 环境准备事件中复核 YAML/profile/命令行最终值；拒绝发生在 Bean 初始化前，避免启动时全库 RUNNING 恢复及向量库灌注先执行。
+
+`APP_INSTANCE_ID` 可选，空白或未配置时每次进程启动生成新 UUID；显式值允许 1..128 位 ASCII 字母、数字、点、下划线、冒号和连字符。解析后的值供启动日志和 `app.deployment.instance-id` 观测使用，不进入咨询正文，也不是分布式锁或 fencing token。不要在所有实例中复用固定默认 ID。
+
+部署与升级必须先停止旧 Java 后端、确认进程完全退出，再启动新后端，接受短暂中断；禁止重叠滚动发布、双实例蓝绿切流和 `--scale backend=2`。Compose 变量只是部署声明，不能测量真实副本数：两个连接同一数据库的实例即使都声明 single/1，门禁也无法自动发现。
+
+真正多副本仍需共享 Session/跨实例吊销、全局限流、turn lease/fencing、记忆整合协调和按所有权恢复 RUNNING 轮次；sticky session 与 instance ID 均不能替代这些能力。本次门禁和纯单元测试已添加，但本次未运行测试或真实数据库验证。

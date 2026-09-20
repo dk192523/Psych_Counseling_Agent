@@ -14,6 +14,8 @@ const state = reactive({
 })
 
 let inflightMe = null
+let authVersion = 0
+let identityVersion = 0
 
 /**
  * 确保已拉取当前登录态。首次懒加载 GET /api/auth/me，
@@ -28,13 +30,16 @@ export const ensureMe = (force = false) => {
     return inflightMe
   }
 
-  inflightMe = getMe()
+  const version = ++authVersion
+  const pending = getMe()
     .then((me) => {
+      if (version !== authVersion) return state.me
       state.me = me
       state.fetched = true
       return me
     })
     .catch((error) => {
+      if (version !== authVersion) return state.me
       // me 接口的 401 由路由守卫处理跳转，这里只落状态。
       if (error?.response?.data?.error === 'DISABLED') {
         state.notice = '该账号已被停用，请联系管理员'
@@ -44,14 +49,17 @@ export const ensureMe = (force = false) => {
       return null
     })
     .finally(() => {
-      inflightMe = null
+      if (inflightMe === pending) inflightMe = null
     })
-
+  inflightMe = pending
   return inflightMe
 }
 
 /** 登录/注册成功后直接写入 me（接口已自动登录，无需再拉一次）。 */
 export const setMe = (me) => {
+  identityVersion++
+  authVersion++
+  inflightMe = null
   state.me = me
   state.fetched = true
   state.notice = ''
@@ -63,6 +71,8 @@ export const setMe = (me) => {
  * 不再反复打 me 接口；重新登录时 setMe 会覆盖该状态。
  */
 export const clearAuth = () => {
+  identityVersion++
+  authVersion++
   state.me = null
   state.fetched = true
   inflightMe = null
@@ -77,16 +87,18 @@ export const clearAuthNotice = () => {
 }
 
 /**
- * 登出：调用后端销毁会话（失败也继续，会话可能已过期），
- * 再清空本地缓存。跳转由调用方决定。
+ * 只有服务端确认退出或已失效才清空身份；失败交给页面显示，不能假装已退出。
  */
 export const logout = async () => {
+  const version = identityVersion
+  authVersion++
+  inflightMe = null
   try {
     await apiLogout()
-  } catch {
-    // 401/网络错误都视为已登出，静默继续。
+  } catch (error) {
+    if (error?.response?.status !== 401) throw error
   }
-  clearAuth()
+  if (version === identityVersion) clearAuth()
 }
 
 /**

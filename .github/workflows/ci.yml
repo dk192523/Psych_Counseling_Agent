@@ -3,6 +3,27 @@ on: [push, pull_request]
 permissions:
   contents: read
 jobs:
+  release-package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and verify a temporary release archive
+        shell: pwsh
+        run: |
+          ./deploy/tencent-cloud/build-package.ps1 -OutputDirectory .test-tmp/release-check
+          $archive = (Get-ChildItem .test-tmp/release-check/*.zip | Select-Object -First 1).FullName
+          ./deploy/tencent-cloud/verify-package.ps1 -ArchivePath $archive
+      - name: Extract the verified release archive
+        run: |
+          unzip .test-tmp/release-check/*.zip -d .test-tmp/extracted
+      - name: Build backend image from the extracted archive
+        run: docker build -t psych-release-backend .test-tmp/extracted/Psych_Counseling_Agent_Server/dk-ai-agent
+      - name: Build worker image from the extracted archive
+        run: docker build -t psych-release-worker .test-tmp/extracted/Psych_Counseling_Agent_Server/ai-worker
+      - name: Build frontend image and validate nginx from the extracted archive
+        run: |
+          docker build -t psych-release-frontend .test-tmp/extracted/Psych_Counseling_Agent_Server/dk-ai-agent/dk-ai-agent-frontend
+          docker run --rm --add-host backend:127.0.0.1 --entrypoint nginx psych-release-frontend -t
   backend:
     runs-on: ubuntu-latest
     services:

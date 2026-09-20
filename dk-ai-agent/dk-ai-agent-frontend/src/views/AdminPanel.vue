@@ -640,8 +640,12 @@ const runBulk = async (action) => {
 // ---------- 顶栏 ----------
 
 const handleLogout = async () => {
-  await logout()
-  await router.push('/login')
+  try {
+    await logout()
+    await router.push('/login')
+  } catch {
+    pushToast('尚未确认退出，请检查网络后重试。', 'error')
+  }
 }
 
 // ---------- 工具 ----------
