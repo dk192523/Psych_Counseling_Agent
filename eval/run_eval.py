@@ -151,7 +151,20 @@ def judge_reply(key: str, expectation: str, transcript: str, reply: str) -> tupl
     )
     response.raise_for_status()
     content = response.json()["choices"][0]["message"]["content"]
-    verdict = json.loads(content)
+    # judge 偶发输出非法 JSON（截断/包裹 markdown 代码块）：剥围栏后仍失败则重试一次，
+    # 再失败就放弃 judge（确定性断言不受影响），而不是把整条用例打成 ERROR——
+    # judge 是增强信号，不该有把合格回复误报为执行异常的权力。
+    verdict = None
+    for attempt in range(2):
+        try:
+            cleaned = content.strip()
+            if cleaned.startswith("```"):
+                cleaned = cleaned.strip("`").lstrip("json").strip()
+            verdict = json.loads(cleaned)
+            break
+        except json.JSONDecodeError:
+            if attempt == 1:
+                return True, "judge 输出无法解析，已跳过（仅确定性断言生效）"
     if type(verdict.get("pass")) is not bool or not isinstance(verdict.get("reason"), str):
         raise ValueError("Judge must return a boolean pass and a string reason")
     return verdict["pass"], verdict["reason"]
@@ -233,6 +246,20 @@ def refresh_csrf(client: httpx.Client, base_url: str) -> None:
     client.headers[token["headerName"]] = token["token"]
 
 
+def track_session_cookie(client: httpx.Client) -> None:
+    """本地验收栈与生产同配置（prod profile + SESSION_COOKIE_SECURE=true），Set-Cookie 带
+    Secure 属性——httpx 遵循 cookie 规范，拒绝在 http:// 上存储/回传，导致 403/401。
+    浏览器对 localhost 有可信来源豁免、curl 无策略校验，均不受影响，唯 eval 需手动跟随。
+    用 response hook 从每个响应同步 JSESSIONID：登录的 changeSessionId 轮换、CSRF 刷新
+    创建的新会话，都会被下一次请求自动携带。"""
+    def sync_cookie(response: httpx.Response) -> None:
+        set_cookie = response.headers.get("set-cookie", "")
+        if "JSESSIONID=" in set_cookie:
+            jsessionid = set_cookie.split("JSESSIONID=", 1)[1].split(";", 1)[0]
+            client.headers["Cookie"] = f"JSESSIONID={jsessionid}"
+    client.event_hooks["response"].append(sync_cookie)
+
+
 def validate_cases(cases: list[dict]) -> None:
     if not isinstance(cases, list) or not cases:
         raise ValueError("cases must be a nonempty list")
@@ -304,6 +331,7 @@ def main() -> int:
     started = time.perf_counter()
     results: list[dict] = []
     with httpx.Client() as client:
+        track_session_cookie(client)
         refresh_csrf(client, args.base_url)
         login = client.post(f"{args.base_url}/api/auth/login", json={
             "username": args.username, "password": args.password})

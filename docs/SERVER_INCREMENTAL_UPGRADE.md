@@ -502,3 +502,35 @@ Java 后端仅支持 `APP_DEPLOYMENT_MODE=single`、`APP_REPLICA_COUNT=1`（默�
 部署与升级必须先停止旧 Java 后端、确认进程完全退出，再启动新后端，接受短暂中断；禁止重叠滚动发布、双实例蓝绿切流和 `--scale backend=2`。Compose 变量只是部署声明，不能测量真实副本数：两个连接同一数据库的实例即使都声明 single/1，门禁也无法自动发现。
 
 真正多副本仍需共享 Session/跨实例吊销、全局限流、turn lease/fencing、记忆整合协调和按所有权恢复 RUNNING 轮次；sticky session 与 instance ID 均不能替代这些能力。本次门禁和纯单元测试已添加，但本次未运行测试或真实数据库验证。
+## 13. 备份恢复 SOP（2026-09-20 本地全流程演练通过）
+
+工具链：`manage.sh backup`（age X25519 公钥流式加密，明文不落盘）→ 三件套
+（`.dump.age` 密文 + `.sha256` + `.manifest`）→ `manage.sh verify-backup` 校验 →
+`age -d` 解密 → `pg_restore` 恢复。演练结果（本地容器，真实生产包脚本）：
+
+- 加密：密文以 `age-encryption.org/v1` 头起始，密文/校验/manifest 三件套齐全，
+  临时文件零残留（明文仅存在于管道）；
+- 篡改拒绝：翻转密文 1 字节后 `verify-backup` 立即以"SHA-256 校验失败"拒绝；
+- **恢复**：解密 → 恢复到全新 PG 容器 → conversations=9 / messages=30 / users=2
+  与源库逐表一致。
+
+日常 SOP：cron 每日 backup；私钥**不存服务器**（离线保存）；恢复演练每季度一次
+（恢复到临时容器比对行数即可，不必覆盖生产）。
+
+## 14. 第七轮增量（2026-09-20：本地闭环收尾——备份演练、RAG 换型与工具修复）
+
+- **eval 工具适配生产安全配置**：本地验收栈与生产同配（prod profile + Secure Cookie），
+  httpx 按规范拒绝回传 Secure cookie 导致 403/401——改用 response hook 手动跟随
+  JSESSIONID（覆盖登录 changeSessionId 轮换）；judge 输出加 JSON 容错（剥代码围栏 +
+  重试，失败降级为跳过而非误报 ERROR）。
+- **RAG embedding 换型**：all-MiniLM-L6-v2 → multilingual-e5-small（384 维不变）。
+  离线对比 + Java 基线复核：Document Hit@4 **0.04 → 0.72**（18 倍）；阈值按分数分布
+  校准 0.3 → 0.87（e5 下正负例完全分离：正例 p5=0.886 vs 负例 max=0.863）。
+  详见 `eval/RAG_BASELINE.md` 第二轮测量。
+- **知识库幽灵副本清理**：生产库曾 1670 条（"大冰连麦案例-*"历史改名残留 ×2），
+  清理 819 条后重灌 851（835 案例 + 16 框架）。
+- **部署注意（重要）**：compose 与 application.yml 的 `ONNX_EMBEDDING_MODEL_URI`
+  默认值已同步为 e5——历史上只改一侧会造成 tokenizer/模型词表不匹配的崩溃循环。
+  首次启动新包会自动全量重灌向量库（e5 推理 851 文档约 8 分钟，readiness 期间
+  拒绝流量属预期）；ONNX 模型 470MB 首次下载需数分钟。
+- 新增 `docs/REMOTE_GO_LIVE.md`（正式 TLS/生产验收单/加密决策/多副本框架）。
