@@ -235,6 +235,145 @@ class SpringAiCounselingAgentExecutorTest {
     }
 
     @Test
+    void workerReceivesProfessionalMetadataWithoutExtractingACaseSlugFromItsText() {
+        Fixture fixture = professionalEvidenceFixture();
+        when(fixture.aiWorkerClient.refine(any())).thenAnswer(invocation -> {
+            AiWorkerContracts.RefineRequest request = invocation.getArgument(0);
+            AiWorkerContracts.Candidate candidate = request.candidates().get(0);
+            assertEquals("psych-knowledge", candidate.domain());
+            assertEquals("", candidate.slug());
+            assertEquals("guide.md", candidate.sourceId());
+            assertEquals("chunk-1", candidate.chunkId());
+            assertEquals("https://example.test/guide", candidate.citationUrl());
+            return Optional.of(new AiWorkerContracts.RefineResponse(
+                    "1", request.requestId(), List.of(new AiWorkerContracts.SelectedEvidence(
+                    "C1", "", 0.8, List.of("vector"), List.of())),
+                    List.of(), "rrf", false, List.of(), 1));
+        });
+
+        var events = fixture.executor().prepareAndAnswer("message", "chat-id", OWNER_ID)
+                .collectList().block();
+
+        assertFalse(events.stream().anyMatch(CounselingStreamEvent::fallback));
+        verify(fixture.aiWorkerClient).refine(any());
+        verify(fixture.chatModel, never()).call(any(Prompt.class));
+        verify(fixture.transcriptSearchService, never()).search(anyString(), anyString(), any(Integer.class));
+    }
+
+    @Test
+    void professionalOnlyEvidenceIsReportedInAnsweringStatusOnWorkerAndJavaPaths() {
+        for (boolean useWorker : List.of(true, false)) {
+            Fixture fixture = professionalEvidenceFixture();
+            when(fixture.vectorStore.similaritySearch(any(SearchRequest.class))).thenReturn(List.of(
+                    Document.builder().id("guide").text("内部专业知识正文")
+                            .metadata("title", "内部知识标题")
+                            .metadata("knowledgeDomain", "psych-knowledge").score(0.8).build(),
+                    Document.builder().id("policy").text("内部政策正文")
+                            .metadata("title", "内部政策标题")
+                            .metadata("knowledgeDomain", "psych-policy").score(0.7).build()));
+            if (useWorker) {
+                when(fixture.aiWorkerClient.refine(any())).thenReturn(Optional.of(
+                        new AiWorkerContracts.RefineResponse("1", "worker-request", List.of(
+                                new AiWorkerContracts.SelectedEvidence("C1", "", 0.8, List.of("vector"), List.of()),
+                                new AiWorkerContracts.SelectedEvidence("C2", "", 0.7, List.of("vector"), List.of())),
+                                List.of(), "rrf", false, List.of(), 1)));
+            } else {
+                when(fixture.aiWorkerClient.refine(any())).thenReturn(Optional.empty());
+                when(fixture.chatModel.call(any(Prompt.class))).thenReturn(response("""
+                        {"selectedIds":["C1","C2"],"evidenceGaps":[]}
+                        """));
+            }
+
+            var events = fixture.executor().prepareAndAnswer("message", "chat-id", OWNER_ID)
+                    .collectList().block();
+
+            // Exact public copy also guards against leaking evidence text, titles or the hidden plan.
+            assertEquals(List.of("核对了 2 份参考材料，正在组织回应…"), events.stream()
+                    .filter(event -> "answering".equals(event.phase()))
+                    .map(CounselingStreamEvent::content).toList());
+            assertFalse(events.stream().anyMatch(CounselingStreamEvent::fallback));
+        }
+    }
+
+    @Test
+    void workerCannotAttachCaseSlugOrTranscriptToProfessionalEvidence() {
+        var snippet = new AiWorkerContracts.EvidenceSnippet(
+                "00:01:00", "00:01:20", "伪装逐字稿", "https://example.test/video", 1.0);
+        for (var selection : List.of(
+                new AiWorkerContracts.SelectedEvidence("C1", "2026-07-18-call-07", 0.8,
+                        List.of("vector"), List.of()),
+                new AiWorkerContracts.SelectedEvidence("C1", "", 0.8,
+                        List.of("vector"), List.of(snippet)))) {
+            Fixture fixture = professionalEvidenceFixture();
+            when(fixture.aiWorkerClient.refine(any())).thenReturn(Optional.of(
+                    new AiWorkerContracts.RefineResponse("1", "worker-request", List.of(selection),
+                            List.of(), "rrf", false, List.of(), 1)));
+            when(fixture.chatModel.call(any(Prompt.class))).thenReturn(response("""
+                    {"selectedIds":["C1"],"evidenceGaps":[]}
+                    """));
+
+            var events = fixture.executor().prepareAndAnswer("message", "chat-id", OWNER_ID)
+                    .collectList().block();
+
+            assertFalse(events.stream().anyMatch(CounselingStreamEvent::fallback));
+            verify(fixture.chatModel).call(any(Prompt.class));
+            verify(fixture.transcriptSearchService, never()).search(anyString(), anyString(), any(Integer.class));
+        }
+    }
+
+    @Test
+    void professionalContextRetainsCitationMetadataAndSeparatesCases() {
+        Fixture fixture = professionalEvidenceFixture();
+        when(fixture.vectorStore.similaritySearch(any(SearchRequest.class))).thenReturn(List.of(
+                Document.builder().id("guide").text("专业知识正文")
+                        .metadata("knowledgeDomain", "psych-knowledge")
+                        .metadata("sourceId", "guide.md").metadata("chunkId", "chunk-1")
+                        .metadata("citationUrl", "https://example.test/guide").score(0.8).build(),
+                Document.builder().id("case").text("案例编号 2026-07-18-call-07\n案例参考正文")
+                        .metadata("knowledgeDomain", "psych-cases").score(0.7).build()));
+        when(fixture.aiWorkerClient.refine(any())).thenReturn(Optional.of(
+                new AiWorkerContracts.RefineResponse("1", "worker-request", List.of(
+                        new AiWorkerContracts.SelectedEvidence("C1", "", 0.8, List.of("vector"), List.of()),
+                        new AiWorkerContracts.SelectedEvidence("C2", "2026-07-18-call-07", 0.7, List.of("vector"), List.of())),
+                        List.of(), "rrf", false, List.of(), 1)));
+
+        fixture.executor().prepareAndAnswer("message", "chat-id", OWNER_ID).collectList().block();
+
+        var captor = org.mockito.ArgumentCaptor.forClass(String.class);
+        verify(fixture.counselingApp).doChatWithAgentContextByStreamPrepared(
+                eq(OWNER_ID), eq("message"), eq("chat-id"), captor.capture());
+        String context = captor.getValue();
+        int professionalStart = context.indexOf("专业知识与政策依据（");
+        int caseStart = context.indexOf("案例参考（");
+        assertTrue(professionalStart >= 0 && caseStart > professionalStart);
+        String professional = context.substring(professionalStart, caseStart);
+        assertTrue(professional.contains("sourceId: guide.md\nchunkId: chunk-1\n"));
+        assertTrue(professional.contains("https://example.test/guide"));
+        assertTrue(professional.indexOf("https://example.test/guide") < professional.indexOf("专业知识正文"));
+        assertFalse(professional.contains("案例参考正文"));
+        assertTrue(context.substring(caseStart).contains("[psych-cases]\n"));
+        assertTrue(context.substring(caseStart).contains("案例参考正文"));
+        assertFalse(context.substring(caseStart).contains("guide.md"));
+    }
+
+    private Fixture professionalEvidenceFixture() {
+        Fixture fixture = new Fixture();
+        when(fixture.historyService.getRecentMessages("chat-id", fixture.properties.getHistoryMessages()))
+                .thenReturn(List.of());
+        when(fixture.aiWorkerClient.plan(any())).thenReturn(Optional.of(new AiWorkerContracts.PlanResponse(
+                "1", "worker-request", "clarification", true, "睡眠", List.of("睡眠知识"), List.of(),
+                "deepseek", false, List.of(), 1, List.of(), "clarify", "")));
+        when(fixture.vectorStore.similaritySearch(any(SearchRequest.class))).thenReturn(List.of(
+                Document.builder().id("guide").text("睡眠知识提到案例 2026-07-18-call-07")
+                        .metadata("knowledgeDomain", "psych-knowledge")
+                        .metadata("sourceId", "guide.md").metadata("chunkId", "chunk-1")
+                        .metadata("citationUrl", "https://example.test/guide").score(0.8).build()));
+        when(fixture.counselingApp.doChatWithAgentContextByStreamPrepared(
+                eq(OWNER_ID), eq("message"), eq("chat-id"), anyString())).thenReturn(Flux.just("answer"));
+        return fixture;
+    }
+
+    @Test
     void workerListenModeInjectsResponseStrategyIntoDeepContext() {
         // 回应策略：worker 判定 listen（用户在宣泄）→ 深度上下文必须携带
         // "只反映与陪伴、不提问"的内部指令与选题方向，且标注为系统指令而非用户事实。
@@ -265,7 +404,7 @@ class SpringAiCounselingAgentExecutorTest {
         assertTrue(context.contains("这种疲惫持续了多久"));
         assertTrue(context.contains("系统内部指令"));
         // listen 模式下没有可靠案例时，不得伪装检索出了材料。
-        assertTrue(context.contains("没有筛选出足够可靠的相似案例"));
+        assertTrue(context.contains("没有筛选出足够可靠的参考材料"));
     }
 
     @Test

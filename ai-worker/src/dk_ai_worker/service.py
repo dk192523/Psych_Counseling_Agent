@@ -154,11 +154,8 @@ class IntelligenceService:
                 "maxEvidence": request.limits.max_evidence,
                 "candidates": [
                     {
-                        "id": candidate.id,
-                        "slug": candidate.slug,
-                        "title": candidate.title,
+                        **candidate.model_dump(by_alias=True),
                         "text": _truncate(candidate.text, 900),
-                        "vectorScore": candidate.vector_score,
                     }
                     for candidate in request.candidates
                 ],
@@ -189,7 +186,8 @@ class IntelligenceService:
             request.limits.max_evidence,
             llm_selected_ids=selected_ids,
         )
-        snippet_lists = await asyncio.gather(
+        case_ranked = [item for item in ranked if item.candidate.domain == "psych-cases"]
+        case_snippet_lists = await asyncio.gather(
             *(
                 asyncio.to_thread(
                     self._transcripts.search,
@@ -198,20 +196,24 @@ class IntelligenceService:
                     request.limits.snippets_per_case,
                     request.limits.snippet_max_chars,
                 )
-                for item in ranked
+                for item in case_ranked
             )
         )
+        snippets_by_id = {
+            item.candidate.id: snippets
+            for item, snippets in zip(case_ranked, case_snippet_lists, strict=True)
+        }
         selected_evidence = [
             SelectedEvidence(
                 id=item.candidate.id,
                 slug=item.candidate.slug,
                 rank_score=item.score,
                 rank_signals=item.signals,
-                snippets=snippets,
+                snippets=snippets_by_id.get(item.candidate.id, []),
             )
-            for item, snippets in zip(ranked, snippet_lists, strict=True)
+            for item in ranked
         ]
-        if selected_evidence and not any(item.snippets for item in selected_evidence):
+        if case_ranked and not any(case_snippet_lists):
             evidence_gaps = _normalize_texts(
                 [*evidence_gaps, "命中案例缺少可核验的逐字稿片段"], 5, 120
             )

@@ -82,9 +82,13 @@ class RetrievalBaselineTest {
                 var match = topDocuments.get(rank);
                 var slugs = documentSlugs.get(match.index());
                 if (firstDocument == 0 && slugs.stream().anyMatch(c.expected()::contains)) firstDocument = rank + 1;
-                candidates.add(Map.of("rank", rank + 1, "score", match.score(), "slugs", slugs,
-                        "document_key", documentKeys.get(match.index()),
-                        "filename", String.valueOf(documents.get(match.index()).getMetadata().getOrDefault("filename", ""))));
+                var candidate = new LinkedHashMap<String, Object>();
+                candidate.put("rank", rank + 1);
+                candidate.put("score", match.score());
+                candidate.put("slugs", slugs);
+                candidate.put("document_key", documentKeys.get(match.index()));
+                candidate.put("filename", String.valueOf(documents.get(match.index()).getMetadata().getOrDefault("filename", "")));
+                candidates.add(candidate);
             }
             // Merge ALL threshold-qualified Documents before case topK; a case uses its maximum score.
             var bestBySlug = new HashMap<String, Scored>();
@@ -103,8 +107,12 @@ class RetrievalBaselineTest {
                     matchedExpected++;
                     if (firstCase == 0) firstCase = rank + 1;
                 }
-                caseCandidates.add(Map.of("rank", rank + 1, "slug", match.getKey(),
-                        "score", match.getValue().score(), "best_document_key", documentKeys.get(match.getValue().index())));
+                var caseCandidate = new LinkedHashMap<String, Object>();
+                caseCandidate.put("rank", rank + 1);
+                caseCandidate.put("slug", match.getKey());
+                caseCandidate.put("score", match.getValue().score());
+                caseCandidate.put("best_document_key", documentKeys.get(match.getValue().index()));
+                caseCandidates.add(caseCandidate);
             }
             switch (c.sampleType()) {
                 case "positive" -> {
@@ -161,9 +169,12 @@ class RetrievalBaselineTest {
         report.put("positive_rejection_rate", divide(positiveRejected, positive));
         report.put("negative_false_hit_rate", divide(negative - negativeRejected, negative));
         report.put("no_hit_accuracy", divide(negativeRejected, negative));
-        report.put("compatibility", Map.of("recall_at_4", "deprecated alias of document_hit_at_4, never Recall",
-                "no_hit_accuracy", "negative rejection rate", "first_relevant_rank", "deprecated document rank alias",
-                "mrr_at_4", "schema v2 uses case ranks; schema v1 used Document ranks, now document_mrr_at_4"));
+        var compatibility = new LinkedHashMap<String, Object>();
+        compatibility.put("recall_at_4", "deprecated alias of document_hit_at_4, never Recall");
+        compatibility.put("no_hit_accuracy", "negative rejection rate");
+        compatibility.put("mrr_at_4", "schema v2 uses case ranks; schema v1 used Document ranks, now document_mrr_at_4");
+        compatibility.put("first_relevant_rank", "deprecated document rank alias");
+        report.put("compatibility", compatibility);
         report.put("results", results);
         report.put("total_elapsed_ms", elapsedMillis(started)); // Excludes report serialization/write.
         Files.writeString(Path.of("../eval/rag_baseline.json"), mapper.writerWithDefaultPrettyPrinter().writeValueAsString(report), StandardCharsets.UTF_8);

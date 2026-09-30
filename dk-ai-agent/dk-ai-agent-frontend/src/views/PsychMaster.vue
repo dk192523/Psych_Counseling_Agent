@@ -1,7 +1,10 @@
 <template>
   <div class="psych-master-container">
     <header class="header">
-      <h1 class="title">AI 心理咨询师</h1>
+      <h1 class="title" aria-label="AI 心理咨询师">
+        <span class="title-full">AI 心理咨询师</span>
+        <span class="title-compact" aria-hidden="true">心理咨询</span>
+      </h1>
       <div class="header-status">
         <span v-if="memoryStats" class="memory-chip" :title="memoryChipTitle">
           <span class="memory-chip-dot" aria-hidden="true"></span>
@@ -12,19 +15,31 @@
           {{ currentConversationTitle }}
         </div>
         <div class="header-account">
-          <span class="account-chip" :title="`当前登录：${me?.username}`">
+          <router-link class="account-link" to="/practice" title="本地原创模拟练习，非考试真题">
+            模拟练习
+          </router-link>
+          <span class="account-chip desktop-account" :title="`当前登录：${me?.username}`">
             <span class="account-avatar" aria-hidden="true">{{ avatarChar }}</span>
             <span class="account-name">{{ me?.username }}</span>
           </span>
-          <router-link v-if="isAdmin" class="account-link admin-entry" to="/admin" title="进入管理后台">
+          <router-link v-if="isAdmin" class="account-link admin-entry desktop-account" to="/admin" title="进入管理后台">
             管理后台
           </router-link>
-          <button type="button" class="account-link" title="把当前会话导出为 Markdown 文件" @click="exportConversation">
+          <button type="button" class="account-link desktop-account" title="把当前会话导出为 Markdown 文件" @click="exportConversation">
             导出
           </button>
-          <button type="button" class="account-link" title="修改当前账号密码" @click="openPasswordModal">
+          <button type="button" class="account-link desktop-account" title="修改当前账号密码" @click="openPasswordModal">
             修改密码
           </button>
+          <details class="mobile-account-menu">
+            <summary class="account-link" aria-label="更多账号操作">更多</summary>
+            <div class="mobile-account-options">
+              <span class="mobile-account-name">{{ me?.username }}</span>
+              <router-link v-if="isAdmin" class="account-link" to="/admin">管理后台</router-link>
+              <button type="button" class="account-link" @click="exportConversation">导出当前会话</button>
+              <button type="button" class="account-link" @click="openPasswordModal">修改密码</button>
+            </div>
+          </details>
           <button type="button" class="account-link logout-button" :disabled="loggingOut" @click="handleLogout">
             {{ loggingOut ? '退出中…' : '退出登录' }}
           </button>
@@ -930,6 +945,11 @@ onBeforeUnmount(() => {
   font-weight: 800;
 }
 
+.title-compact,
+.mobile-account-menu {
+  display: none;
+}
+
 .header-status {
   display: flex;
   min-width: 0;
@@ -1336,7 +1356,8 @@ onBeforeUnmount(() => {
 
 @media (max-width: 768px) {
   .header {
-    grid-template-columns: minmax(0, 1fr) minmax(72px, auto);
+    grid-template-columns: minmax(0, 1fr) auto;
+    column-gap: 8px;
     /* 与下方 content-wrapper 的兜底 calc(100dvh - 48px) 保持同一契约 */
     height: 48px;
     padding: 0 14px;
@@ -1372,7 +1393,59 @@ onBeforeUnmount(() => {
 
   .header-account {
     gap: 5px;
-    padding-left: 8px;
+    padding-left: 0;
+    border-left: 0;
+  }
+
+  /* 固定高度内保留练习和退出，其余操作移入原生可键盘操作的折叠菜单。 */
+  .header-account > .desktop-account,
+  .header-status > .memory-chip,
+  .header-status > .current-conversation {
+    display: none;
+  }
+
+  .mobile-account-menu {
+    position: relative;
+    display: block;
+  }
+
+  .mobile-account-menu summary {
+    list-style: none;
+  }
+
+  .mobile-account-menu summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .mobile-account-options {
+    position: absolute;
+    top: calc(100% + 8px);
+    right: 0;
+    display: flex;
+    width: 168px;
+    padding: 10px;
+    flex-direction: column;
+    gap: 8px;
+    border: 1px solid var(--psych-glass-line);
+    border-radius: 12px;
+    background: #fff;
+    box-shadow: 0 8px 24px rgba(23, 43, 77, 0.16);
+  }
+
+  .mobile-account-menu:not([open]) .mobile-account-options {
+    display: none;
+  }
+
+  .mobile-account-name {
+    overflow-wrap: anywhere;
+    color: var(--psych-ink-muted);
+    font-size: 12px;
+  }
+
+  .mobile-account-options .account-link {
+    min-height: 40px;
+    justify-content: flex-start;
+    text-align: left;
   }
 
   .account-name {
@@ -1384,8 +1457,18 @@ onBeforeUnmount(() => {
   }
 
   .account-link {
+    display: inline-flex;
+    min-height: 32px;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
     padding: 4px 7px;
     font-size: 11px;
+  }
+
+  .account-link:focus-visible {
+    outline: 2px solid var(--psych-primary);
+    outline-offset: 2px;
   }
 
   .content-wrapper {
@@ -1453,13 +1536,21 @@ onBeforeUnmount(() => {
 
 @media (max-width: 480px) {
   .header {
-    grid-template-columns: minmax(0, 1fr) minmax(62px, auto);
+    grid-template-columns: minmax(0, 1fr) auto;
     height: 44px;
     padding: 0 10px;
   }
 
   .title {
     font-size: 16px;
+  }
+
+  .title-full {
+    display: none;
+  }
+
+  .title-compact {
+    display: inline;
   }
 
   .current-conversation {

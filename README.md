@@ -2,7 +2,7 @@
 
 这是一个面向日常心理疏导的本地 RAG 应用。它先理解用户的感受并澄清事实，在信息不足时以简短提问为主；画像足够清晰后，会先复述确认并征得许可，再进行完整梳理。
 
-当前知识库整理自公开连麦案例。案例只用于检索参考和原文溯源，不定义 AI 的身份、立场或表达风格。项目不模仿、代表或绑定任何现实人物。
+当前咨询检索分为案例参考（`psych-cases`）、专业知识（`psych-knowledge`）和政策材料（`psych-policy`）三个运行时域，按用户意图选域。公开连麦案例只用于检索参考和原文溯源，不能作为诊断、法规或危机处置的专业依据，也不定义 AI 的身份、立场或表达风格。项目不模仿、代表或绑定任何现实人物。
 
 > 本项目仅供个人学习和本地体验，不是医疗服务，不能替代持证心理咨询师、精神科医生或紧急救援服务。账号体系为本地单实例设计（登录限流与会话注册表均为进程内状态，不支持多副本共享），开放注册仅适合本机使用，不应直接部署到公网。
 
@@ -18,6 +18,7 @@
 - 会话持久化：PostgreSQL 保存历史会话，页面支持新建、切换和删除。
 - 安全 Markdown：AI 回复经过 Markdown 渲染和 HTML 消毒，用户输入按纯文本显示。
 - 二级溯源：摘要命中后按案例编号读取 raw 逐字稿，返回带时间戳的参考片段。
+- 独立模拟练习：登录后从咨询页顶栏进入 `/practice`，每轮加载 5 道题，提交选项、查看解析并重新开始；使用本地原创虚构材料，不进入向量库或咨询记忆，不持久化成绩。
 
 ## 技术结构
 
@@ -25,7 +26,7 @@
 Psych_Counseling_Agent/
 ├── dk-ai-agent/                  Java 25 后端、Vue 前端和 Docker Compose
 ├── ai-worker/                    Python 3.12 深度检索 Worker
-├── counseling-kb/                    案例索引、分类文档和 raw 逐字稿
+├── counseling-kb/                历史案例材料、来源清单和离线治理校验脚本
 ├── docs/                         功能与技术文档
 └── launcher/                     Windows 一键启动器源码、构建脚本和 EXE
 ```
@@ -88,7 +89,7 @@ set "ADMIN_INITIAL_PASSWORD=REPLACE_WITH_YOUR_STRONG_PASSWORD"
 mvnw.cmd spring-boot:run
 ```
 
-首次启动会下载本地 ONNX 模型并把知识库 Markdown 切分后写入 PgVector，耗时会明显高于后续启动。知识库内容不变时会按版本哈希跳过重复灌库。
+首次启动会下载本地 ONNX 模型（当前默认 `multilingual-e5-small`）并把三个运行时域的 Markdown 切分后写入 PgVector，耗时会明显高于后续启动。快照版本包含模型版本、切块正文与来源元数据；启动时按域检查当前快照数量，完整则跳过重复灌库。新快照写入并通过数量校验后才清理旧快照，失败时保留旧快照并拒绝启动。
 
 ### 3. 启动 Vue 前端
 
@@ -107,10 +108,11 @@ npm.cmd run dev
 - `POST /api/auth/register`、`POST /api/auth/login`、`POST /api/auth/logout`、`GET /api/auth/me`
 - `POST /api/users/me/password`
 - `GET /api/admin/users`、`/api/admin/stats` 等管理端点（仅 ADMIN）
-- `GET /api/ai/counseling/chat/sync`
+- `POST /api/ai/counseling/chat/sync`
 - `POST /api/ai/counseling/chat/sse`（正式前端链路；JSON body）
 - `POST /api/ai/conversations`
 - `GET /api/ai/conversations`
+- `GET /api/exam/questions`、`POST /api/exam/questions/{id}/answer`（独立模拟练习，需登录；POST 需 CSRF token）
 - `GET /api/health`
 
 ## 账号与数据隔离
@@ -130,15 +132,16 @@ npm.cmd run dev
 - 快速模式不做情景召回，不为记忆新增任何模型或 Worker 调用。
 - 普通回答读取最近 30 条消息：`CHAT_HISTORY_CONTEXT_WINDOW=30`。
 - 深度规划读取最近 12 条消息：`DEEP_THINKING_HISTORY_MESSAGES=12`。
-- 快速检索默认 `topK=4`、相似度阈值 `0.3`。
-- 深度检索默认每条查询召回 6 个候选、阈值 `0.25`，最终保留最多 4 个案例证据。
+- 快速检索默认 `topK=4`、相似度阈值 `0.87`。
+- 深度检索默认每条查询召回 6 个候选、阈值 `0.25`，最终保留最多 4 个证据；专业知识、政策依据与案例参考分开组织，非案例证据不做逐字稿搜索。
 
 ## 数据范围
 
-- 810 个案例索引。
-- 799 份 raw 逐字稿，约 396 万字。
-- 11 份来源网站缺失的逐字稿只能使用摘要层信息。
-- 9 个案例分类 Markdown 和 1 个中性心理疏导框架。
+运行时加载 `dk-ai-agent/src/main/resources/document/` 下的旧案例材料（`psych-cases`）、`document/professional/`（`psych-knowledge`）和 `document/policy/`（`psych-policy`）。旧材料包括 810 个案例索引、799 份 raw 逐字稿（约 396 万字）、9 个案例分类 Markdown 和 1 个中性心理疏导框架；11 个案例缺少来源网站逐字稿，只能参考摘要。专业与政策目录中的种子摘要是项目整理文本，引用链接不表示外部机构授权或背书。
+
+`psych-exams`、`psych-prompts` 是候选域，目前没有接入生产资源导入；考试意图虽有独立域路由，也不会因此获得可检索题库。实际 `exam/practice/seed.jsonl` 供 `/practice` 页面通过独立练习 API 使用：后端无状态、本地虚构模拟题，不调用模型、不保存答题记录；页面仅临时展示本轮结果，刷新、离开或重新开始后清除。不进入向量库、咨询检索或咨询记忆，也不属于正式题库或专业认证材料。
+
+来源治理见 [KNOWLEDGE_GOVERNANCE](docs/KNOWLEDGE_GOVERNANCE.md)：`counseling-kb/manifests/sources.jsonl` 登记来源，`counseling-kb/validate_sources.py` 提供离线校验。旧 `raw/`、`cases.json`、`document/` 及其旧运行时文档仍登记为 `quarantine`，当前没有 approved production entry。治理登记尚未成为运行时准入门禁，现有加载器仍会读取旧语料；运行时域名或 `Status: active` 不等于授权、脱敏或审核通过。
 
 逐字稿默认从 `../counseling-kb/raw` 读取。若从其他工作目录启动，可设置：
 
@@ -168,12 +171,13 @@ set COUNSELING_TRANSCRIPT_DIRECTORY=D:\absolute\path\to\counseling-kb\raw
 
 ## 修复与验证（2026-09-17）
 
-本轮修复与验证明细见 [REPAIR_REPORT](docs/REPAIR_REPORT.md)。前端已加入 lint、Vitest 与 CI；检索种子集及实测结果见 [检索基线](eval/RAG_BASELINE.md)。检索 Recall@4 仅 4%，不能把工程测试通过等同于对话或检索质量合格。
+该轮历史修复与验证明细见 [REPAIR_REPORT](docs/REPAIR_REPORT.md)，其中测试数字保留当时口径。检索后续测量见 [检索基线](eval/RAG_BASELINE.md)：2026-09-20 的 `multilingual-e5-small` 在 source-grounded seed 上 Document Hit@4 为 **0.72**；**0.04** 是 2026-09-17 MiniLM 的历史 Document Hit@4，旧称 Recall 不准确。这个种子集尚非独立人工 golden set，0.72 不是人工 golden Recall 或真实用户准确率，工程测试通过也不代表对话或检索质量合格。
 
 ## 文档
 
 - [功能说明](docs/FUNCTIONAL_SPEC.md)——产品功能与使用：账号体系、咨询对话、长期记忆、管理后台、页面与路由清单
 - [技术设计](docs/TECHNICAL_DESIGN.md)——架构、认证与数据隔离、分层记忆、RAG、API 合约、部署与启动、测试与 E2E 复现
+- [知识来源治理](docs/KNOWLEDGE_GOVERNANCE.md)——来源登记、授权与隐私审核、隔离状态及离线校验边界
 - [服务器旧版本增量升级](docs/SERVER_INCREMENTAL_UPGRADE.md)——本轮审计修复的变更清单、备份换版、验收与回滚
 
 项目统一使用 UTF-8。编辑器、Maven、Python、容器和生成文件的编码约束见 `.editorconfig` 与 `.gitattributes`。

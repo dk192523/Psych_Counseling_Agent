@@ -9,7 +9,7 @@ import com.dk.dkaiagent.memory.RiskTier;
 import com.dk.dkaiagent.memory.SafetyTerms;
 import com.dk.dkaiagent.orchestration.AgentRequestContext;
 import com.dk.dkaiagent.orchestration.ExecutionContextScope;
-import com.dk.dkaiagent.rag.PgVectorVectorStoreConfig;
+import com.dk.dkaiagent.rag.KnowledgeIntentRouter;
 import com.dk.dkaiagent.rag.TranscriptSearchService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
@@ -345,7 +345,8 @@ public class SpringAiCounselingAgentExecutor implements CounselingAgentExecutor 
     }
 
     private List<Candidate> retrieveCandidates(RetrievalPlan plan, String originalMessage) {
-        if (!plan.shouldRetrieve()) {
+        KnowledgeIntentRouter.Route route = KnowledgeIntentRouter.route(originalMessage);
+        if (!plan.shouldRetrieve() || !route.shouldRetrieve()) {
             return List.of();
         }
 
@@ -356,7 +357,7 @@ public class SpringAiCounselingAgentExecutor implements CounselingAgentExecutor 
         AgentRequestContext context = ExecutionContextScope.requireCurrent();
         List<Future<List<Document>>> searches = queries.stream()
                 .map(query -> agentExecutor.submit(
-                        () -> ExecutionContextScope.call(context, () -> retrieveQuery(query))))
+                        () -> ExecutionContextScope.call(context, () -> retrieveQuery(query, route))))
                 .toList();
         for (List<Document> hits : awaitParallel(searches, "vector retrieval")) {
             for (Document document : hits) {
@@ -380,6 +381,10 @@ public class SpringAiCounselingAgentExecutor implements CounselingAgentExecutor 
     }
 
     private List<Document> retrieveQuery(String query) {
+        return retrieveQuery(query, KnowledgeIntentRouter.route(query));
+    }
+
+    private List<Document> retrieveQuery(String query, KnowledgeIntentRouter.Route route) {
         boolean acquired = false;
         try {
             acquired = vectorBulkhead.tryAcquire(
@@ -392,7 +397,7 @@ public class SpringAiCounselingAgentExecutor implements CounselingAgentExecutor 
                     .query(query)
                     .topK(properties.getCandidateTopK())
                     .similarityThreshold(properties.getSimilarityThreshold())
-                    .filterExpression("knowledgeBase == '" + PgVectorVectorStoreConfig.KNOWLEDGE_BASE_NAME + "'")
+                    .filterExpression(route.filterExpression())
                     .build();
             List<Document> hits = vectorStore.similaritySearch(request);
             return hits == null ? List.of() : List.copyOf(hits);
@@ -444,7 +449,7 @@ public class SpringAiCounselingAgentExecutor implements CounselingAgentExecutor 
             String message) {
         if (candidates.isEmpty()) {
             return new DeepContext(
-                    buildContext(plan, List.of(), List.of(), List.of(), episodes), episodes, 0, 0);
+                    buildContext(plan, List.of(), List.of(), List.of(), episodes), episodes, 0, 0, 0);
         }
 
         Optional<DeepContext> workerContext = createWorkerDeepContext(plan, candidates, episodes, message);
@@ -486,7 +491,8 @@ public class SpringAiCounselingAgentExecutor implements CounselingAgentExecutor 
         return new DeepContext(
                 buildContext(plan, selected, sources, gaps, episodes),
                 episodes,
-                selected.size(),
+                (int) selected.stream().filter(SpringAiCounselingAgentExecutor::isCase).count(),
+                (int) selected.stream().filter(candidate -> !isCase(candidate)).count(),
                 countSnippets(sources));
     }
 
@@ -524,7 +530,7 @@ public class SpringAiCounselingAgentExecutor implements CounselingAgentExecutor 
     }
 
     private Optional<AiWorkerContracts.Candidate> toWorkerCandidate(Candidate candidate) {
-        String slug = extractSlug(candidate.document());
+        String slug = isCase(candidate) ? extractSlug(candidate.document()) : "";
         if (slug == null) {
             return Optional.empty();
         }
@@ -533,7 +539,11 @@ public class SpringAiCounselingAgentExecutor implements CounselingAgentExecutor 
                 slug,
                 truncate(Objects.toString(candidate.document().getMetadata().get("title"), ""), 200),
                 truncate(candidate.document().getText(), properties.getCandidateTextChars()),
-                score(candidate.document())
+                score(candidate.document()),
+                Objects.toString(candidate.document().getMetadata().get("knowledgeDomain"), "psych-cases"),
+                Objects.toString(candidate.document().getMetadata().get("sourceId"), ""),
+                Objects.toString(candidate.document().getMetadata().get("chunkId"), ""),
+                safeSourceUrl(Objects.toString(candidate.document().getMetadata().get("citationUrl"), ""))
         ));
     }
 
@@ -556,14 +566,17 @@ public class SpringAiCounselingAgentExecutor implements CounselingAgentExecutor 
         for (AiWorkerContracts.SelectedEvidence item : evidence) {
             String selectedId = Objects.toString(item.id(), "").toUpperCase(Locale.ROOT);
             Candidate candidate = byId.get(selectedId);
+            Optional<AiWorkerContracts.Candidate> sentCandidate = candidate == null
+                    ? Optional.empty() : toWorkerCandidate(candidate);
             if (!seenIds.add(selectedId)
-                    || candidate == null
-                    || !Objects.equals(extractSlug(candidate.document()), item.slug())) {
+                    || sentCandidate.isEmpty()
+                    || !Objects.equals(sentCandidate.get().slug(), item.slug())) {
                 return Optional.empty();
             }
             List<AiWorkerContracts.EvidenceSnippet> snippets = item.snippets() == null
                     ? List.of() : item.snippets();
-            if (snippets.size() > properties.getTranscriptSnippetsPerCase()) {
+            if ((!isCase(candidate) && !snippets.isEmpty())
+                    || snippets.size() > properties.getTranscriptSnippetsPerCase()) {
                 return Optional.empty();
             }
             selected.add(candidate);
@@ -587,7 +600,8 @@ public class SpringAiCounselingAgentExecutor implements CounselingAgentExecutor 
         return Optional.of(new DeepContext(
                 buildContext(plan, selected, sources, gaps, episodes),
                 episodes,
-                selected.size(),
+                (int) selected.stream().filter(SpringAiCounselingAgentExecutor::isCase).count(),
+                (int) selected.stream().filter(candidate -> !isCase(candidate)).count(),
                 countSnippets(sources)));
     }
 
@@ -611,12 +625,15 @@ public class SpringAiCounselingAgentExecutor implements CounselingAgentExecutor 
         if (context == null) {
             return "依据已经整理好，正在组织回应…";
         }
-        List<String> parts = new ArrayList<>(3);
+        List<String> parts = new ArrayList<>(4);
         if (context.caseCount() > 0) {
             parts.add("核对了 " + context.caseCount() + " 个相关案例");
         }
         if (context.transcriptSnippetCount() > 0) {
             parts.add("其中 " + context.transcriptSnippetCount() + " 段逐字稿可直接对照");
+        }
+        if (context.referenceMaterialCount() > 0) {
+            parts.add("核对了 " + context.referenceMaterialCount() + " 份参考材料");
         }
         if (!context.episodes().isEmpty()) {
             parts.add("回看了 " + context.episodes().size() + " 处你此前说过的话");
@@ -674,6 +691,9 @@ public class SpringAiCounselingAgentExecutor implements CounselingAgentExecutor 
 
     private Optional<TranscriptSearchService.TranscriptSource> retrieveTranscript(
             Candidate candidate, String query) {
+        if (!isCase(candidate)) {
+            return Optional.empty();
+        }
         String slug = extractSlug(candidate.document());
         if (slug == null) {
             return Optional.empty();
@@ -727,7 +747,14 @@ public class SpringAiCounselingAgentExecutor implements CounselingAgentExecutor 
 
     private static String safeSourceUrl(String value) {
         String url = Objects.toString(value, "").trim();
-        return url.startsWith("https://") || url.startsWith("http://") ? truncate(url, 600) : "";
+        if (url.length() > 600 || url.chars().anyMatch(Character::isISOControl)) return "";
+        try {
+            java.net.URI uri = java.net.URI.create(url);
+            return ("https".equalsIgnoreCase(uri.getScheme()) || "http".equalsIgnoreCase(uri.getScheme()))
+                    && uri.getHost() != null && uri.getUserInfo() == null ? url : "";
+        } catch (IllegalArgumentException ignored) {
+            return "";
+        }
     }
 
     private String buildContext(
@@ -756,13 +783,12 @@ public class SpringAiCounselingAgentExecutor implements CounselingAgentExecutor 
         }
 
         if (selected.isEmpty()) {
-            builder.append("没有筛选出足够可靠的相似案例。不要强行引用案例，应按咨询阶段继续澄清或回应。\n");
+            builder.append("没有筛选出足够可靠的参考材料。不要虚构依据，应按咨询阶段继续澄清或回应。\n");
         } else {
-            builder.append("\n经相关性复核后保留的案例摘要：\n");
-            for (Candidate candidate : selected) {
-                appendLimited(builder, "- " + truncate(candidate.document().getText(),
-                        properties.getCandidateTextChars()) + "\n");
-            }
+            appendEvidenceGroup(builder, selected, false,
+                    "\n专业知识与政策依据（保留来源适用范围，不能据此远程诊断）：\n");
+            appendEvidenceGroup(builder, selected, true,
+                    "\n案例参考（与专业依据分开；案例不能证明诊断、法规或危机处置结论）：\n");
         }
 
         if (!sources.isEmpty()) {
@@ -781,6 +807,35 @@ public class SpringAiCounselingAgentExecutor implements CounselingAgentExecutor 
             }
         }
         return truncateAtBlockBoundary(builder.toString().trim(), properties.getContextMaxChars());
+    }
+
+    private static boolean isCase(Candidate candidate) {
+        // Legacy test fixtures and pre-migration documents are cases; new ingestion always labels domains.
+        return "psych-cases".equals(Objects.toString(
+                candidate.document().getMetadata().get("knowledgeDomain"), "psych-cases"));
+    }
+
+    private void appendEvidenceGroup(StringBuilder builder, List<Candidate> selected,
+            boolean cases, String heading) {
+        List<Candidate> group = selected.stream().filter(candidate -> isCase(candidate) == cases).toList();
+        if (group.isEmpty()) return;
+        appendLimited(builder, heading);
+        for (Candidate candidate : group) {
+            Map<String, Object> metadata = candidate.document().getMetadata();
+            String sourceId = contextIdentifier(metadata.get("sourceId"));
+            String chunkId = contextIdentifier(metadata.get("chunkId"));
+            String citationUrl = safeSourceUrl(Objects.toString(metadata.get("citationUrl"), ""));
+            appendLimited(builder, "- [" + Objects.toString(
+                    metadata.get("knowledgeDomain"), "psych-cases") + "]\n"
+                    + "sourceId: " + sourceId + "\nchunkId: " + chunkId + "\n"
+                    + (citationUrl.isEmpty() ? "" : "citationUrl（来源元数据，未核验网页内容）: " + citationUrl + "\n")
+                    + truncate(candidate.document().getText(), properties.getCandidateTextChars()) + "\n");
+        }
+    }
+
+    private static String contextIdentifier(Object value) {
+        return truncate(Objects.toString(value, ""), 200)
+                .replaceAll("[\\p{Cntrl}\\p{Cf}\\p{Zl}\\p{Zp}]", " ").trim();
     }
 
     /**
@@ -829,6 +884,8 @@ public class SpringAiCounselingAgentExecutor implements CounselingAgentExecutor 
         for (Candidate candidate : candidates) {
             Document document = candidate.document();
             builder.append(candidate.id())
+                    .append(" | domain=").append(Objects.toString(
+                            document.getMetadata().get("knowledgeDomain"), "psych-cases"))
                     .append(" | score=").append(String.format(Locale.ROOT, "%.4f", score(document)))
                     .append(" | title=").append(Objects.toString(document.getMetadata().get("title"), ""))
                     .append('\n')
@@ -955,6 +1012,7 @@ public class SpringAiCounselingAgentExecutor implements CounselingAgentExecutor 
             String text,
             List<ConversationMemoryService.RecallEpisodeView> episodes,
             int caseCount,
+            int referenceMaterialCount,
             int transcriptSnippetCount) {
     }
 

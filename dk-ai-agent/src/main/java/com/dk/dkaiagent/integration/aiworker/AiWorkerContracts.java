@@ -42,7 +42,22 @@ public final class AiWorkerContracts {
             String slug,
             String title,
             String text,
-            double vectorScore) {}
+            double vectorScore,
+            String domain,
+            String sourceId,
+            String chunkId,
+            String citationUrl) {
+        public Candidate {
+            domain = domain == null || domain.isBlank() ? "psych-cases" : domain;
+            sourceId = sourceId == null ? "" : sourceId;
+            chunkId = chunkId == null ? "" : chunkId;
+            citationUrl = citationUrl == null ? "" : citationUrl;
+        }
+
+        public Candidate(String id, String slug, String title, String text, double vectorScore) {
+            this(id, slug, title, text, vectorScore, "psych-cases", "", "", "");
+        }
+    }
 
     public record RefineLimits(int maxEvidence, int snippetsPerCase, int snippetMaxChars) {}
 

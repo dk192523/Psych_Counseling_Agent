@@ -112,6 +112,11 @@ public class TranscriptProvenanceAdvisor implements BaseAdvisor {
             if (sources.size() == MAX_CASES) {
                 break;
             }
+            // Missing domain is supported for legacy case-summary documents.
+            Object knowledgeDomain = document.getMetadata().get("knowledgeDomain");
+            if (knowledgeDomain != null && !"psych-cases".equals(knowledgeDomain)) {
+                continue;
+            }
             String slug = extractSlug(document);
             if (slug == null || !seenSlugs.add(slug)) {
                 continue;

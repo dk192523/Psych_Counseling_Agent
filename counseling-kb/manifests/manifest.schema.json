@@ -1,0 +1,181 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Counseling knowledge source (one object per JSONL line)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "title",
+    "domain",
+    "use",
+    "license",
+    "license_status",
+    "pii_status",
+    "review_status",
+    "notes"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[a-z0-9][a-z0-9._-]*$"
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1
+    },
+    "domain": {
+      "type": "string",
+      "enum": [
+        "knowledge",
+        "cases/summaries",
+        "cases/transcripts",
+        "policy",
+        "prompt-references",
+        "exam/practice"
+      ]
+    },
+    "use": {
+      "type": "string",
+      "enum": [
+        "production",
+        "evaluation",
+        "reference",
+        "quarantine"
+      ]
+    },
+    "path": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source_url": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^https?://"
+    },
+    "license": {
+      "type": "string",
+      "minLength": 1
+    },
+    "license_status": {
+      "type": "string",
+      "enum": [
+        "unknown",
+        "approved",
+        "restricted",
+        "rejected"
+      ]
+    },
+    "license_evidence": {
+      "type": "string",
+      "minLength": 1
+    },
+    "pii_status": {
+      "type": "string",
+      "enum": [
+        "unknown",
+        "contains_pii",
+        "redacted",
+        "no_pii"
+      ]
+    },
+    "review_status": {
+      "type": "string",
+      "enum": [
+        "pending",
+        "approved",
+        "rejected"
+      ]
+    },
+    "reviewed_by": {
+      "type": "string",
+      "minLength": 1
+    },
+    "reviewed_at": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+    },
+    "notes": {
+      "type": "string",
+      "minLength": 1
+    },
+    "runtime_path": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^dk-ai-agent/src/main/resources/"
+    }
+  },
+  "anyOf": [
+    {
+      "required": [
+        "path"
+      ]
+    },
+    {
+      "required": [
+        "source_url"
+      ]
+    },
+    {
+      "required": [
+        "runtime_path"
+      ]
+    }
+  ],
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "use": {
+            "const": "production"
+          }
+        },
+        "required": [
+          "use"
+        ]
+      },
+      "then": {
+        "required": [
+          "license_evidence",
+          "reviewed_by",
+          "reviewed_at"
+        ],
+        "properties": {
+          "domain": {
+            "enum": [
+              "knowledge",
+              "cases/summaries",
+              "policy"
+            ]
+          },
+          "license_status": {
+            "const": "approved"
+          },
+          "pii_status": {
+            "enum": [
+              "redacted",
+              "no_pii"
+            ]
+          },
+          "review_status": {
+            "const": "approved"
+          },
+          "license": {
+            "not": {
+              "enum": [
+                "unknown",
+                "UNKNOWN",
+                "Unknown"
+              ]
+            }
+          }
+        },
+        "not": {
+          "required": [
+            "runtime_path"
+          ]
+        }
+      }
+    }
+  ]
+}

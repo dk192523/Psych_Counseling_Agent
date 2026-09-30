@@ -98,6 +98,17 @@ export const deleteConversation = async (conversationId) => {
   await request.delete(`/ai/conversations/${encodeURIComponent(conversationId)}`)
 }
 
+// 独立模拟练习：沿用会话 Cookie、CSRF 和认证失效处理，不调用咨询接口。
+export const getPracticeQuestions = async (limit = 5, signal) => {
+  const response = await request.get('/exam/questions', { params: { limit }, signal })
+  return response.data
+}
+
+export const submitPracticeAnswer = async (questionId, option, signal) => {
+  const response = await request.post(`/exam/questions/${encodeURIComponent(questionId)}/answer`, { option }, { signal })
+  return response.data
+}
+
 // ==================== 认证 ====================
 
 // 登录：成功后后端写 HttpOnly 会话 Cookie，axios 自动携带。
@@ -180,6 +191,8 @@ export default {
   getConversations,
   getConversation,
   deleteConversation,
+  getPracticeQuestions,
+  submitPracticeAnswer,
   login,
   register,
   logout,

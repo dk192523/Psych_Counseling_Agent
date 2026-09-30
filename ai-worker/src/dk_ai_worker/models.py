@@ -1,6 +1,7 @@
-from typing import Annotated, Literal
+import re
+from typing import Annotated, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 def _to_camel(value: str) -> str:
@@ -63,10 +64,25 @@ class PlanResponse(ContractModel):
 
 class Candidate(ContractModel):
     id: str = Field(pattern=r"^C[1-9][0-9]?$", max_length=3)
-    slug: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}-call-\d{2}$")
+    slug: str = Field(default="", max_length=32)
     title: str = Field(default="", max_length=200)
     text: str = Field(min_length=1, max_length=2_000)
     vector_score: float = Field(ge=-1.0, le=1.0)
+    domain: Literal[
+        "psych-cases", "psych-knowledge", "psych-policy", "psych-exams", "psych-prompts"
+    ] = "psych-cases"
+    source_id: str = Field(default="", max_length=600)
+    chunk_id: str = Field(default="", max_length=200)
+    citation_url: str = Field(default="", max_length=600)
+
+    @model_validator(mode="after")
+    def validate_case_slug(self) -> Self:
+        if self.domain == "psych-cases":
+            if not re.fullmatch(r"\d{4}-\d{2}-\d{2}-call-\d{2}", self.slug):
+                raise ValueError("psych-cases candidates require a valid case slug")
+        elif self.slug:
+            raise ValueError("non-case candidates must not carry a transcript slug")
+        return self
 
 
 class RefineLimits(ContractModel):

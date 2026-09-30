@@ -60,8 +60,7 @@ class PgVectorVectorStoreConfigUnitTest {
     void knowledgeBaseFilterExpressionIsValid() {
         SearchRequest request = SearchRequest.builder()
                 .query("test")
-                .filterExpression("knowledgeBase == '" +
-                        PgVectorVectorStoreConfig.KNOWLEDGE_BASE_NAME + "'")
+                .filterExpression(PgVectorVectorStoreConfig.PRODUCTION_FILTER)
                 .build();
 
         assertNotNull(request.getFilterExpression());

@@ -25,6 +25,15 @@ const routes = [
     }
   },
   {
+    path: '/practice',
+    name: 'Practice',
+    component: () => import('../views/PracticeView.vue'),
+    meta: {
+      title: '模拟练习 · AI 心理咨询师',
+      requiresAuth: true
+    }
+  },
+  {
     path: '/admin',
     name: 'AdminPanel',
     component: () => import('../views/AdminPanel.vue'),

@@ -7,6 +7,7 @@ import com.dk.dkaiagent.account.UserRepository;
 import com.dk.dkaiagent.app.CounselingApp;
 import com.dk.dkaiagent.agent.counseling.CounselingAgentExecutor;
 import com.dk.dkaiagent.agent.counseling.CounselingTurnPipeline;
+import com.dk.dkaiagent.exam.ExamService;
 import com.dk.dkaiagent.history.ConversationHistoryService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -69,6 +70,9 @@ class SecurityFilterChainTest {
 
     @MockitoBean
     private ConversationHistoryService conversationHistoryService;
+
+    @MockitoBean
+    private ExamService examService;
 
     @MockitoBean
     private CounselingAgentExecutor counselingAgentExecutor;
@@ -285,6 +289,21 @@ class SecurityFilterChainTest {
     }
 
     // ---------------------------------------------------------------- 认证要求
+
+    @Test
+    void examQuestionsRequireAuthenticationAndCsrfBeforeService() throws Exception {
+        mockMvc.perform(get("/exam/questions"))
+                .andExpect(status().isUnauthorized());
+        mockMvc.perform(post("/exam/questions")
+                        .contentType(MediaType.APPLICATION_JSON).content("{}"))
+                .andExpect(status().isUnauthorized());
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/exam/questions")
+                        .with(user("alice").roles("USER"))
+                        .contentType(MediaType.APPLICATION_JSON).content("{}"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error").value("CSRF_INVALID"));
+        org.mockito.Mockito.verifyNoInteractions(examService);
+    }
 
     @Test
     void meRequiresAuthentication() throws Exception {

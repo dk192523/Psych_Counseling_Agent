@@ -17,6 +17,8 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verifyNoInteractions;
 
 class TranscriptProvenanceAdvisorTest {
 
@@ -34,7 +36,7 @@ class TranscriptProvenanceAdvisorTest {
         );
         Document summary = new Document(
                 "视频：https://example.com/video（案例编号 " + SLUG + "）\n父亲担心女儿洁癖和减肥。",
-                Map.of("title", "父亲求助女儿洁癖减肥")
+                Map.of("title", "父亲求助女儿洁癖减肥", "knowledgeDomain", "psych-cases")
         );
         String firstStagePrompt = "父亲要不要介入女儿的洁癖减肥？\n\n首层摘要：父亲担心女儿洁癖和减肥。";
         ChatClientRequest request = ChatClientRequest.builder()
@@ -76,6 +78,25 @@ class TranscriptProvenanceAdvisorTest {
 
         assertSame(request, advisor.before(request, null));
         assertFalse(request.context().containsKey(TranscriptProvenanceAdvisor.RETRIEVED_SOURCES));
+    }
+
+    @Test
+    void skipsProfessionalAndPolicyDocumentsContainingCaseReferences() {
+        TranscriptSearchService searchService = mock(TranscriptSearchService.class);
+        TranscriptProvenanceAdvisor advisor = new TranscriptProvenanceAdvisor(searchService);
+        for (String domain : List.of("psych-knowledge", "psych-policy")) {
+            Document document = new Document(
+                    "引用案例编号 " + SLUG + " 的专业或政策说明。",
+                    Map.of("knowledgeDomain", domain)
+            );
+            ChatClientRequest request = ChatClientRequest.builder()
+                    .prompt(new Prompt("如何理解这项说明？"))
+                    .context(Map.of(QuestionAnswerAdvisor.RETRIEVED_DOCUMENTS, List.of(document)))
+                    .build();
+
+            assertSame(request, advisor.before(request, null));
+        }
+        verifyNoInteractions(searchService);
     }
 
     private void writeTranscript(ObjectMapper objectMapper) throws IOException {
