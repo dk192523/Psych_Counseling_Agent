@@ -1,6 +1,9 @@
 package com.dk.dkaiagent.account;
 
 import jakarta.annotation.PostConstruct;
+import com.dk.dkaiagent.config.JdbcDialect;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.support.GeneratedKeyHolder;
 import org.springframework.context.annotation.DependsOn;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
@@ -51,14 +54,19 @@ public class UserRepository {
     );
 
     private final JdbcTemplate jdbcTemplate;
+    private final JdbcDialect dialect;
 
-    public UserRepository(JdbcTemplate jdbcTemplate) {
+    public UserRepository(JdbcTemplate jdbcTemplate) { this(jdbcTemplate, JdbcDialect.POSTGRESQL); }
+
+    @Autowired
+    public UserRepository(JdbcTemplate jdbcTemplate, JdbcDialect dialect) {
         this.jdbcTemplate = jdbcTemplate;
+        this.dialect = dialect;
     }
 
     @PostConstruct
     void initializeSchema() {
-        jdbcTemplate.execute("""
+        jdbcTemplate.execute(dialect.schema("""
                 CREATE TABLE IF NOT EXISTS psych_user (
                     id BIGSERIAL PRIMARY KEY,
                     username VARCHAR(64) NOT NULL UNIQUE,
@@ -71,16 +79,16 @@ public class UserRepository {
                     disabled_at TIMESTAMPTZ,
                     disabled_reason VARCHAR(200)
                 )
-                """);
+                """));
         // 会话归属扩展列：FK 默认 NO ACTION，删除用户前由 deleteById 先级联清理其会话。
-        jdbcTemplate.execute("""
+        jdbcTemplate.execute(dialect.schema("""
                 ALTER TABLE psych_conversation
                 ADD COLUMN IF NOT EXISTS owner_id BIGINT REFERENCES psych_user(id)
-                """);
-        jdbcTemplate.execute("""
+                """));
+        jdbcTemplate.execute(dialect.schema("""
                 CREATE INDEX IF NOT EXISTS idx_psych_conversation_owner_updated
                 ON psych_conversation (owner_id, updated_at DESC)
-                """);
+                """));
     }
 
     public Optional<PsychUser> findByUsername(String username) {
@@ -104,6 +112,22 @@ public class UserRepository {
     }
 
     public long insertUser(String username, String passwordHash, String role) {
+        if (dialect.isH2()) {
+            GeneratedKeyHolder holder = new GeneratedKeyHolder();
+            jdbcTemplate.update(connection -> {
+                var statement = connection.prepareStatement("""
+                        INSERT INTO psych_user (username, password_hash, role, status, created_at, updated_at)
+                        VALUES (?, ?, ?, 'ACTIVE', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                        """, new String[]{"id"});
+                statement.setString(1, username);
+                statement.setString(2, passwordHash);
+                statement.setString(3, role);
+                return statement;
+            }, holder);
+            Number id = holder.getKey();
+            if (id == null) throw new IllegalStateException("insertUser returned no generated id");
+            return id.longValue();
+        }
         Long generatedId = jdbcTemplate.queryForObject("""
                 INSERT INTO psych_user (username, password_hash, role, status, created_at, updated_at)
                 VALUES (?, ?, ?, 'ACTIVE', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
@@ -154,10 +178,11 @@ public class UserRepository {
                 """);
         List<Object> params = new ArrayList<>(appendFilters(sql, keyword, status));
         sql.append("""
-                GROUP BY u.id
+                %s
                 ORDER BY u.id ASC
                 LIMIT ? OFFSET ?
-                """);
+                """.formatted(dialect.choose("GROUP BY u.id",
+                "GROUP BY u.id, u.username, u.role, u.status, u.created_at, u.last_login_at, u.disabled_at, u.disabled_reason")));
         params.add(size);
         params.add((long) page * size);
         return jdbcTemplate.query(sql.toString(), USER_LIST_ROW_MAPPER, params.toArray());
@@ -200,10 +225,11 @@ public class UserRepository {
         return count == null ? 0 : count;
     }
 
-    /** 遗留数据一次性迁移：无主会话归属到超管（冻结合约 AUTH-v1）。 */
-    public int adoptOrphanConversations(long ownerId) {
-        return jdbcTemplate.update(
-                "UPDATE psych_conversation SET owner_id = ? WHERE owner_id IS NULL", ownerId);
+    /** 启动只查询无主会话数量，不读取内容或更改已有归属。 */
+    public long countOrphanConversations() {
+        Long count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM psych_conversation WHERE owner_id IS NULL", Long.class);
+        return count == null ? 0 : count;
     }
 
     @Transactional
@@ -212,21 +238,17 @@ public class UserRepository {
         // 自身的 ON DELETE CASCADE 级联清理；会话级 HttpSession 由控制器/安全层另行销毁。
         // 删除前对其全部会话补墓碑（同事务）：防止在途聊天流的 bootstrap 以旧 owner_id 复活
         // 已删会话（复活还会因 owner_id FK 指向已删用户而 500）。
-        jdbcTemplate.update("""
-                INSERT INTO psych_conversation_tombstone (conversation_id, owner_id)
-                SELECT id, owner_id FROM psych_conversation WHERE owner_id = ?
-                ON CONFLICT (conversation_id) DO UPDATE SET deleted_at = CURRENT_TIMESTAMP
-                """, id);
+        jdbcTemplate.update(dialect.userDeletionTombstones(), id);
         jdbcTemplate.update("DELETE FROM psych_conversation WHERE owner_id = ?", id);
         return jdbcTemplate.update("DELETE FROM psych_user WHERE id = ?", id) > 0;
     }
 
-    private static List<Object> appendFilters(StringBuilder sql, String keyword, String status) {
+    private List<Object> appendFilters(StringBuilder sql, String keyword, String status) {
         // WHERE 片段仅为固定常量谓词；keyword/status 值一律经占位符进入 SQL。
         List<Object> params = new ArrayList<>();
         List<String> predicates = new ArrayList<>();
         if (keyword != null && !keyword.isBlank()) {
-            predicates.add("u.username ILIKE ?");
+            predicates.add(dialect.choose("u.username ILIKE ?", "LOWER(u.username) LIKE LOWER(?)"));
             params.add("%" + keyword.trim() + "%");
         }
         if (status != null && !status.isBlank()) {

@@ -1,7 +1,8 @@
 """Validate source metadata and admission gates offline using only the stdlib.
 
 This implements the committed manifest contract, not a general JSON Schema engine.
-It does not fetch sources, scan PII, grant rights, or alter runtime ingestion.
+It does not fetch sources, scan PII, or grant rights. Production admission at
+runtime is enforced by the Java loader using the same manifest contract.
 """
 from __future__ import annotations
 
@@ -10,6 +11,7 @@ from datetime import date
 import json
 from pathlib import Path, PurePosixPath
 import re
+import stat
 import sys
 from urllib.parse import urlsplit
 
@@ -26,10 +28,44 @@ def _unique_object(pairs):
     return result
 
 
+def _resolve_existing(path: Path, link_depth: int = 0) -> Path:
+    """Resolve existing components without Windows' strict realpath call.
+
+    lstat/readlink remain explicit so a denied or unknown reparse point cannot
+    silently become a lexical path and bypass the containment checks.
+    """
+    if link_depth > 40:
+        raise RuntimeError("too many symbolic links")
+    absolute = Path(path).absolute()
+    current = Path(absolute.anchor)
+    for component in absolute.parts[1:]:
+        if component == "..":
+            current = current.parent
+            continue
+        current = current / component
+        metadata = current.lstat()
+        is_reparse = bool(
+            getattr(metadata, "st_file_attributes", 0)
+            & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+        )
+        if stat.S_ISLNK(metadata.st_mode) or is_reparse:
+            target_text = str(current.readlink())
+            # Windows junction targets can use the extended-length prefix.
+            if target_text.startswith("\\\\?\\UNC\\"):
+                target_text = "\\\\" + target_text[8:]
+            elif target_text.startswith("\\\\?\\"):
+                target_text = target_text[4:]
+            target = Path(target_text)
+            if not target.is_absolute():
+                target = current.parent / target
+            current = _resolve_existing(target, link_depth + 1)
+    return current
+
+
 def validate_sources(manifest: Path, root: Path = KB_ROOT) -> list[str]:
     """Return all validation errors; an empty list means metadata is valid."""
     schema = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
-    root = root.resolve()
+    root = _resolve_existing(root)
     errors = []
     ids = set()
     locations = {}
@@ -80,7 +116,7 @@ def validate_sources(manifest: Path, root: Path = KB_ROOT) -> list[str]:
                     errors.append(f"{prefix}: path must be a safe KB-relative POSIX path")
                 else:
                     try:
-                        resolved = (root / entry["path"]).resolve(strict=True)
+                        resolved = _resolve_existing(root / entry["path"])
                         resolved.relative_to(root)
                         if not (resolved.is_file() or resolved.is_dir()):
                             raise ValueError("not a regular file or directory")
@@ -99,17 +135,15 @@ def validate_sources(manifest: Path, root: Path = KB_ROOT) -> list[str]:
                     errors.append(f"{prefix}: runtime_path must be a safe repository-relative resources path")
                 else:
                     try:
-                        runtime_base = (root.parent / runtime_prefix).resolve(strict=True)
-                        runtime_resolved = (root.parent / entry["runtime_path"]).resolve(strict=True)
+                        runtime_base = _resolve_existing(root.parent / runtime_prefix)
+                        runtime_resolved = _resolve_existing(root.parent / entry["runtime_path"])
                         runtime_resolved.relative_to(runtime_base)
-                        runtime_resolved.relative_to(root.parent.resolve())
+                        runtime_resolved.relative_to(root.parent)
                         if not runtime_resolved.is_file():
                             raise ValueError("runtime_path must identify a file")
                     except (OSError, ValueError, RuntimeError):
                         errors.append(f"{prefix}: unknown runtime_path or path outside resources: {entry['runtime_path']}")
                         runtime_resolved = None
-                if entry["use"] == "production":
-                    errors.append(f"{prefix}: runtime_path is reference/evaluation/quarantine inventory only")
             if "source_url" in entry:
                 try:
                     url = urlsplit(entry["source_url"])
@@ -131,11 +165,30 @@ def validate_sources(manifest: Path, root: Path = KB_ROOT) -> list[str]:
                     if field not in entry:
                         errors.append(f"{prefix}: production requires {field}")
                 for field, rule in production["properties"].items():
+                    if field not in entry:
+                        continue
                     value = entry[field]
                     if ("const" in rule and value != rule["const"]
                             or "enum" in rule and value not in rule["enum"]
                             or field == "license" and value.strip().lower() == "unknown"):
                         errors.append(f"{prefix}: unsafe production {field}: {value}")
+                    if "pattern" in rule and re.search(rule["pattern"], value) is None:
+                        errors.append(
+                            f"{prefix}: production runtime_path must identify a Markdown file "
+                            "directly under document/, document/professional/ or document/policy/ "
+                            "within dk-ai-agent/src/main/resources/"
+                        )
+                if runtime_resolved is not None:
+                    document_base = (root.parent / "dk-ai-agent/src/main/resources/document").resolve()
+                    try:
+                        runtime_parts = runtime_resolved.relative_to(document_base).parts
+                        if (runtime_resolved.suffix != ".md"
+                                or not (len(runtime_parts) == 1
+                                        or len(runtime_parts) == 2
+                                        and runtime_parts[0] in {"professional", "policy"})):
+                            raise ValueError("outside production document directories")
+                    except ValueError:
+                        errors.append(f"{prefix}: production runtime_path resolves outside allowed Markdown resources")
                 if resolved is not None:
                     domain_dir = root / entry["domain"]
                     try:
@@ -172,7 +225,7 @@ def main() -> int:
         for error in errors:
             print(error, file=sys.stderr)
         return 1
-    print("Source manifest valid (metadata only; runtime ingestion is unchanged).")
+    print("Source manifest valid (Python checks metadata and format; runtime admission is enforced by the Java loader).")
     return 0
 
 

@@ -10,6 +10,10 @@
 *.cache
 .test-tmp/
 .test-tmp-final/
+/.pytest-runtime/
+**/.pytest-runtime/
+**/.vitest-runtime/
+**/.node24-wrapper-check/
 # 构建/发布产物（可再生，不进 git；二进制 EXE 由 build-launcher.cmd 本地生成）
 release/
 **/launcher/*.exe

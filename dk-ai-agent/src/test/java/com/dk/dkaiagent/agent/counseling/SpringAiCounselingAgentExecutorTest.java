@@ -8,6 +8,9 @@ import com.dk.dkaiagent.memory.ConversationMemoryService;
 import com.dk.dkaiagent.memory.RiskTier;
 import com.dk.dkaiagent.memory.SafetyTerms;
 import com.dk.dkaiagent.rag.TranscriptSearchService;
+import com.dk.dkaiagent.rag.KnowledgeAdmissionPolicy;
+import com.dk.dkaiagent.rag.KnowledgeIntentRouter;
+import org.springframework.test.util.ReflectionTestUtils;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.messages.AssistantMessage;
@@ -40,6 +43,7 @@ import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 class SpringAiCounselingAgentExecutorTest {
@@ -178,9 +182,7 @@ class SpringAiCounselingAgentExecutorTest {
                         "1", "worker-request",
                         List.of(new AiWorkerContracts.SelectedEvidence(
                                 "C1", "2026-07-18-call-07", 0.91, List.of("vector", "bm25"),
-                                List.of(new AiWorkerContracts.EvidenceSnippet(
-                                        "00:01:00", "00:01:20", "来访者描述了压力对睡眠的影响。",
-                                        "https://example.test/source", 91.0)))),
+                                List.of())),
                         List.of("持续时间"), "rrf", false, List.of(), 8)));
         Document document = Document.builder()
                 .id("case-1")
@@ -461,6 +463,68 @@ class SpringAiCounselingAgentExecutorTest {
         assertEquals(List.of("status", "status", "fallback", "delta", "done"), eventTypes(events));
     }
 
+    @Test
+    void emptyAdmissionAnswersExplicitQuestionWithoutPlannerWorkerOrVectorAccess() {
+        Fixture fixture = new Fixture();
+        var executor = fixture.executor();
+        ReflectionTestUtils.setField(executor, "admissionPolicy", new KnowledgeAdmissionPolicy());
+        var events = executor.prepareAndAnswer("CBT 是什么", "chat-id", OWNER_ID).collectList().block();
+        assertEquals(List.of("delta", "done"), eventTypes(events));
+        assertEquals(KnowledgeAdmissionPolicy.INSUFFICIENT_MESSAGE, events.getFirst().content());
+        verifyNoModelCalls(fixture.chatModel);
+        org.mockito.Mockito.verifyNoInteractions(fixture.aiWorkerClient, fixture.vectorStore,
+                fixture.transcriptSearchService, fixture.counselingApp);
+    }
+
+    @Test
+    void emptyAdmissionUsesStandardAnswerForVentingWithoutDeepPreparation() {
+        Fixture fixture = new Fixture();
+        when(fixture.counselingApp.doChatWithRagByStreamPrepared(OWNER_ID, "我很焦虑，只想倾诉", "chat-id"))
+                .thenReturn(Flux.just("我在听。"));
+        var executor = fixture.executor();
+        ReflectionTestUtils.setField(executor, "admissionPolicy", new KnowledgeAdmissionPolicy());
+        var events = executor.prepareAndAnswer("我很焦虑，只想倾诉", "chat-id", OWNER_ID).collectList().block();
+        assertEquals("standard", events.getLast().effectiveMode());
+        assertEquals("我在听。", events.stream().filter(event -> "delta".equals(event.type())).findFirst().orElseThrow().content());
+        verifyNoModelCalls(fixture.chatModel);
+        org.mockito.Mockito.verifyNoInteractions(fixture.aiWorkerClient, fixture.vectorStore,
+                fixture.transcriptSearchService);
+        verify(fixture.counselingApp).doChatWithRagByStreamPrepared(OWNER_ID, "我很焦虑，只想倾诉", "chat-id");
+    }
+
+    private static void verifyNoModelCalls(ChatModel chatModel) {
+        // DefaultChatClient reads model defaults during construction; this is not a model request.
+        verify(chatModel).getDefaultOptions();
+        verifyNoMoreInteractions(chatModel);
+    }
+
+    @Test
+    void workerCannotExpandApprovedCaseSummaryIntoUnapprovedRawTranscript() {
+        Fixture fixture = new Fixture();
+        when(fixture.aiWorkerClient.plan(any())).thenReturn(Optional.of(new AiWorkerContracts.PlanResponse(
+                "1", "worker-request", "clarification", true, "压力", List.of("压力"), List.of(),
+                "deepseek", false, List.of(), 1, List.of(), "clarify", "")));
+        when(fixture.vectorStore.similaritySearch(any(SearchRequest.class))).thenReturn(List.of(Document.builder()
+                .id("case").text("案例编号 2026-07-18-call-07 已审核摘要").metadata("knowledgeDomain", "psych-cases").build()));
+        when(fixture.aiWorkerClient.refine(any())).thenAnswer(call -> {
+            AiWorkerContracts.RefineRequest request = call.getArgument(0);
+            assertEquals(0, request.limits().snippetsPerCase());
+            return Optional.of(new AiWorkerContracts.RefineResponse("1", "worker-request", List.of(
+                    new AiWorkerContracts.SelectedEvidence("C1", "2026-07-18-call-07", 1, List.of(), List.of(
+                            new AiWorkerContracts.EvidenceSnippet("00:00:01", "00:00:03", "未经审核的原文", "https://example.test", 1)))),
+                    List.of(), "rrf", false, List.of(), 1));
+        });
+        when(fixture.chatModel.call(any(Prompt.class))).thenReturn(response("{\"selectedIds\":[\"C1\"],\"evidenceGaps\":[]}"));
+        when(fixture.counselingApp.doChatWithAgentContextByStreamPrepared(eq(OWNER_ID), eq("message"), eq("chat-id"), anyString()))
+                .thenReturn(Flux.just("answer"));
+        fixture.executor().prepareAndAnswer("message", "chat-id", OWNER_ID).collectList().block();
+        var context = org.mockito.ArgumentCaptor.forClass(String.class);
+        verify(fixture.counselingApp).doChatWithAgentContextByStreamPrepared(eq(OWNER_ID), eq("message"), eq("chat-id"), context.capture());
+        assertTrue(context.getValue().contains("已审核摘要"));
+        assertFalse(context.getValue().contains("未经审核的原文"));
+        org.mockito.Mockito.verifyNoInteractions(fixture.transcriptSearchService);
+    }
+
     private static ChatResponse response(String text) {
         return new ChatResponse(List.of(new Generation(new AssistantMessage(text))));
     }
@@ -478,14 +542,21 @@ class SpringAiCounselingAgentExecutorTest {
         private final AiWorkerClient aiWorkerClient = mock(AiWorkerClient.class);
         private final ConversationMemoryService memoryService = mock(ConversationMemoryService.class);
         private final DeepThinkingProperties properties = new DeepThinkingProperties();
+        // These tests isolate planning/grading; the real admission boundary is covered separately.
+        private final KnowledgeAdmissionPolicy admissionPolicy = mock(KnowledgeAdmissionPolicy.class);
 
         private Fixture() {
+            when(admissionPolicy.insufficientAnswer(anyString())).thenReturn(Optional.empty());
+            when(admissionPolicy.filterExpression(any(KnowledgeIntentRouter.Route.class)))
+                    .thenAnswer(call -> Optional.of(((KnowledgeIntentRouter.Route) call.getArgument(0)).filterExpression()));
+            when(admissionPolicy.search(any(VectorStore.class), any(SearchRequest.class), any(KnowledgeIntentRouter.Route.class)))
+                    .thenAnswer(call -> vectorStore.similaritySearch(call.getArgument(1, SearchRequest.class)));
             when(aiWorkerClient.plan(any())).thenReturn(Optional.empty());
             when(aiWorkerClient.refine(any())).thenReturn(Optional.empty());
         }
 
         private SpringAiCounselingAgentExecutor executor() {
-            return new SpringAiCounselingAgentExecutor(
+            SpringAiCounselingAgentExecutor executor = new SpringAiCounselingAgentExecutor(
                     counselingApp,
                     historyService,
                     transcriptSearchService,
@@ -497,6 +568,8 @@ class SpringAiCounselingAgentExecutorTest {
                     AGENT_EXECUTOR,
                     AGENT_SCHEDULER
             );
+            ReflectionTestUtils.setField(executor, "admissionPolicy", admissionPolicy);
+            return executor;
         }
     }
 }

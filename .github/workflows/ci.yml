@@ -3,6 +3,157 @@ on: [push, pull_request]
 permissions:
   contents: read
 jobs:
+  desktop-windows:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: dk-ai-agent/dk-ai-agent-frontend/package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Check desktop build script syntax
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $errors = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile(
+            (Join-Path $PWD 'deploy/desktop/build-desktop.ps1'), [ref]$tokens, [ref]$errors)
+          if ($errors.Count) { throw ($errors | Out-String) }
+      - name: Run desktop-client unit tests on Windows
+        shell: pwsh
+        working-directory: desktop-client
+        run: |
+          ./mvnw.cmd -B test
+          if ($LASTEXITCODE -ne 0) { throw 'desktop-client tests failed' }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: desktop-windows-test-results
+          path: desktop-client/target/surefire-reports
+      - name: Locate the runner's existing WiX 3+ tools
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $candlePath = (Get-Command candle.exe -CommandType Application -ErrorAction SilentlyContinue).Source
+          $lightPath = (Get-Command light.exe -CommandType Application -ErrorAction SilentlyContinue).Source
+          if (!$candlePath -or !$lightPath) {
+            $wixDirectories = @()
+            if ($env:WIX) { $wixDirectories += $env:WIX, (Join-Path $env:WIX 'bin') }
+            foreach ($programFiles in @($env:ProgramFiles, ${env:ProgramFiles(x86)})) {
+              if ($programFiles) {
+                $wixDirectories += Get-ChildItem -Path (Join-Path $programFiles 'WiX Toolset */bin') -Directory -ErrorAction SilentlyContinue |
+                  Select-Object -ExpandProperty FullName
+              }
+            }
+            foreach ($directory in $wixDirectories) {
+              $candidateCandle = Join-Path $directory 'candle.exe'
+              $candidateLight = Join-Path $directory 'light.exe'
+              if ((Test-Path -LiteralPath $candidateCandle -PathType Leaf) -and
+                  (Test-Path -LiteralPath $candidateLight -PathType Leaf)) {
+                $candlePath = $candidateCandle
+                $lightPath = $candidateLight
+                break
+              }
+            }
+          }
+          if ($candlePath -and $lightPath) {
+            foreach ($toolPath in @($candlePath, $lightPath)) {
+              if ([Diagnostics.FileVersionInfo]::GetVersionInfo($toolPath).ProductMajorPart -lt 3) {
+                throw "WiX 3+ is required: $toolPath"
+              }
+              Write-Host "Using existing WiX tool: $toolPath"
+              Split-Path -Parent $toolPath | Add-Content -LiteralPath $env:GITHUB_PATH -Encoding utf8
+            }
+          } else {
+            $wixPath = (Get-Command wix.exe -CommandType Application -ErrorAction SilentlyContinue).Source
+            if (!$wixPath) { throw 'Runner WiX tools are missing: expected candle.exe + light.exe or wix.exe' }
+            $wixVersion = & $wixPath --version
+            if ($LASTEXITCODE -ne 0 -or "$wixVersion" -notmatch '^(\d+)\.' -or [int]$Matches[1] -lt 3) {
+              throw "WiX 3+ is required: $wixPath ($wixVersion)"
+            }
+            Write-Host "Using existing WiX tool: $wixPath ($wixVersion)"
+          }
+      - name: Build independent Client and Server per-user EXE installers and app images
+        shell: pwsh
+        run: ./deploy/desktop/build-desktop.ps1 -Product Both -JdkHome $env:JAVA_HOME -PythonExecutable python.exe -OutputDirectory release/desktop-ci -Installer
+      - name: Verify packaged product boundaries
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          function Read-JarEntries([string]$path) {
+            $jar = [IO.Compression.ZipFile]::OpenRead((Join-Path $PWD $path))
+            try { return @($jar.Entries | ForEach-Object { $_.FullName }) }
+            finally { $jar.Dispose() }
+          }
+          $clientRoot = 'release/desktop-ci/client/PsychCounselorClient'
+          $serverRoot = 'release/desktop-ci/server/PsychCounselorServer'
+          $client = Get-Content release/desktop-ci/client/build-manifest.json -Raw | ConvertFrom-Json
+          $server = Get-Content release/desktop-ci/server/build-manifest.json -Raw | ConvertFrom-Json
+          if ($client.product -ne 'PsychCounselorClient' -or $server.product -ne 'PsychCounselorServer' -or
+              $client.protocolVersion -lt 1 -or $client.protocolVersion -ne $server.protocolVersion) {
+            throw 'Product identity or local protocol version mismatch'
+          }
+          foreach ($product in @($client, $server)) {
+            if ($product.architecture -ne 'windows-x64') { throw 'Invalid desktop platform architecture' }
+            if ($product.version -notmatch '^\d+\.\d+\.\d+$') { throw 'Invalid installer version in build manifest' }
+            if ('jdk.httpserver' -notin $product.runtimeModules) { throw 'Loopback HTTP module is missing' }
+            $packagedPaths = @($product.packagedFiles.file | ForEach-Object { $_ -replace '\\', '/' })
+            if ($packagedPaths -match '(?i)(^|/)(\.env[^/]*|client\.properties|server-endpoint\.properties|data|logs?|backups?|counseling-kb|worker-build-venv)(/|$)|\.(?:mv\.db|trace\.db|sqlite3?|log)$') {
+              throw 'Runtime configuration, data or build venv leaked into package input'
+            }
+          }
+          if ($client.processArchitecture -ne 'desktop-client-jvm' -or
+              $server.processArchitecture -ne 'spring-server-jvm-with-python-worker-sidecar' -or
+              $client.workerBundled -ne $false -or $client.workerAutoStartIntegrated -ne $false -or
+              $server.workerBundled -ne $true -or $server.workerAutoStartIntegrated -ne $true) {
+            throw 'Desktop process architecture or Worker integration manifest mismatch'
+          }
+          $clientEntries = Read-JarEntries "$clientRoot/app/psych-counselor-client.jar"
+          $serverEntries = Read-JarEntries "$serverRoot/app/psych-counselor-server.jar"
+          $backendEntries = Read-JarEntries "$serverRoot/app/server-backend-classes.jar"
+          if ('static/index.html' -notin $clientEntries -or
+              !($clientEntries -match '^static/assets/.+\.js$') -or
+              'com/dk/psychclient/DesktopLauncher.class' -notin $clientEntries) { throw 'Client UI or launcher missing' }
+          if ($clientEntries -match '(^com/dk/dkaiagent/|/(?:LocalBackendHost|WorkerSidecar|DpapiSecretStore|LocalServerManager|LocalServerLauncher|LocalDataBackup|UserAutoStart)(?:\$|\.))') {
+            throw 'Server code leaked into Client JAR'
+          }
+          if (Test-Path "$clientRoot/app/lib/backend") { throw 'Backend dependencies leaked into Client' }
+          if (Test-Path "$clientRoot/app/worker") { throw 'Worker leaked into Client' }
+          if ('com/dk/psychclient/LocalServerLauncher.class' -notin $serverEntries -or
+              'com/dk/psychclient/WorkerSidecar.class' -notin $serverEntries -or
+              'com/dk/psychclient/LocalDataBackup.class' -notin $serverEntries) { throw 'Server launcher or backup support missing' }
+          if ($serverEntries -match '^static/|/(?:PsychCounselorClient|DesktopLauncher|ClientUiHost|ClientUpstreamTransport|ClientApiRoutes|DesktopPageBridge)(?:\$|\.)' -or
+              $backendEntries -match '^static/|^application-(?!local-desktop\.yml$).*\.ya?ml$|^mcp-') {
+            throw 'Client UI or private server resources leaked into Server JARs'
+          }
+          foreach ($launcher in @("$clientRoot/PsychCounselorClient.exe", "$serverRoot/PsychCounselorServer.exe",
+                                  "$serverRoot/app/worker/PsychCounselorWorker.exe")) {
+            if (!(Test-Path $launcher -PathType Leaf)) { throw "Launcher missing: $launcher" }
+          }
+          foreach ($installer in @("release/desktop-ci/client/$($client.product)-$($client.version).exe",
+                                   "release/desktop-ci/server/$($server.product)-$($server.version).exe")) {
+            if (!(Test-Path -LiteralPath $installer -PathType Leaf)) { throw "EXE installer missing: $installer" }
+          }
+          foreach ($root in @($clientRoot, $serverRoot)) {
+            $modules = & "$root/runtime/bin/java.exe" --list-modules
+            if ($LASTEXITCODE -ne 0 -or !($modules -match '^jdk\.httpserver@')) { throw 'Invalid packaged Java runtime' }
+          }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-windows-installers-and-app-images
+          path: release/desktop-ci
+          if-no-files-found: error
   release-package:
     runs-on: ubuntu-latest
     steps:
@@ -13,9 +164,38 @@ jobs:
           ./deploy/tencent-cloud/build-package.ps1 -OutputDirectory .test-tmp/release-check
           $archive = (Get-ChildItem .test-tmp/release-check/*.zip | Select-Object -First 1).FullName
           ./deploy/tencent-cloud/verify-package.ps1 -ArchivePath $archive
+      - name: Reject an archive containing quarantined raw transcripts
+        shell: pwsh
+        run: |
+          $archive = (Get-ChildItem .test-tmp/release-check/*.zip | Select-Object -First 1).FullName
+          $rejectedArchive = Join-Path (Resolve-Path .test-tmp) 'release-with-quarantined-raw.zip'
+          Copy-Item -LiteralPath $archive -Destination $rejectedArchive
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $zip = [System.IO.Compression.ZipFile]::Open($rejectedArchive, [System.IO.Compression.ZipArchiveMode]::Update)
+          try {
+            $entry = $zip.CreateEntry('Psych_Counseling_Agent_Server/counseling-kb/raw/ci-probe.json')
+            $writer = [System.IO.StreamWriter]::new($entry.Open(), [System.Text.UTF8Encoding]::new($false))
+            try { $writer.Write('{}') } finally { $writer.Dispose() }
+          } finally { $zip.Dispose() }
+          $rejected = $false
+          try {
+            ./deploy/tencent-cloud/verify-package.ps1 -ArchivePath $rejectedArchive
+          } catch {
+            if ($_.Exception.Message -notmatch '^Quarantined raw transcripts in archive:') { throw }
+            $rejected = $true
+          }
+          if (-not $rejected) { throw 'Release verifier accepted quarantined raw transcripts' }
       - name: Extract the verified release archive
         run: |
           unzip .test-tmp/release-check/*.zip -d .test-tmp/extracted
+      - name: Check release and Compose exclude raw transcripts
+        run: |
+          root=.test-tmp/extracted/Psych_Counseling_Agent_Server
+          test ! -e "$root/counseling-kb/raw"
+          if grep -Eq 'counseling-kb/raw|/data/transcripts|COUNSELING_TRANSCRIPT_DIRECTORY' "$root/dk-ai-agent/docker-compose.yml"; then
+            echo 'Release Compose still configures raw transcript access'
+            exit 1
+          fi
       - name: Build backend image from the extracted archive
         run: docker build -t psych-release-backend .test-tmp/extracted/Psych_Counseling_Agent_Server/dk-ai-agent
       - name: Build worker image from the extracted archive

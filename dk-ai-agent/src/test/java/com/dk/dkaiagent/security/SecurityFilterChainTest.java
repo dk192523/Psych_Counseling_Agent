@@ -155,7 +155,18 @@ class SecurityFilterChainTest {
     @Test
     void healthIsPublic() throws Exception {
         mockMvc.perform(get("/health"))
-                .andExpect(status().isOk());
+                .andExpect(status().isOk())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.content().string("ok"));
+    }
+
+    @Test
+    void systemHealthIsPublicAndDefaultsToDevelopmentProtocol() throws Exception {
+        mockMvc.perform(get("/system/health"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("UP"))
+                .andExpect(jsonPath("$.serverVersion").value("dev"))
+                .andExpect(jsonPath("$.protocolVersion").value("1"))
+                .andExpect(jsonPath("$.*", org.hamcrest.Matchers.hasSize(3)));
     }
 
     @Test

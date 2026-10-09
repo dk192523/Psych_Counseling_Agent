@@ -11,6 +11,7 @@ import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Profile;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.nio.charset.StandardCharsets;
@@ -27,6 +28,7 @@ import static org.springframework.ai.vectorstore.pgvector.PgVectorStore.PgDistan
 import static org.springframework.ai.vectorstore.pgvector.PgVectorStore.PgIndexType.HNSW;
 
 @Configuration
+@Profile("!local-desktop")
 @Slf4j
 public class PgVectorVectorStoreConfig {
 
@@ -35,11 +37,14 @@ public class PgVectorVectorStoreConfig {
             KnowledgeDomain.CASES.getValue(), KnowledgeDomain.KNOWLEDGE.getValue(), KnowledgeDomain.POLICY.getValue());
     public static final String PRODUCTION_FILTER = KnowledgeIntentRouter.filterExpression(PRODUCTION_DOMAINS);
     private static final List<String> VERSION_METADATA = List.of(
-            "filename", "status", "knowledgeDomain", "sourceId", "documentId", "chunkId",
+            "filename", "status", "knowledgeDomain", "manifestSourceId", "sourceId", "documentId", "chunkId",
             "sourceVersion", "contentHash", "citationUrl");
 
     @Resource
     private CounselingDocumentLoader counselingDocumentLoader;
+
+    @Resource
+    private KnowledgeAdmissionPolicy admissionPolicy = new KnowledgeAdmissionPolicy();
 
     @Value("${app.rag.embedding-dimensions:384}")
     private int embeddingDimensions = 384;
@@ -69,6 +74,7 @@ public class PgVectorVectorStoreConfig {
     }
 
     private void initializeKnowledgeBase(VectorStore vectorStore, JdbcTemplate jdbcTemplate) {
+        admissionPolicy.activateVerified(List.of());
         List<Document> sourceDocuments = counselingDocumentLoader.loadMarkdowns().stream()
                 .filter(document -> PRODUCTION_DOMAINS.contains(document.getMetadata()
                         .getOrDefault("knowledgeDomain", KnowledgeDomain.CASES.getValue())))
@@ -77,7 +83,8 @@ public class PgVectorVectorStoreConfig {
                 .sorted(Comparator.comparing(PgVectorVectorStoreConfig::documentSortKey).thenComparing(Document::getText))
                 .toList();
         if (sourceDocuments.isEmpty()) {
-            throw new IllegalStateException("未加载到心理咨询知识库文档，拒绝使用旧向量数据启动");
+            log.info("生产知识清单为空，保留已有向量数据并关闭知识检索");
+            return;
         }
 
         String knowledgeBaseVersion = calculateKnowledgeBaseVersion(sourceDocuments, embeddingVersion);
@@ -98,41 +105,30 @@ public class PgVectorVectorStoreConfig {
             log.info("灌注新的心理咨询知识库快照：version={}, documents={}", knowledgeBaseVersion, documents.size());
             vectorStore.add(documents);
             if (!snapshotCountsMatch(jdbcTemplate, documents, knowledgeBaseVersion)) {
-                throw new IllegalStateException("新知识库快照数量校验失败，保留旧快照，拒绝启动");
+                throw new IllegalStateException("新知识库快照 ID、内容或元数据校验失败，保留旧快照，拒绝启动");
             }
         }
-        // Cleanup runs only after the complete replacement is persisted and verified.
-        for (String domain : PRODUCTION_DOMAINS) {
-            jdbcTemplate.update("DELETE FROM public.vector_store WHERE metadata->>'knowledgeBase' = ? "
-                            + "AND metadata->>'knowledgeDomain' = ? "
-                            + "AND metadata->>'knowledgeBaseVersion' IS DISTINCT FROM ?",
-                    KNOWLEDGE_BASE_NAME, domain, knowledgeBaseVersion);
-        }
-        // Match known legacy source filenames exactly; unrelated applications and other domains survive.
-        sourceDocuments.stream().filter(document -> KnowledgeDomain.CASES.getValue()
-                        .equals(document.getMetadata().get("knowledgeDomain")))
-                .map(document -> document.getMetadata().get("filename"))
-                .filter(java.util.Objects::nonNull).distinct().forEach(filename -> jdbcTemplate.update(
-                        "DELETE FROM public.vector_store WHERE metadata->>'knowledgeDomain' IS NULL "
-                                + "AND metadata->>'filename' = ? "
-                                + "AND (metadata->>'knowledgeBase' = ? OR metadata->>'knowledgeBase' IS NULL)",
-                        filename, KNOWLEDGE_BASE_NAME));
+        admissionPolicy.activateVerified(documents);
         log.info("心理咨询知识库快照已就绪：version={}, documents={}", knowledgeBaseVersion, documents.size());
     }
 
     private boolean snapshotCountsMatch(JdbcTemplate jdbcTemplate, List<Document> documents, String version) {
-        for (String domain : PRODUCTION_DOMAINS) {
-            long expected = documents.stream().filter(document -> domain.equals(
-                    document.getMetadata().get("knowledgeDomain"))).count();
-            Long actual = jdbcTemplate.queryForObject("SELECT count(*) FROM public.vector_store "
-                            + "WHERE metadata->>'knowledgeBase' = ? AND metadata->>'knowledgeBaseVersion' = ? "
-                            + "AND metadata->>'knowledgeDomain' = ?",
-                    Long.class, KNOWLEDGE_BASE_NAME, version, domain);
-            if (!Long.valueOf(expected).equals(actual)) {
-                return false;
-            }
-        }
-        return true;
+        List<Document> persisted = jdbcTemplate.query("SELECT id, content, metadata::text AS metadata FROM public.vector_store "
+                        + "WHERE metadata->>'knowledgeBase' = ? AND metadata->>'knowledgeBaseVersion' = ?",
+                (rs, index) -> {
+                    try {
+                        java.util.Map<String, Object> metadata = new com.fasterxml.jackson.databind.ObjectMapper().readValue(
+                                rs.getString("metadata"), new com.fasterxml.jackson.core.type.TypeReference<java.util.Map<String, Object>>() {});
+                        return Document.builder().id(rs.getString("id")).text(rs.getString("content")).metadata(metadata).build();
+                    } catch (java.io.IOException failure) {
+                        throw new IllegalStateException("Cannot verify knowledge metadata", failure);
+                    }
+                }, KNOWLEDGE_BASE_NAME, version);
+        if (persisted.size() != documents.size()) return false;
+        java.util.Map<String, Document> expected = documents.stream().collect(
+                java.util.stream.Collectors.toMap(Document::getId, document -> document));
+        return persisted.stream().allMatch(document -> expected.containsKey(document.getId())
+                && KnowledgeAdmissionPolicy.sameDocument(expected.get(document.getId()), document));
     }
 
     static String calculateKnowledgeBaseVersion(List<Document> documents) {
@@ -142,6 +138,8 @@ public class PgVectorVectorStoreConfig {
     static String calculateKnowledgeBaseVersion(List<Document> documents, String embeddingVersion) {
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            digest.update(KnowledgeAdmissionPolicy.ADMISSION_SCHEMA_VERSION.getBytes(StandardCharsets.UTF_8));
+            digest.update((byte) 0);
             digest.update(embeddingVersion.getBytes(StandardCharsets.UTF_8));
             digest.update((byte) 0);
             documents.stream()
@@ -154,13 +152,13 @@ public class PgVectorVectorStoreConfig {
                         digest.update(document.getText().getBytes(StandardCharsets.UTF_8));
                         digest.update((byte) 0);
                     });
-            return HexFormat.of().formatHex(digest.digest()).substring(0, 16);
+            return HexFormat.of().formatHex(digest.digest());
         } catch (NoSuchAlgorithmException e) {
             throw new IllegalStateException("当前 JDK 不支持 SHA-256", e);
         }
     }
 
-    private static String documentSortKey(Document document) {
+    static String documentSortKey(Document document) {
         StringBuilder key = new StringBuilder();
         for (String field : VERSION_METADATA) {
             String value = String.valueOf(document.getMetadata().getOrDefault(field, ""));

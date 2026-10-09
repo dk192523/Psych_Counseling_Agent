@@ -6,7 +6,7 @@ import pytest
 from pydantic import ValidationError
 
 from dk_ai_worker.config import Settings
-from dk_ai_worker.models import Candidate, RefineLimits, RefineRequest
+from dk_ai_worker.models import Candidate, EvidenceSnippet, RefineLimits, RefineRequest
 from dk_ai_worker.ranking import rank_candidates
 from dk_ai_worker.service import IntelligenceService
 
@@ -77,3 +77,46 @@ def test_refine_preserves_metadata_and_never_searches_non_case_transcripts(tmp_p
     assert prompt["candidates"][0]["sourceId"] == "policy.md"
     assert prompt["candidates"][0]["chunkId"] == "chunk-1"
     assert prompt["candidates"][0]["citationUrl"] == "https://example.test/policy"
+
+
+@pytest.mark.parametrize("snippets_per_case", [0, 1, 2, 3])
+def test_refine_respects_transcript_read_limit(tmp_path, snippets_per_case):
+    service = IntelligenceService(Settings(
+        DEEPSEEK_API_KEY="", AI_WORKER_SHARED_SECRET="test-secret",
+        COUNSELING_TRANSCRIPT_DIRECTORY=tmp_path,
+    ))
+    service._llm = Mock()
+    service._llm.complete_json = AsyncMock(return_value=(
+        {"selected_ids": ["C1"], "evidence_gaps": []}, None,
+    ))
+    snippet = EvidenceSnippet(start="00:01", end="00:05", text="工作压力影响睡眠", score=1.0)
+    service._transcripts = Mock()
+    service._transcripts.search.return_value = [snippet]
+    case = _candidate()
+    request = RefineRequest(
+        contractVersion="1", requestId="transcript-limit", currentMessage="工作压力影响睡眠",
+        candidates=[case],
+        limits=RefineLimits(
+            maxEvidence=1, snippetsPerCase=snippets_per_case, snippetMaxChars=200,
+        ),
+    )
+
+    response = asyncio.run(service.refine(request))
+
+    assert [item.id for item in response.selected_evidence] == ["C1"]
+    if snippets_per_case == 0:
+        service._transcripts.search.assert_not_called()
+        assert response.selected_evidence[0].snippets == []
+        assert response.evidence_gaps == ["逐字稿读取已关闭，案例摘要未经逐字稿核验"]
+    else:
+        service._transcripts.search.assert_called_once_with(
+            case.slug, request.current_message + " ", snippets_per_case, 200,
+        )
+        assert response.selected_evidence[0].snippets == [snippet]
+        assert response.evidence_gaps == []
+
+
+@pytest.mark.parametrize("snippets_per_case", [-1, 4])
+def test_refine_rejects_out_of_range_transcript_read_limits(snippets_per_case):
+    with pytest.raises(ValidationError):
+        RefineLimits(maxEvidence=1, snippetsPerCase=snippets_per_case, snippetMaxChars=200)

@@ -1,9 +1,12 @@
 import hmac
+import ipaddress
 import logging
+import os
+from collections.abc import Callable
 from contextlib import asynccontextmanager
 from typing import Annotated
 
-from fastapi import FastAPI, Header, HTTPException, status
+from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Request, status
 
 from .config import Settings
 from .models import (
@@ -19,7 +22,11 @@ from .models import (
 from .service import IntelligenceService
 
 
-def create_app(settings: Settings | None = None) -> FastAPI:
+def create_app(
+    settings: Settings | None = None,
+    *,
+    request_shutdown: Callable[[], None] | None = None,
+) -> FastAPI:
     runtime_settings = settings or Settings()
     auth_required = runtime_settings.require_auth()
     configured_secret = runtime_settings.shared_secret_value()
@@ -74,9 +81,33 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def ready() -> dict[str, object]:
         return {
             "status": "ok",
+            "pid": os.getpid(),
             "heuristicPlanner": True,
             "llmConfigured": service().llm_available,
         }
+
+    @app.post("/internal/v1/admin/shutdown", status_code=status.HTTP_202_ACCEPTED)
+    async def shutdown(
+        request: Request,
+        background_tasks: BackgroundTasks,
+        worker_token: Annotated[str | None, Header(alias="X-AI-Worker-Token")] = None,
+    ) -> dict[str, str]:
+        # 管理接口始终要求密钥；开发模式的业务鉴权豁免不授予关闭进程权限。
+        if not configured_secret or not worker_token or not hmac.compare_digest(
+            worker_token, configured_secret
+        ):
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="unauthorized")
+        if request_shutdown is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="shutdown unavailable")
+        try:
+            is_local = request.client is not None and ipaddress.ip_address(request.client.host).is_loopback
+        except ValueError:
+            is_local = False
+        if not is_local:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="local access required")
+        # 先送出响应，再通知 Uvicorn 正常停止，由 lifespan 释放业务资源。
+        background_tasks.add_task(request_shutdown)
+        return {"status": "shuttingDown"}
 
     @app.post("/internal/v1/plan", response_model=PlanResponse)
     async def plan(

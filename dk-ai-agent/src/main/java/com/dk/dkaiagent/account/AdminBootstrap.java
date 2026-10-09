@@ -11,7 +11,7 @@ import org.springframework.stereotype.Component;
  * 初始超管引导（冻结合约 AUTH-v1）：无任何 ADMIN 时创建 admin。
  * 口令必须取 env ADMIN_INITIAL_PASSWORD；无管理员且未配置时阻止启动。
  * BCrypt 落库，日志仅记录创建成功及口令来源，绝不输出口令或哈希。
- * 随后把无主历史会话归属到超管（幂等，每次启动只影响 owner_id IS NULL 的行）。
+ * 无主历史会话保持 owner_id IS NULL；启动仅记录数量，归属必须由人工明确映射。
  *
  * 时机：@PostConstruct 处于 refresh() 的 finishBeanFactoryInitialization 阶段——此时依赖注入
  * 保证 UserRepository 的 @PostConstruct 建表 DDL 已完成，而端口绑定发生在随后的 finishRefresh →
@@ -42,8 +42,8 @@ public class AdminBootstrap {
 
     @PostConstruct
     void ensureInitialAdmin() {
+        reportOrphanConversations();
         if (userRepository.countByRole(UserAccountService.ROLE_ADMIN) > 0) {
-            adoptOrphanConversations();
             return;
         }
         if (configuredInitialPassword == null || configuredInitialPassword.isBlank()) {
@@ -59,31 +59,21 @@ public class AdminBootstrap {
         } catch (DataIntegrityViolationException usernameCollision) {
             // 用户名冲突：回查冲突行裁决语义。仅当冲突行确为 ADMIN（多实例并发首启，另一实例已引导）
             // 才按"已引导"处理；若 "admin" 被非管理员账号占用（如首启窗口内抢注），记 ERROR 要求人工
-            // 介入并直接返回——绝不能把无主历史会话 adopt 到非 ADMIN 账号。
+            // 介入并直接返回，不更改现有账号或任何会话归属。
             PsychUser existing = userRepository.findByUsername(ADMIN_USERNAME).orElse(null);
             if (existing != null && UserAccountService.ROLE_ADMIN.equals(existing.role())) {
-                adoptOrphanConversations();
                 return;
             }
-            log.error("用户名 {} 被非管理员账号占用，初始超管创建失败，需人工介入（清理占用账号或将现有管理员提权后重启）",
-                    ADMIN_USERNAME);
+            log.error("初始超管创建失败：保留用户名被非管理员账号占用，需人工介入");
             return;
         }
-        log.info("初始超管已创建，用户名 {}，初始口令来源 ADMIN_INITIAL_PASSWORD", ADMIN_USERNAME);
-        adoptOrphanConversations();
+        log.info("初始超管已创建，初始口令来源 ADMIN_INITIAL_PASSWORD");
     }
 
-    private void adoptOrphanConversations() {
-        userRepository.findByUsername(ADMIN_USERNAME).ifPresent(admin -> {
-            // 归属断言：无主历史咨询会话只允许落到真正的 ADMIN，杜绝被非管理员账号窃取。
-            if (!UserAccountService.ROLE_ADMIN.equals(admin.role())) {
-                log.error("用户名 {} 非 ADMIN 账号，跳过无主会话归属，需人工介入", ADMIN_USERNAME);
-                return;
-            }
-            int adopted = userRepository.adoptOrphanConversations(admin.id());
-            if (adopted > 0) {
-                log.info("已将 {} 个无主历史会话归属到管理员 id={}", adopted, admin.id());
-            }
-        });
+    private void reportOrphanConversations() {
+        long orphanCount = userRepository.countOrphanConversations();
+        if (orphanCount > 0) {
+            log.warn("检测到 {} 个无主历史会话，保留无主状态；迁移需人工明确映射", orphanCount);
+        }
     }
 }

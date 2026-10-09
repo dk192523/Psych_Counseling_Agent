@@ -2,6 +2,7 @@ package com.dk.dkaiagent.integration.aiworker;
 
 import com.dk.dkaiagent.orchestration.AgentRequestContext;
 import com.dk.dkaiagent.orchestration.ExecutionContextScope;
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpExchange;
@@ -9,16 +10,20 @@ import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.core.env.MapPropertySource;
+import org.springframework.mock.env.MockEnvironment;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.BooleanSupplier;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -76,6 +81,116 @@ class AiWorkerClientTest {
         assertEquals("test-secret", tokenHeader.get());
         assertEquals(1, requestCount.get());
         assertFalse(client.availability().circuitOpen());
+    }
+
+    @Test
+    void unavailableDesktopWorkerBlocksEveryPostBeforeSerialization() {
+        AtomicInteger serializationCount = new AtomicInteger();
+        ObjectMapper mapper = new ObjectMapper() {
+            @Override
+            public byte[] writeValueAsBytes(Object value) throws JsonProcessingException {
+                serializationCount.incrementAndGet();
+                return super.writeValueAsBytes(value);
+            }
+        };
+        AtomicInteger gateCalls = new AtomicInteger();
+        BooleanSupplier gate = () -> {
+            gateCalls.incrementAndGet();
+            return false;
+        };
+        AiWorkerClient client = new AiWorkerClient(properties, mapper, desktopEnvironment(gate));
+
+        assertTrue(client.plan(request("门禁关闭")).isEmpty());
+        assertTrue(client.refine(new AiWorkerContracts.RefineRequest(
+                AiWorkerContracts.VERSION, "req-1", "门禁关闭", "", List.of(), List.of(),
+                new AiWorkerContracts.RefineLimits(3, 2, 180))).isEmpty());
+        assertTrue(client.consolidate(consolidateRequest()).isEmpty());
+        assertTrue(client.recall(recallRequest()).isEmpty());
+        assertEquals(4, gateCalls.get());
+        assertEquals(0, serializationCount.get());
+        assertEquals(0, requestCount.get());
+        assertEquals(0, client.availability().activeCalls());
+    }
+
+    @Test
+    void desktopWorkerWithMissingGateDoesNotSend() {
+        AiWorkerClient client = new AiWorkerClient(properties, new ObjectMapper(),
+                new MockEnvironment().withProperty("app.ai-worker.desktop-managed", "true"));
+
+        assertTrue(client.plan(request("缺少门禁")).isEmpty());
+        assertEquals(0, requestCount.get());
+    }
+
+    @Test
+    void desktopWorkerWithWrongGateTypeDoesNotSend() {
+        AiWorkerClient client = new AiWorkerClient(properties, new ObjectMapper(), desktopEnvironment("true"));
+
+        assertTrue(client.plan(request("错误门禁类型")).isEmpty());
+        assertEquals(0, requestCount.get());
+    }
+
+    @Test
+    void desktopWorkerWithThrowingGateDoesNotSend() {
+        BooleanSupplier gate = () -> {
+            throw new IllegalStateException("gate failed");
+        };
+        AiWorkerClient client = new AiWorkerClient(properties, new ObjectMapper(), desktopEnvironment(gate));
+
+        assertTrue(client.plan(request("门禁异常")).isEmpty());
+        assertEquals(0, requestCount.get());
+    }
+
+    @Test
+    void desktopWorkerExitDuringSerializationBlocksSending() {
+        AtomicBoolean alive = new AtomicBoolean(true);
+        ObjectMapper mapper = new ObjectMapper() {
+            @Override
+            public byte[] writeValueAsBytes(Object value) throws JsonProcessingException {
+                byte[] json = super.writeValueAsBytes(value);
+                alive.set(false);
+                return json;
+            }
+        };
+        AiWorkerClient client = new AiWorkerClient(properties, mapper,
+                desktopEnvironment((BooleanSupplier) alive::get));
+
+        assertTrue(client.plan(request("序列化期间退出")).isEmpty());
+        assertEquals(0, requestCount.get());
+    }
+
+    @Test
+    void liveDesktopWorkerChecksGateBeforeSerializationAndSending() {
+        AtomicInteger gateCalls = new AtomicInteger();
+        BooleanSupplier gate = () -> {
+            gateCalls.incrementAndGet();
+            return true;
+        };
+        AiWorkerClient client = new AiWorkerClient(properties, new ObjectMapper(), desktopEnvironment(gate));
+
+        assertTrue(client.plan(request("存活 Worker")).isPresent());
+        assertEquals(2, gateCalls.get());
+        assertEquals(1, requestCount.get());
+    }
+
+    @Test
+    void unmanagedWorkerSendsWithoutConsultingDesktopGate() {
+        MockEnvironment environment = new MockEnvironment();
+        BooleanSupplier gate = () -> {
+            throw new AssertionError("unmanaged worker must not consult desktop gate");
+        };
+        environment.getPropertySources().addFirst(new MapPropertySource("desktop-gate",
+                Map.of("app.ai-worker.process-alive", gate)));
+        AiWorkerClient client = new AiWorkerClient(properties, new ObjectMapper(), environment);
+
+        assertTrue(client.plan(request("开发环境")).isPresent());
+        assertEquals(1, requestCount.get());
+    }
+
+    private MockEnvironment desktopEnvironment(Object gate) {
+        MockEnvironment environment = new MockEnvironment();
+        environment.getPropertySources().addFirst(new MapPropertySource("desktop-runtime",
+                Map.of("app.ai-worker.desktop-managed", true, "app.ai-worker.process-alive", gate)));
+        return environment;
     }
 
     @Test

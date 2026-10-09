@@ -198,10 +198,14 @@ class IntelligenceService:
                 )
                 for item in case_ranked
             )
-        )
+        ) if request.limits.snippets_per_case > 0 else []
         snippets_by_id = {
             item.candidate.id: snippets
-            for item, snippets in zip(case_ranked, case_snippet_lists, strict=True)
+            for item, snippets in zip(
+                case_ranked if request.limits.snippets_per_case > 0 else [],
+                case_snippet_lists,
+                strict=True,
+            )
         }
         selected_evidence = [
             SelectedEvidence(
@@ -214,8 +218,13 @@ class IntelligenceService:
             for item in ranked
         ]
         if case_ranked and not any(case_snippet_lists):
+            transcript_gap = (
+                "逐字稿读取已关闭，案例摘要未经逐字稿核验"
+                if request.limits.snippets_per_case == 0
+                else "命中案例缺少可核验的逐字稿片段"
+            )
             evidence_gaps = _normalize_texts(
-                [*evidence_gaps, "命中案例缺少可核验的逐字稿片段"], 5, 120
+                [*evidence_gaps, transcript_gap], 5, 120
             )
 
         return RefineResponse(

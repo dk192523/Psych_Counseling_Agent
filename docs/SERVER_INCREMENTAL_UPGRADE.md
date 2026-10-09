@@ -175,7 +175,9 @@ release/Psych_Counseling_Agent_TencentCloud_3004_YYYYMMDD-HHMMSS.zip
 release/Psych_Counseling_Agent_TencentCloud_3004_YYYYMMDD-HHMMSS.zip.sha256
 ```
 
-部署包不应包含真实 `.env`、API Key、`target`、`node_modules`、`.venv` 或测试缓存。构建脚本会检查疑似 API Key，并生成 `PACKAGE_MANIFEST.json`。
+部署包不应包含真实 `.env`、API Key、`target`、`node_modules`、`.venv`、测试缓存或 `counseling-kb/raw` 原始逐字稿。raw 的来源仍为 `quarantine`、审核 `pending`、许可及 PII 状态 `unknown`，只保留在仓库用于离线治理。构建脚本不复制 raw，Compose 不配置或挂载 raw，部署检查不要求该目录；当前 Java→Worker 固定 `snippetsPerCase=0`，运行时不读取逐字稿。不要把旧版本 raw 复制到新部署目录。
+
+构建脚本会检查疑似 API Key，并生成 `PACKAGE_MANIFEST.json`。上传前执行 `powershell -ExecutionPolicy Bypass -File .\deploy\tencent-cloud\verify-package.ps1 -ArchivePath <完整 ZIP 路径>`；验证器会明确拒绝任何 raw 条目，再检查所需源码、manifest 和文件哈希。CI 同时检查正常包、合成 raw 污染包及 Compose 挂载边界。
 
 ### 3.2 上传并校验
 
@@ -221,14 +223,13 @@ sudo chown -R "$USER":"$USER" "$RELEASE_DIR"
 NEW_DIR="$RELEASE_DIR/Psych_Counseling_Agent_Server"
 test -f "$NEW_DIR/manage.sh"
 test -f "$NEW_DIR/dk-ai-agent/docker-compose.yml"
-test -d "$NEW_DIR/counseling-kb/raw"
 
 cp "$CURRENT_DIR/dk-ai-agent/.env" "$NEW_DIR/dk-ai-agent/.env"
 chmod 600 "$NEW_DIR/dk-ai-agent/.env"
 chmod +x "$NEW_DIR/manage.sh"
 bash -n "$NEW_DIR/manage.sh"
 
-# 旧服务保持在线，先验证新包、生产配置、语料和 Compose。
+# 旧服务保持在线，先验证新包、生产配置和 Compose。
 cd "$NEW_DIR"
 ./manage.sh check
 

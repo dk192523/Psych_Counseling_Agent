@@ -1,6 +1,7 @@
 package com.dk.dkaiagent.history;
 
 import jakarta.annotation.PostConstruct;
+import com.dk.dkaiagent.config.JdbcDialect;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -26,20 +27,26 @@ import java.util.UUID;
 public class ChatTurnService {
     private static final Logger log = LoggerFactory.getLogger(ChatTurnService.class);
     private final JdbcTemplate jdbc;
+    private final JdbcDialect dialect;
     private final ReplayRetentionProperties retention;
 
     public ChatTurnService(JdbcTemplate jdbc) { this(jdbc, new ReplayRetentionProperties()); }
 
-    @Autowired
     public ChatTurnService(JdbcTemplate jdbc, ReplayRetentionProperties retention) {
+        this(jdbc, retention, JdbcDialect.POSTGRESQL);
+    }
+
+    @Autowired
+    public ChatTurnService(JdbcTemplate jdbc, ReplayRetentionProperties retention, JdbcDialect dialect) {
         retention.validate();
         this.jdbc = jdbc;
+        this.dialect = dialect;
         this.retention = retention;
     }
 
     @PostConstruct
     public void initializeSchema() {
-        jdbc.execute("""
+        jdbc.execute(dialect.schema("""
                 CREATE TABLE IF NOT EXISTS psych_chat_turn (
                     conversation_id VARCHAR(64) NOT NULL REFERENCES psych_conversation(id) ON DELETE CASCADE,
                     client_msg_id VARCHAR(64) NOT NULL,
@@ -51,9 +58,20 @@ public class ChatTurnService {
                     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     PRIMARY KEY (conversation_id, client_msg_id)
                 )
-                """);
-        jdbc.execute("CREATE UNIQUE INDEX IF NOT EXISTS uk_psych_running_turn ON psych_chat_turn(conversation_id) WHERE status = 'RUNNING'");
-        jdbc.execute("CREATE INDEX IF NOT EXISTS idx_psych_turn_expiry ON psych_chat_turn(updated_at) WHERE status <> 'RUNNING'");
+                """));
+        if (dialect.isH2()) {
+            // H2 has no partial indexes. NULL entries stay distinct; only RUNNING rows expose their parent key.
+            jdbc.execute("""
+                    ALTER TABLE psych_chat_turn ADD COLUMN IF NOT EXISTS running_conversation_id VARCHAR(64)
+                    GENERATED ALWAYS AS (CASE WHEN status = 'RUNNING' THEN conversation_id ELSE NULL END)
+                    """);
+        }
+        jdbc.execute(dialect.choose(
+                "CREATE UNIQUE INDEX IF NOT EXISTS uk_psych_running_turn ON psych_chat_turn(conversation_id) WHERE status = 'RUNNING'",
+                "CREATE UNIQUE INDEX IF NOT EXISTS uk_psych_running_turn ON psych_chat_turn(running_conversation_id)"));
+        jdbc.execute(dialect.choose(
+                "CREATE INDEX IF NOT EXISTS idx_psych_turn_expiry ON psych_chat_turn(updated_at) WHERE status <> 'RUNNING'",
+                "CREATE INDEX IF NOT EXISTS idx_psych_turn_expiry ON psych_chat_turn(status, updated_at)"));
         // No other replica may run this application: see deployment contract. A restart must not
         // leave an unfinishable RUNNING reservation. Empty failed turns may be retried with the same key.
         jdbc.update("UPDATE psych_chat_turn SET status = 'FAILED', updated_at = CURRENT_TIMESTAMP WHERE status = 'RUNNING'");
@@ -73,8 +91,8 @@ public class ChatTurnService {
         long retentionMillis = retention.getReplayRetention().toMillis();
         int removed = jdbc.update("""
                 DELETE FROM psych_chat_turn WHERE status <> 'RUNNING'
-                  AND updated_at < CURRENT_TIMESTAMP - CAST(? AS DOUBLE PRECISION) * INTERVAL '1 millisecond'
-                """, retentionMillis);
+                  AND updated_at < %s
+                """.formatted(dialect.agoMillis()), retentionMillis);
         log.info("replay_retention retentionMillis={} deleted={}", retentionMillis, removed);
     }
 
@@ -83,7 +101,7 @@ public class ChatTurnService {
         lockConversation(ownerId, chatId);
         // Covers disconnect-before-subscribe and failed terminal writes. Generation has a hard
         // 180 s deadline, so a five-minute reservation cannot still own a live answer stream.
-        jdbc.update("UPDATE psych_chat_turn SET status = 'FAILED' WHERE conversation_id = ? AND status = 'RUNNING' AND updated_at < CURRENT_TIMESTAMP - INTERVAL '5 minutes'", chatId);
+        jdbc.update("UPDATE psych_chat_turn SET status = 'FAILED' WHERE conversation_id = ? AND status = 'RUNNING' AND updated_at < " + dialect.staleTurnCutoff(), chatId);
         String key = clientMsgId == null ? UUID.randomUUID().toString() : clientMsgId;
         String hash = hash(message + "\u0000" + deep);
         var previous = jdbc.query("SELECT * FROM psych_chat_turn WHERE conversation_id = ? AND client_msg_id = ?",
@@ -97,11 +115,7 @@ public class ChatTurnService {
         }
         Integer running = jdbc.queryForObject("SELECT count(*) FROM psych_chat_turn WHERE conversation_id = ? AND status = 'RUNNING'", Integer.class, chatId);
         if (running != null && running > 0) throw conflict("此会话已有回答正在生成");
-        jdbc.update("""
-                INSERT INTO psych_chat_turn(conversation_id, client_msg_id, request_hash, status)
-                VALUES (?, ?, ?, 'RUNNING')
-                ON CONFLICT(conversation_id, client_msg_id) DO UPDATE SET status = 'RUNNING', updated_at = CURRENT_TIMESTAMP
-                """, chatId, key, hash);
+        jdbc.update(dialect.turnReservation(), chatId, key, hash);
         return new Turn(key, "RUNNING", "", deep ? "deep" : "standard", false);
     }
 

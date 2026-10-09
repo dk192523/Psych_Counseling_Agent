@@ -28,7 +28,7 @@
                   :started-at="thinkingState.startedAt"
                   :fallback="thinkingState.fallback"
                 />
-                <div class="markdown-body" v-html="renderMarkdown(msg.content)"></div>
+                <div class="markdown-body" @click="openSourceLink" @auxclick="openSourceLink" v-html="renderMarkdown(msg.content)"></div>
                 <span
                   v-if="connectionStatus === 'connecting' && index === visibleMessages.length - 1 && !thinkingState?.active"
                   class="typing-indicator"
@@ -54,6 +54,7 @@
 
     <!-- 输入区域：玻璃胶囊复合输入舱 -->
     <div class="composer-area">
+      <p v-if="sourceLinkError" class="source-link-error" role="alert">{{ sourceLinkError }}</p>
       <!-- U9：上一轮发送中断后的手动重发入口。重发沿用原 clientMsgId，后端幂等去重，
            不会重复归档用户消息。 -->
       <div v-if="retryableTurn" class="chat-retry-bar" role="status">
@@ -170,6 +171,7 @@ const MAX_INPUT_ROWS = 6
 const inputMessage = ref('')
 const messagesContainer = ref(null)
 const inputBox = ref(null)
+const sourceLinkError = ref('')
 
 // 欢迎消息（id 以 welcome- 开头）只是占位文案：空会话渲染 hero 问候，不进消息列；
 // 首条消息发出后它也不再以气泡形式出现在聊天顶部。
@@ -189,7 +191,32 @@ const placeholderText = computed(() => {
 })
 
 const renderMarkdown = (content) => {
-  return DOMPurify.sanitize(markdown.render(content || ''))
+  return DOMPurify.sanitize(markdown.render(content || ''), { ADD_ATTR: ['target', 'rel'] })
+}
+
+const openSourceLink = (event) => {
+  if (event.type === 'auxclick' && event.button !== 1) return
+  const anchor = event.target?.closest?.('a')
+  if (!anchor || !event.currentTarget.contains(anchor)) return
+  sourceLinkError.value = ''
+  let destination
+  try {
+    destination = new URL(anchor.getAttribute('href'))
+    if (!['http:', 'https:'].includes(destination.protocol) || destination.username || destination.password) {
+      throw new Error('Unsupported source link')
+    }
+  } catch {
+    event.preventDefault()
+    sourceLinkError.value = '仅支持打开有效的 http/https 来源链接。'
+    return
+  }
+  if (!window.psychDesktop) return
+  event.preventDefault()
+  try {
+    if (window.psychDesktop.openExternal(destination.href) !== true) throw new Error('Open failed')
+  } catch {
+    sourceLinkError.value = '来源链接未能打开，请检查系统默认浏览器后重试。'
+  }
 }
 
 // 输入框随内容自增长，到 MAX_INPUT_ROWS 行为止；之后内部滚动。

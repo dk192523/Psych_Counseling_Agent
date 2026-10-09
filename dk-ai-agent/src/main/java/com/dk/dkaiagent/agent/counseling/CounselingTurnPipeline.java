@@ -2,10 +2,12 @@ package com.dk.dkaiagent.agent.counseling;
 
 import com.dk.dkaiagent.app.CounselingApp;
 import com.dk.dkaiagent.app.CrisisResponse;
+import com.dk.dkaiagent.app.DesktopLlmAvailability;
 import com.dk.dkaiagent.app.SafetyOutputGuard;
 import com.dk.dkaiagent.memory.RiskTier;
 import com.dk.dkaiagent.memory.SafetyProperties;
 import com.dk.dkaiagent.memory.SafetyTerms;
+import com.dk.dkaiagent.rag.KnowledgeAdmissionPolicy;
 import com.dk.dkaiagent.history.ChatTurnService;
 import com.dk.dkaiagent.memory.ConversationMemoryService;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -70,7 +72,30 @@ public class CounselingTurnPipeline {
     @Autowired(required = false)
     private MeterRegistry metrics = new SimpleMeterRegistry();
 
+    @Resource
+    private KnowledgeAdmissionPolicy admissionPolicy = new KnowledgeAdmissionPolicy();
+
+    private boolean desktopLlmUnconfigured;
+
+    @Autowired
+    void configureDesktopLlm(DesktopLlmAvailability availability) {
+        desktopLlmUnconfigured = availability.isUnconfigured();
+    }
+
     public Flux<CounselingStreamEvent> run(CounselingTurnRequest request) {
+        RiskTier tier = assessRisk(request);
+        java.util.Optional<String> insufficient = admissionPolicy.insufficientAnswer(request.message());
+        // Keep the deterministic crisis response available without a cloud key. Other requests
+        // fail before admission, retrieval, worker planning, or a provider can see the message.
+        if (desktopLlmUnconfigured && insufficient.isEmpty()
+                && !(tier == RiskTier.IMMINENT && safetyProperties.isCrisisResponseEnabled())) {
+            RiskTier historyRisk = counselingApp.outputRiskTier(request.chatId());
+            String message = DesktopLlmAvailability.UNCONFIGURED_MESSAGE;
+            if (tier.isSafetyRelevant() || (historyRisk != null && historyRisk.isSafetyRelevant())) {
+                message += "\n\n" + crisisResponse.supplement();
+            }
+            return Flux.just(failure("llm_unconfigured", message));
+        }
         // Admission runs before the HTTP stream starts, so conflicts retain HTTP 409 semantics.
         ChatTurnService.Turn turn = chatTurnService.begin(request.ownerId(), request.chatId(),
                 request.clientMsgId(), request.message(), request.deepThinking());
@@ -93,22 +118,15 @@ public class CounselingTurnPipeline {
             // 危机拦截先于一切：IMMINENT 级（手段/计划/进行中）直接走专用模板，
             // 不进入任何 LLM 聊天链——这是快速模式此前缺失的危机前置检查，
             // 现在两条模式在 pipeline 收口处统一获得。
-            RiskTier tier = SafetyTerms.assess(request.message());
-            if (tier.isSafetyRelevant()) {
-                // A2 审计：只记分级/会话/主体/模式，绝不记正文（隐私红线）。
-                // IMMINENT=WARN 便于日志告警直接筛出；PASSIVE=INFO 留痕不告警。
-                if (tier == RiskTier.IMMINENT) {
-                    auditLog.warn("安全事件 tier=IMMINENT chatId={} ownerId={} deep={}",
-                            request.chatId(), request.ownerId(), request.deepThinking());
-                } else {
-                    auditLog.info("安全事件 tier=PASSIVE chatId={} ownerId={} deep={}",
-                            request.chatId(), request.ownerId(), request.deepThinking());
-                }
-            }
             counselingApp.prepareConversationTurn(
                     request.ownerId(), request.chatId(), request.message(), turn.key());
             if (tier == RiskTier.IMMINENT && safetyProperties.isCrisisResponseEnabled()) {
                 return crisisResponse(request);
+            }
+            if (insufficient.isPresent()) {
+                String mode = request.deepThinking() ? "deep" : "standard";
+                return Flux.just(CounselingStreamEvent.delta(insufficient.get(), mode, false),
+                        CounselingStreamEvent.done(mode, false));
             }
             Flux<CounselingStreamEvent> events = request.deepThinking()
                     ? counselingAgentExecutor.prepareAndAnswer(
@@ -133,7 +151,7 @@ public class CounselingTurnPipeline {
                             chatTurnService.finish(request.ownerId(), request.chatId(), turn.key(),
                                     visible.toString(), "COMPLETED", event.effectiveMode(), event.fallback());
                             terminal.set(true);
-                            afterCommit(request.chatId());
+                            afterCommit(request.chatId(), insufficient.isPresent());
                             metrics.counter("counseling.turns", "outcome", "completed").increment();
                         }
                         return Mono.just(event);
@@ -157,15 +175,30 @@ public class CounselingTurnPipeline {
         });
     }
 
-    private void afterCommit(String chatId) {
+    private void afterCommit(String chatId, boolean knowledgeInsufficient) {
         // The answer is already durable. Optional memory maintenance must not undo HTTP success.
         try {
             counselingApp.clearConversationMemory(chatId);
+            // Crisis turns remain durable; postpone optional cloud consolidation until configured.
+            if (desktopLlmUnconfigured || knowledgeInsufficient) return;
             memoryService.onTurnArchived(chatId);
         } catch (RuntimeException error) {
             auditLog.warn("Post-commit memory maintenance failed; chatId={} errorType={}",
                     chatId, error.getClass().getSimpleName());
         }
+    }
+
+    private RiskTier assessRisk(CounselingTurnRequest request) {
+        RiskTier tier = SafetyTerms.assess(request.message());
+        // Audit classification only; never include counseling text.
+        if (tier == RiskTier.IMMINENT) {
+            auditLog.warn("安全事件 tier=IMMINENT chatId={} ownerId={} deep={}",
+                    request.chatId(), request.ownerId(), request.deepThinking());
+        } else if (tier.isSafetyRelevant()) {
+            auditLog.info("安全事件 tier=PASSIVE chatId={} ownerId={} deep={}",
+                    request.chatId(), request.ownerId(), request.deepThinking());
+        }
+        return tier;
     }
 
     private boolean finishInterrupted(CounselingTurnRequest request, ChatTurnService.Turn turn, String answer,

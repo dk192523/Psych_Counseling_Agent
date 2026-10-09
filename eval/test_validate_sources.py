@@ -13,7 +13,8 @@ spec.loader.exec_module(validator)
 
 def source(**overrides):
     entry = {"id": "sample", "title": "示例", "domain": "knowledge",
-             "use": "production", "path": "knowledge/sample.txt", "license": "CC0-1.0",
+             "use": "production", "path": "knowledge/sample.txt",
+             "runtime_path": "dk-ai-agent/src/main/resources/document/sample.md", "license": "CC0-1.0",
              "license_status": "approved", "license_evidence": "Fixture authorization",
              "pii_status": "no_pii", "review_status": "approved", "reviewed_by": "test",
              "reviewed_at": "2026-09-20", "notes": "Synthetic fixture only"}
@@ -22,16 +23,21 @@ def source(**overrides):
 
 
 def validate(tmp_path, entries):
-    (tmp_path / "knowledge").mkdir(exist_ok=True)
-    (tmp_path / "knowledge" / "sample.txt").write_text("fixture", encoding="utf-8")
-    manifest = tmp_path / "sources.jsonl"
+    kb_root = tmp_path / "counseling-kb"
+    (kb_root / "knowledge").mkdir(parents=True, exist_ok=True)
+    (kb_root / "knowledge" / "sample.txt").write_text("fixture", encoding="utf-8")
+    runtime_file = tmp_path / "dk-ai-agent" / "src" / "main" / "resources" / "document" / "sample.md"
+    runtime_file.parent.mkdir(parents=True, exist_ok=True)
+    runtime_file.write_text("fixture", encoding="utf-8")
+    manifest = kb_root / "sources.jsonl"
     manifest.write_text("\n".join(json.dumps(e, ensure_ascii=False) for e in entries), encoding="utf-8")
-    return validator.validate_sources(manifest, tmp_path)
+    return validator.validate_sources(manifest, kb_root)
 
 
 def test_valid_production_and_external_inventory(tmp_path):
     external = source(id="external", use="quarantine", source_url="https://example.com/source")
     del external["path"]
+    del external["runtime_path"]
     assert not validate(tmp_path, [source(), external])
 
 
@@ -45,6 +51,8 @@ def test_duplicate_ids_and_missing_fields(tmp_path):
 @pytest.mark.parametrize("changes", [
     {"domain": "other"}, {"use": "train"}, {"path": "missing.txt"},
     {"path": "../escape.txt"}, {"path": "C:/escape.txt"},
+    {"runtime_path": "dk-ai-agent/src/main/resources/document/missing.md"},
+    {"runtime_path": "dk-ai-agent/src/main/resources/../escape.md"},
     {"license_status": "unknown"}, {"license": "unknown"},
     {"review_status": "pending"}, {"pii_status": "contains_pii"},
     {"pii_status": "unknown"}, {"domain": "exam/practice"},
@@ -55,7 +63,7 @@ def test_invalid_entries_are_rejected(tmp_path, changes):
     assert validate(tmp_path, [source(**changes)])
 
 
-@pytest.mark.parametrize("field", ["license_evidence", "reviewed_by", "reviewed_at"])
+@pytest.mark.parametrize("field", ["license_evidence", "reviewed_by", "reviewed_at", "runtime_path"])
 def test_production_requires_evidence(tmp_path, field):
     entry = source()
     del entry[field]

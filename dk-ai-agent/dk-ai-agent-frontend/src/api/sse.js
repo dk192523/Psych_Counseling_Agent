@@ -1,6 +1,22 @@
+let requestSequence = 0
+
+const createRequestId = () => {
+  if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID()
+  if (globalThis.crypto?.getRandomValues) {
+    const bytes = globalThis.crypto.getRandomValues(new Uint8Array(16))
+    return Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('')
+  }
+  // Older WebView implementations may not expose crypto on loopback HTTP.
+  return `sse_${Date.now().toString(36)}_${(++requestSequence).toString(36)}_${Math.random().toString(36).slice(2).padEnd(16, '0')}`
+}
+
 export const createSSEConnection = (url, payload, { headers, onUnauthorized, onCsrfInvalid, fetchImpl = (...args) => fetch(...args) } = {}) => {
   const controller = new AbortController()
+  const requestId = createRequestId()
   let closed = false
+  let started = false
+  const onPageHide = () => connection.close()
+  const detachPageHide = () => globalThis.removeEventListener?.('pagehide', onPageHide)
 
   const connection = {
     onmessage: null,
@@ -9,8 +25,24 @@ export const createSSEConnection = (url, payload, { headers, onUnauthorized, onC
       if (closed) return
       closed = true
       controller.abort()
+      detachPageHide()
+      if (!started) return
+      // The desktop proxy owns the upstream socket. Aborting fetch alone may leave
+      // a silent remote stream running; this same-origin request closes that socket.
+      // Ordinary web deployments have no cancel route, so every failure is ignored.
+      try {
+        void Promise.resolve(fetchImpl(`/__client/cancel/${requestId}`, {
+          method: 'POST',
+          credentials: 'include',
+          keepalive: true
+        })).catch(() => {})
+      } catch (_) {
+        // Custom fetch implementations can throw synchronously as well.
+      }
     }
   }
+
+  globalThis.addEventListener?.('pagehide', onPageHide)
 
   const dispatchFrame = (frame) => {
     const data = frame
@@ -26,13 +58,17 @@ export const createSSEConnection = (url, payload, { headers, onUnauthorized, onC
 
   const run = async () => {
     try {
+      const requestHeaders = await headers?.()
+      if (closed) return
+      started = true
       const response = await fetchImpl(url, {
         method: 'POST',
         credentials: 'include',
         headers: {
           Accept: 'text/event-stream',
           'Content-Type': 'application/json',
-          ...await headers?.()
+          ...requestHeaders,
+          'X-Client-Request-Id': requestId
         },
         body: JSON.stringify(payload),
         signal: controller.signal
@@ -87,6 +123,8 @@ export const createSSEConnection = (url, payload, { headers, onUnauthorized, onC
       if (!closed && error?.name !== 'AbortError') {
         connection.onerror?.(error)
       }
+    } finally {
+      detachPageHide()
     }
   }
 

@@ -82,6 +82,10 @@
             <artifactId>spring-boot-starter-jdbc</artifactId>
         </dependency>
         <dependency>
+            <groupId>com.h2database</groupId>
+            <artifactId>h2</artifactId>
+        </dependency>
+        <dependency>
             <groupId>org.postgresql</groupId>
             <artifactId>postgresql</artifactId>
             <scope>runtime</scope>
@@ -139,6 +143,21 @@
     </dependencies>
 
     <build>
+        <resources>
+            <resource>
+                <directory>src/main/resources</directory>
+                <filtering>false</filtering>
+            </resource>
+            <!-- Publish the canonical governance manifest, never an independently maintained copy. -->
+            <resource>
+                <directory>${project.basedir}/../counseling-kb/manifests</directory>
+                <targetPath>counseling-kb/manifests</targetPath>
+                <filtering>false</filtering>
+                <includes>
+                    <include>sources.jsonl</include>
+                </includes>
+            </resource>
+        </resources>
         <plugins>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>

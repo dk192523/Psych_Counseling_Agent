@@ -1,0 +1,43 @@
+# Opt in with --spring.profiles.active=local-desktop (or local,local-desktop).
+# Encrypted embedded persistence; the desktop bootstrap supplies the key in memory.
+server:
+  address: 127.0.0.1
+  port: 0
+  servlet:
+    context-path: /api
+    session:
+      cookie:
+        # This profile serves HTTP only on loopback.
+        secure: false
+app:
+  desktop:
+    # Standalone servers disable the UI while keeping the API bound to loopback.
+    serve-ui: ${APP_DESKTOP_SERVE_UI:true}
+    data-directory: ${APP_DATA_DIR:}
+    # The desktop bootstrap overrides this only when a real cloud key is present.
+    llm-configured: false
+  ai-worker:
+    # Only LocalBackendHost may enable the bundled, PID-verified loopback sidecar.
+    enabled: false
+    base-url: http://127.0.0.1:1
+    shared-secret: ""
+    desktop-managed: true
+  cors:
+    allowed-origin-patterns: ""
+  docs:
+    enabled: false
+spring:
+  ai:
+    mcp:
+      client:
+        enabled: false
+  h2:
+    console:
+      enabled: false
+springdoc:
+  api-docs:
+    enabled: false
+  swagger-ui:
+    enabled: false
+knife4j:
+  enable: false

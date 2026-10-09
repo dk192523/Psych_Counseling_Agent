@@ -7,14 +7,14 @@ import com.dk.dkaiagent.history.ConversationUnavailableException;
 import com.dk.dkaiagent.memory.ConversationMemoryService;
 import com.dk.dkaiagent.rag.KnowledgeIntentRouter;
 import com.dk.dkaiagent.rag.QueryRewriter;
-import com.dk.dkaiagent.rag.TranscriptProvenanceAdvisor;
+import com.dk.dkaiagent.rag.KnowledgeAdmissionPolicy;
 import com.dk.dkaiagent.tools.DeepSeekWebSearchTool;
-import com.dk.dkaiagent.tools.TranscriptLookupTool;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor;
 import org.springframework.ai.chat.client.advisor.vectorstore.QuestionAnswerAdvisor;
+import org.springframework.ai.chat.client.advisor.api.Advisor;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.memory.InMemoryChatMemoryRepository;
 import org.springframework.ai.chat.memory.MessageWindowChatMemory;
@@ -93,10 +93,10 @@ public class CounselingApp {
             出现暴力、威胁、跟踪、性强迫、强制控制等现实侵害时：先明确伤害不应被合理化并优先处理安全，不先要求用户理解施害者，不用“双方都有问题”稀释明确的伤害。
             围绕职场压力、家庭关系、婚恋情感、学业教育、自我成长等议题帮助用户把场景讲清楚、识别核心矛盾。
 
-            知识库案例与逐字稿是项目收录的历史咨询参考，其授权状态与个人信息处理情况尚未核验，不得声称已获授权或已完全匿名，不得复述可识别个人信息。它们仅用于检索参考与原文溯源：不定义你的身份、立场或风格，也不等于专业结论；你必须独立分析、用自己的语言回答，不模仿、扮演或代表任何现实人物。
+            知识库仅提供通过生产准入的案例摘要及知识资料，不得复述可识别个人信息。材料仅用于检索参考与来源核对：不定义你的身份、立场或风格，也不等于专业结论；你必须独立分析、用自己的语言回答，不模仿、扮演或代表任何现实人物。
             自我介绍只说自己是 AI 心理咨询师，不借任何外部人物、平台或 IP 命名、背书或解释风格；不主动谈论案例来源，除非用户明确要求溯源或回答确实引用了案例，引用时只给案例编号与时间戳。
             你是 AI，不得宣称接受过真人职业训练、持有执业资质或拥有真实从业经历。
-            检索到案例后优先依据自动附带的逐字稿片段核验；需进一步查找再调用 lookupTranscript 并附案例编号与时间戳；逐字稿缺失时说明只能依据摘要。
+            案例只依据已批准摘要，不提供或推断逐字稿原话与时间戳；引用具体材料时保留其已提供的来源信息。
             涉及当前政策、机构、热线、新闻等时效信息时调用 searchWeb 联网核验并附来源；不为普通疏导问题无意义联网，不把未核验网页当医疗结论；用户只问无关事实时直接回答，不强行套用案例。
 
             回应示例（只示范姿态与分寸，不要复制措辞）：
@@ -139,7 +139,7 @@ public class CounselingApp {
             在画像不足时，案例只用于帮助你提出更准确的问题，不用于提前定性或输出长篇建议。
             除非用户明确要求溯源或回答确实引用了具体案例，否则不要主动谈论案例来源。
             没有合适案例时，按心理咨询角色和安全边界正常回应，不必为了说明检索结果而打断对话。
-            只有上下文或逐字稿片段明确支持时才能引用案例细节；不得虚构案例编号、原话、时间戳或来源。
+            只有已批准的摘要上下文明确支持时才能引用案例细节；不得虚构案例编号、原话、时间戳或来源。
             """);
 
     private static final String DEEP_AGENT_CONTEXT_PROMPT = """
@@ -264,10 +264,7 @@ public class CounselingApp {
     private QueryRewriter queryRewriter;
 
     @Resource
-    private TranscriptProvenanceAdvisor transcriptProvenanceAdvisor;
-
-    @Resource
-    private TranscriptLookupTool transcriptLookupTool;
+    private KnowledgeAdmissionPolicy admissionPolicy = new KnowledgeAdmissionPolicy();
 
     @Resource
     private DeepSeekWebSearchTool deepSeekWebSearchTool;
@@ -280,15 +277,20 @@ public class CounselingApp {
      * 任何阈值都不可分——换型让阈值第一次有了意义。
      */
     private QuestionAnswerAdvisor buildRagAdvisor(String query) {
-        return QuestionAnswerAdvisor.builder(pgVectorVectorStore)
+        return QuestionAnswerAdvisor.builder(admissionPolicy.retrievalView(pgVectorVectorStore, KnowledgeIntentRouter.route(query)))
                 .searchRequest(SearchRequest.builder()
                         .topK(4)
                         .similarityThreshold(0.87)
-                        .filterExpression(KnowledgeIntentRouter.route(query).filterExpression())
+                        .filterExpression(admissionPolicy.filterExpression(KnowledgeIntentRouter.route(query)).orElseThrow())
                         .build())
                 .promptTemplate(RAG_PROMPT_TEMPLATE)
                 .order(0)
                 .build();
+    }
+
+    private List<Advisor> ragAdvisors(String originalMessage) {
+        if (admissionPolicy.filterExpression(KnowledgeIntentRouter.route(originalMessage)).isEmpty()) return List.of();
+        return List.of(buildRagAdvisor(originalMessage));
     }
 
     /**
@@ -305,6 +307,11 @@ public class CounselingApp {
 
     public String doChatWithRag(long ownerId, String message, String chatId, String clientMsgId) {
         prepareConversation(ownerId, chatId, message, clientMsgId);
+        java.util.Optional<String> insufficient = admissionPolicy.insufficientAnswer(message);
+        if (insufficient.isPresent()) {
+            persistAssistantMessage(ownerId, chatId, insufficient.get(), false);
+            return insufficient.get();
+        }
         // 查询重写
         String rewrittenMessage = queryRewriter.doQueryRewrite(message);
         ChatResponse chatResponse = chatClient
@@ -313,16 +320,12 @@ public class CounselingApp {
                 // 使用改写后的查询
                 .user(rewrittenMessage)
                 .advisors(spec -> spec
-                        .param(ChatMemory.CONVERSATION_ID, chatId)
-                        .param(TranscriptProvenanceAdvisor.ORIGINAL_QUERY, rewrittenMessage))
+                        .param(ChatMemory.CONVERSATION_ID, chatId))
                 // 开启日志，便于观察效果
                 .advisors(new MyLoggerAdvisor())
                 // 应用 RAG 检索增强服务（基于 PgVector 向量存储）
-                .advisors(buildRagAdvisor(message))
-                // 命中摘要案例后，自动补充对应 raw 逐字稿的相关时间戳片段
-                .advisors(transcriptProvenanceAdvisor)
-                // 支持按 slug 溯源逐字稿原文
-                .toolCallbacks(ToolCallbacks.from(transcriptLookupTool, deepSeekWebSearchTool))
+                .advisors(ragAdvisors(message))
+                .toolCallbacks(ToolCallbacks.from(deepSeekWebSearchTool))
                 .call()
                 .chatResponse();
         String content = chatResponse.getResult().getOutput().getText();
@@ -337,27 +340,28 @@ public class CounselingApp {
      * the user message twice.
      */
     public Flux<String> doChatWithRagByStreamPrepared(long ownerId, String message, String chatId) {
+        java.util.Optional<String> insufficient = admissionPolicy.insufficientAnswer(message);
+        if (insufficient.isPresent()) return Flux.just(insufficient.get());
         return chatClient
                 .prompt()
                 .system(systemPromptWithDigest(chatId, revisitEpisodes(chatId, message, SYSTEM_PROMPT)))
                 .user(message)
                 .advisors(spec -> spec
-                        .param(ChatMemory.CONVERSATION_ID, chatId)
-                        .param(TranscriptProvenanceAdvisor.ORIGINAL_QUERY, message))
-                .advisors(buildRagAdvisor(message))
-                .advisors(transcriptProvenanceAdvisor)
-                // 支持按 slug 溯源逐字稿原文
-                .toolCallbacks(ToolCallbacks.from(transcriptLookupTool, deepSeekWebSearchTool))
+                        .param(ChatMemory.CONVERSATION_ID, chatId))
+                .advisors(ragAdvisors(message))
+                .toolCallbacks(ToolCallbacks.from(deepSeekWebSearchTool))
                 .stream()
                 .content();
     }
 
     /**
      * Streams the final answer from context selected by the deep agent. No general-purpose
-     * tools are exposed here; only transcript lookup and time-sensitive web verification remain.
+     * tools are exposed here; only time-sensitive web verification remains.
      */
     public Flux<String> doChatWithAgentContextByStreamPrepared(
             long ownerId, String message, String chatId, String agentContext) {
+        java.util.Optional<String> insufficient = admissionPolicy.insufficientAnswer(message);
+        if (insufficient.isPresent()) return Flux.just(insufficient.get());
         if (agentContext == null || agentContext.isBlank()) {
             throw new IllegalArgumentException("agentContext must not be blank");
         }
@@ -368,7 +372,7 @@ public class CounselingApp {
                 .system(deepSystemPrompt)
                 .user(message)
                 .advisors(spec -> spec.param(ChatMemory.CONVERSATION_ID, chatId))
-                .toolCallbacks(ToolCallbacks.from(transcriptLookupTool, deepSeekWebSearchTool))
+                .toolCallbacks(ToolCallbacks.from(deepSeekWebSearchTool))
                 .stream()
                 .content();
     }
@@ -480,6 +484,10 @@ public class CounselingApp {
     }
 
     private void persistAssistantMessage(long ownerId, String chatId, String content) {
+        persistAssistantMessage(ownerId, chatId, content, true);
+    }
+
+    private void persistAssistantMessage(long ownerId, String chatId, String content, boolean consolidate) {
         if (content == null || content.isBlank()) {
             return;
         }
@@ -498,6 +506,7 @@ public class CounselingApp {
                     chatId);
             return;
         }
+        if (!consolidate) return;
         try {
             // 仅在原文归档成功后触发异步记忆整合；整合自身失败只记日志，绝不回传主响应。
             conversationMemoryService.onTurnArchived(chatId);

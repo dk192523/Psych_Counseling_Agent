@@ -80,7 +80,7 @@ $BackendEntries = @(
     "mvnw",
     "mvnw.cmd",
     "pom.xml",
-    "src"
+    "src/main"
 )
 foreach ($entry in $BackendEntries) {
     Copy-RequiredEntry -Source (Join-Path $BackendSource $entry) -Destination (Join-Path $BackendTarget $entry)
@@ -119,9 +119,11 @@ foreach ($entry in $WorkerEntries) {
     Copy-RequiredEntry -Source (Join-Path $WorkerSource $entry) -Destination (Join-Path $WorkerTarget $entry)
 }
 
-Copy-RequiredEntry -Source (Join-Path $RepoRoot "counseling-kb/raw") -Destination (Join-Path $PackageRoot "counseling-kb/raw")
+# Quarantined raw transcripts remain in the repository and are never release inputs.
 Copy-RequiredEntry -Source (Join-Path $PSScriptRoot ".env.server.example") -Destination (Join-Path $BackendTarget ".env.example")
 Copy-RequiredEntry -Source (Join-Path $PSScriptRoot "manage.sh") -Destination (Join-Path $PackageRoot "manage.sh")
+Copy-RequiredEntry -Source (Join-Path $PSScriptRoot "migration-preflight.py") -Destination (Join-Path $PackageRoot "migration-preflight.py")
+Copy-RequiredEntry -Source (Join-Path $PSScriptRoot "MIGRATION_SAME_DATABASE.md") -Destination (Join-Path $PackageRoot "MIGRATION_SAME_DATABASE.md")
 Copy-RequiredEntry -Source (Join-Path $PSScriptRoot "nginx-site.conf.example") -Destination (Join-Path $PackageRoot "nginx-site.conf.example")
 Copy-RequiredEntry -Source (Join-Path $PSScriptRoot "DEPLOY_TENCENT_CLOUD.md") -Destination (Join-Path $PackageRoot "README_DEPLOY.md")
 
@@ -140,7 +142,8 @@ foreach ($directory in $GeneratedDirectories) {
 # Git and may contain local API keys even when the current checkout only has examples.
 $LocalConfigFiles = @(
     (Join-Path $PackageRoot "dk-ai-agent/src/main/resources/application-local.yml"),
-    (Join-Path $PackageRoot "dk-ai-agent/src/main/resources/application-local.yaml")
+    (Join-Path $PackageRoot "dk-ai-agent/src/main/resources/application-local.yaml"),
+    (Join-Path $PackageRoot "dk-ai-agent/src/main/resources/application-local-desktop.yml")
 )
 foreach ($file in $LocalConfigFiles) {
     if (Test-Path -LiteralPath $file) {

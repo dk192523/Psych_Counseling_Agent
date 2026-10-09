@@ -1,9 +1,11 @@
 package com.dk.dkaiagent.tools;
 
+import com.dk.dkaiagent.app.DesktopLlmAvailability;
 import com.fasterxml.jackson.databind.JsonNode;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
@@ -29,6 +31,13 @@ public class DeepSeekWebSearchTool {
     private final String model;
     private final String webSearchTool;
 
+    private boolean desktopLlmUnconfigured;
+
+    @Autowired
+    void configureDesktopLlm(DesktopLlmAvailability availability) {
+        desktopLlmUnconfigured = availability.isUnconfigured();
+    }
+
     public DeepSeekWebSearchTool(
             @Value("${deepseek.api-key}") String apiKey,
             @Value("${deepseek.anthropic-base-url}") String anthropicBaseUrl,
@@ -46,6 +55,9 @@ public class DeepSeekWebSearchTool {
 
     @Tool(description = "Search the live web for current, verifiable information and return an answer with source URLs")
     public String searchWeb(@ToolParam(description = "A focused web search question") String query) {
+        if (desktopLlmUnconfigured) {
+            return DesktopLlmAvailability.UNCONFIGURED_MESSAGE;
+        }
         if (!StringUtils.hasText(query)) {
             return "联网搜索失败：查询不能为空。";
         }

@@ -5,7 +5,7 @@
 
   1. 确定性断言：提问数（问号计数）、字数区间、必须出现/禁止出现的子串——代码判定；
   2. LLM-as-judge：把"动作选对没有"（反映 vs 建议 vs 危机响应…）交给 DeepSeek 按
-     用例的 judge 描述打分，输出 pass/fail + 理由。judge 失败不阻塞确定性断言的报告。
+     用例的 judge 描述打分，输出 PASS/FAIL/ERROR + 理由。judge 异常使必需评测为 ERROR。
 
 用法（用 ai-worker 的 venv，里面已有 httpx/pyyaml）：
 
@@ -122,8 +122,8 @@ def check_assertions(expect: dict, reply: str) -> list[str]:
     return failures
 
 
-def judge_reply(key: str, expectation: str, transcript: str, reply: str) -> tuple[bool, str]:
-    """LLM-as-judge：判定"动作选对没有"。返回 (pass, 理由)。"""
+def judge_reply(key: str, expectation: str, transcript: str, reply: str) -> dict:
+    """返回显式三态结果；只有结构有效的布尔判定可以成为 PASS/FAIL。"""
     prompt = f"""你是心理咨询对话质量的评审。对照期望行为，评判下面这条 AI 回复是否合格。
 
 【期望行为】{expectation}
@@ -138,36 +138,71 @@ def judge_reply(key: str, expectation: str, transcript: str, reply: str) -> tupl
 不该提问时是否提问），不评判文笔与细节取舍。输出 JSON：{{"pass": true/false, "reason": "一句话理由"}}。
 只输出 JSON。"""
 
-    response = httpx.post(
-        os.environ.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com").rstrip("/") + "/chat/completions",
-        headers={"Authorization": f"Bearer {key}"},
-        json={
-            "model": os.environ.get("EVAL_JUDGE_MODEL") or os.environ.get("DEEPSEEK_CHAT_MODEL", "deepseek-v4-flash"),
-            "messages": [{"role": "user", "content": prompt}],
-            "temperature": 0,
-            "response_format": {"type": "json_object"},
-        },
-        timeout=45,
-    )
-    response.raise_for_status()
-    content = response.json()["choices"][0]["message"]["content"]
-    # judge 偶发输出非法 JSON（截断/包裹 markdown 代码块）：剥围栏后仍失败则重试一次，
-    # 再失败就放弃 judge（确定性断言不受影响），而不是把整条用例打成 ERROR——
-    # judge 是增强信号，不该有把合格回复误报为执行异常的权力。
-    verdict = None
-    for attempt in range(2):
-        try:
-            cleaned = content.strip()
-            if cleaned.startswith("```"):
-                cleaned = cleaned.strip("`").lstrip("json").strip()
-            verdict = json.loads(cleaned)
-            break
-        except json.JSONDecodeError:
-            if attempt == 1:
-                return True, "judge 输出无法解析，已跳过（仅确定性断言生效）"
-    if type(verdict.get("pass")) is not bool or not isinstance(verdict.get("reason"), str):
-        raise ValueError("Judge must return a boolean pass and a string reason")
-    return verdict["pass"], verdict["reason"]
+    try:
+        response = httpx.post(
+            os.environ.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com").rstrip("/") + "/chat/completions",
+            headers={"Authorization": f"Bearer {key}"},
+            json={
+                "model": os.environ.get("EVAL_JUDGE_MODEL") or os.environ.get("DEEPSEEK_CHAT_MODEL", "deepseek-v4-flash"),
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0,
+                "response_format": {"type": "json_object"},
+            },
+            timeout=45,
+        )
+        response.raise_for_status()
+        content = response.json()["choices"][0]["message"]["content"]
+        if not isinstance(content, str) or not content.strip():
+            raise ValueError("Judge content must be a nonempty string")
+        cleaned = content.strip()
+        fenced = re.fullmatch(r"```(?:json)?\s*\n?(.*?)\n?```", cleaned, re.DOTALL)
+        if fenced:
+            cleaned = fenced.group(1).strip()
+
+        def reject_constant(value: str):
+            raise ValueError(f"Invalid JSON constant: {value}")
+
+        verdict = json.loads(cleaned, parse_constant=reject_constant)
+        if not isinstance(verdict, dict):
+            raise ValueError("Judge verdict must be an object")
+        if type(verdict.get("pass")) is not bool or not isinstance(verdict.get("reason"), str) or not verdict["reason"].strip():
+            raise ValueError("Judge must return a boolean pass and a nonempty string reason")
+        return {"status": "PASS" if verdict["pass"] else "FAIL", "pass": verdict["pass"], "reason": verdict["reason"]}
+    except Exception as error:
+        # 协议/网络错误没有得到有效判定，不能视为通过或普通行为不合格。
+        return {"status": "ERROR", "pass": None, "reason": f"Judge 执行异常：{type(error).__name__}"}
+
+
+def case_status(result: dict) -> str:
+    """统一报告和退出码口径，同时兼容已有 pass/reason 判定字段。"""
+    statuses = []
+    for judgement in result["judgements"]:
+        status = judgement.get("status")
+        if status is None and type(judgement.get("pass")) is bool:
+            status = "PASS" if judgement["pass"] else "FAIL"
+        if status not in {"PASS", "FAIL"} or judgement.get("pass") is not (status == "PASS"):
+            return "ERROR"
+        statuses.append(status)
+    if result.get("error") or (result.get("judge_required") and not statuses):
+        return "ERROR"
+    if result["failures"] or "FAIL" in statuses:
+        return "FAIL"
+    return "PASS"
+
+
+def display_verdict(result: dict) -> str:
+    status = case_status(result)
+    return "PASS deterministic / SKIP judge" if status == "PASS" and not result["judgements"] else status
+
+
+def overall_status(results: list[dict], judge_enabled: bool) -> str:
+    """报告和 CLI 共用总体结果；执行异常优先于普通不通过。"""
+    statuses = [case_status(result) for result in results]
+    if "ERROR" in statuses:
+        return "ERROR"
+    if "FAIL" in statuses:
+        return "FAIL"
+    return "PASS" if judge_enabled and results else "SKIP"
 
 
 def run_case(client: httpx.Client, base_url: str, case: dict, args) -> dict:
@@ -180,7 +215,8 @@ def run_case(client: httpx.Client, base_url: str, case: dict, args) -> dict:
     conversation.raise_for_status()
     chat_id = conversation.json()["id"]
 
-    result = {"id": case["id"], "requested_mode": mode, "turn_metadata": [], "replies": [], "failures": [], "judgements": []}
+    result = {"id": case["id"], "requested_mode": mode, "turn_metadata": [], "replies": [], "failures": [], "judgements": [],
+              "judge_required": bool(args.judge and expect.get("judge"))}
     try:
         for index, turn in enumerate(case["turns"], start=1):
             metadata = {}
@@ -200,11 +236,14 @@ def run_case(client: httpx.Client, base_url: str, case: dict, args) -> dict:
                 transcript_lines.append(f"用户：{turn}")
                 if turn_index < len(result["replies"]):
                     transcript_lines.append(f"AI：{result['replies'][turn_index]}")
-            passed, reason = judge_reply(
+            judgement = judge_reply(
                 args.judge_key, expect["judge"], "\n".join(transcript_lines), result["replies"][-1])
-            result["judgements"].append({"pass": passed, "reason": reason})
-            if not passed:
-                result["failures"].append(f"judge 不通过：{reason}")
+            result["judgements"].append(judgement)
+            if judgement["status"] == "ERROR":
+                result["error"] = True
+                result["failures"].append(judgement["reason"])
+            elif judgement["status"] == "FAIL":
+                result["failures"].append(f"judge 不通过：{judgement['reason']}")
     except Exception as error:
         result["error"] = True
         result["failures"].append(f"执行异常：{error}")
@@ -215,15 +254,19 @@ def run_case(client: httpx.Client, base_url: str, case: dict, args) -> dict:
             except httpx.HTTPError as error:
                 result["error"] = True
                 result["failures"].append(f"评测会话清理失败：{type(error).__name__}，请在界面清理本次评测记录")
+    result["status"] = case_status(result)
     return result
 
 
 def write_report(results: list[dict], elapsed: float, judge_enabled: bool = False) -> Path:
     report = ROOT / "report.md"
     revision = subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT, capture_output=True, text=True, check=False).stdout.strip() or "unknown"
-    lines = ["# 对话质量评测报告", "", f"- 时间：{datetime.now(timezone.utc).isoformat()}", f"- 提交：{revision}", f"- 用例数：{len(results)}，总耗时 {elapsed:.0f}s", f"- Judge：{'启用' if judge_enabled else 'SKIP（仅确定性断言，不代表完整通过）'}", f"- Judge model：{os.environ.get('EVAL_JUDGE_MODEL') or os.environ.get('DEEPSEEK_CHAT_MODEL', 'deepseek-v4-flash')}", ""]
+    statuses = [case_status(result) for result in results]
+    overall = overall_status(results, judge_enabled)
+    summary = {"status": overall, "pass_count": statuses.count("PASS"), "fail_count": statuses.count("FAIL"), "error_count": statuses.count("ERROR")}
+    lines = ["# 对话质量评测报告", "", f"- 总体结果：{overall}", f"- 时间：{datetime.now(timezone.utc).isoformat()}", f"- 提交：{revision}", f"- 用例数：{len(results)}，总耗时 {elapsed:.0f}s", f"- Judge：{'启用' if judge_enabled else 'SKIP（仅确定性断言，不代表完整通过）'}", f"- Judge model：{os.environ.get('EVAL_JUDGE_MODEL') or os.environ.get('DEEPSEEK_CHAT_MODEL', 'deepseek-v4-flash')}", ""]
     for result in results:
-        verdict = "ERROR" if result.get("error") else "FAIL" if result["failures"] else "PASS" if result["judgements"] else "PASS deterministic / SKIP judge"
+        verdict = display_verdict(result)
         lines.append(f"## {verdict} {result['id']}")
         for i, reply in enumerate(result["replies"], start=1):
             lines.append(f"- 第{i}轮回复（{len(reply)} 字，{count_questions(reply)} 问）：{reply}")
@@ -234,7 +277,7 @@ def write_report(results: list[dict], elapsed: float, judge_enabled: bool = Fals
             lines.append(f"- ❌ {failure}")
         lines.append("")
     report.write_text("\n".join(lines), encoding="utf-8")
-    (ROOT / "report.json").write_text(json.dumps({"revision": revision, "judge_enabled": judge_enabled, "results": results}, ensure_ascii=False, indent=2), encoding="utf-8")
+    (ROOT / "report.json").write_text(json.dumps({"revision": revision, "judge_enabled": judge_enabled, "summary": summary, "results": results}, ensure_ascii=False, indent=2), encoding="utf-8")
     return report
 
 
@@ -346,15 +389,17 @@ def main() -> int:
             except Exception as error:  # noqa: BLE001 —— 单用例失败不中断整场评测
                 result = {"id": case["id"], "error": True, "replies": [], "failures": [f"执行异常：{error}"],
                           "judgements": []}
-            verdict = "ERROR" if result.get("error") else "FAIL" if result["failures"] else "PASS" if result["judgements"] else "PASS deterministic / SKIP judge"
+            result["status"] = case_status(result)
+            verdict = display_verdict(result)
             print(f"  {verdict}  {('; '.join(result['failures']) or '全部断言通过')[:120]}")
-            failures_total += bool(result["failures"])
+            failures_total += result["status"] != "PASS"
             results.append(result)
 
     elapsed = time.perf_counter() - started
     report = write_report(results, elapsed, args.judge)
-    print(f"\n{len(results) - failures_total}/{len(results)} 通过，报告：{report}")
-    return 1 if failures_total else 0
+    overall = overall_status(results, args.judge)
+    print(f"\n总体结果：{overall}；{len(results) - failures_total}/{len(results)} 通过，报告：{report}")
+    return 1 if failures_total or overall in {"ERROR", "FAIL"} else 0
 
 
 if __name__ == "__main__":

@@ -19,6 +19,7 @@ import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 /**
@@ -146,15 +147,24 @@ class UserRepositoryTest {
     }
 
     @Test
-    void adoptOrphanConversationsBindsOwnerAndFiltersNullOwner() {
-        when(jdbcTemplate.update(
-                argThat((String sql) -> sql != null
-                        && sql.contains("UPDATE psych_conversation SET owner_id = ?")
-                        && sql.contains("WHERE owner_id IS NULL")),
-                eq(9L)))
-                .thenReturn(3);
+    void countOrphanConversationsReadsOnlyNullOwnerAggregate() {
+        String sql = "SELECT COUNT(*) FROM psych_conversation WHERE owner_id IS NULL";
+        when(jdbcTemplate.queryForObject(sql, Long.class)).thenReturn(3_000_000_000L);
 
-        assertEquals(3, repository.adoptOrphanConversations(9L));
+        assertEquals(3_000_000_000L, repository.countOrphanConversations());
+        verify(jdbcTemplate).queryForObject(sql, Long.class);
+        // 限定 COUNT 与 NULL 条件：不读取正文/标题/用户名，不触发任何更新或有主数据查询。
+        verifyNoMoreInteractions(jdbcTemplate);
+    }
+
+    @Test
+    void countOrphanConversationsReturnsZeroWhenNoOrphansExist() {
+        String sql = "SELECT COUNT(*) FROM psych_conversation WHERE owner_id IS NULL";
+        when(jdbcTemplate.queryForObject(sql, Long.class)).thenReturn(0L);
+
+        assertEquals(0L, repository.countOrphanConversations());
+        verify(jdbcTemplate).queryForObject(sql, Long.class);
+        verifyNoMoreInteractions(jdbcTemplate);
     }
 
     @Test

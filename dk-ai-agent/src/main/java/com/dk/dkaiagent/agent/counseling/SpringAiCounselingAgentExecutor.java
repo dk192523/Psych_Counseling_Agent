@@ -10,6 +10,8 @@ import com.dk.dkaiagent.memory.SafetyTerms;
 import com.dk.dkaiagent.orchestration.AgentRequestContext;
 import com.dk.dkaiagent.orchestration.ExecutionContextScope;
 import com.dk.dkaiagent.rag.KnowledgeIntentRouter;
+import com.dk.dkaiagent.rag.KnowledgeAdmissionPolicy;
+import jakarta.annotation.Resource;
 import com.dk.dkaiagent.rag.TranscriptSearchService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
@@ -99,6 +101,9 @@ public class SpringAiCounselingAgentExecutor implements CounselingAgentExecutor 
             selectedIds 最多选择给定上限内的候选编号；没有可靠候选时返回空列表。evidenceGaps 简短写明仍缺什么证据，不输出思维链。
             """;
 
+    @Resource
+    private KnowledgeAdmissionPolicy admissionPolicy = new KnowledgeAdmissionPolicy();
+
     private final CounselingApp counselingApp;
     private final ConversationHistoryService historyService;
     private final TranscriptSearchService transcriptSearchService;
@@ -144,11 +149,19 @@ public class SpringAiCounselingAgentExecutor implements CounselingAgentExecutor 
                     chatId, Duration.ofSeconds(properties.getStepTimeoutSeconds() * 3L));
             // 归档由 CounselingTurnPipeline 收口完成，此处不再落库，降级路径因此只需 Prepared 变体。
 
+            Optional<String> insufficient = admissionPolicy.insufficientAnswer(message);
+            if (insufficient.isPresent() && !requiresImmediateSafetyResponse(message)) {
+                return mapAnswer(Flux.just(insufficient.get()), "deep", false);
+            }
             if (!properties.isEnabled()) {
                 return fallbackToStandard(ownerId, message, chatId, "fallback", STANDARD_PATH_NOTICE);
             }
             if (requiresImmediateSafetyResponse(message)) {
                 return fallbackToStandard(ownerId, message, chatId, "safety", "这段话可能涉及现实安全，我先优先回应你…");
+            }
+
+            if (admissionPolicy.filterExpression(KnowledgeIntentRouter.route(message)).isEmpty()) {
+                return fallbackToStandard(ownerId, message, chatId, "fallback", "这轮按你说的内容来回应…");
             }
 
             AtomicReference<DeepContext> deepContext = new AtomicReference<>();
@@ -346,7 +359,7 @@ public class SpringAiCounselingAgentExecutor implements CounselingAgentExecutor 
 
     private List<Candidate> retrieveCandidates(RetrievalPlan plan, String originalMessage) {
         KnowledgeIntentRouter.Route route = KnowledgeIntentRouter.route(originalMessage);
-        if (!plan.shouldRetrieve() || !route.shouldRetrieve()) {
+        if (!plan.shouldRetrieve() || admissionPolicy.filterExpression(route).isEmpty()) {
             return List.of();
         }
 
@@ -385,6 +398,7 @@ public class SpringAiCounselingAgentExecutor implements CounselingAgentExecutor 
     }
 
     private List<Document> retrieveQuery(String query, KnowledgeIntentRouter.Route route) {
+        if (admissionPolicy.filterExpression(route).isEmpty()) return List.of();
         boolean acquired = false;
         try {
             acquired = vectorBulkhead.tryAcquire(
@@ -397,9 +411,9 @@ public class SpringAiCounselingAgentExecutor implements CounselingAgentExecutor 
                     .query(query)
                     .topK(properties.getCandidateTopK())
                     .similarityThreshold(properties.getSimilarityThreshold())
-                    .filterExpression(route.filterExpression())
+                    .filterExpression(admissionPolicy.filterExpression(route).orElseThrow())
                     .build();
-            List<Document> hits = vectorStore.similaritySearch(request);
+            List<Document> hits = admissionPolicy.search(vectorStore, request, route);
             return hits == null ? List.of() : List.copyOf(hits);
         } catch (InterruptedException error) {
             Thread.currentThread().interrupt();
@@ -485,8 +499,7 @@ public class SpringAiCounselingAgentExecutor implements CounselingAgentExecutor 
             }
         }
 
-        List<TranscriptSearchService.TranscriptSource> sources = retrieveTranscripts(
-                selected, plan.focus() + " " + message);
+        List<TranscriptSearchService.TranscriptSource> sources = List.of();
         List<String> gaps = normalizeTextList(decision.evidenceGaps(), 5, 120);
         return new DeepContext(
                 buildContext(plan, selected, sources, gaps, episodes),
@@ -519,7 +532,7 @@ public class SpringAiCounselingAgentExecutor implements CounselingAgentExecutor 
                 workerCandidates,
                 new AiWorkerContracts.RefineLimits(
                         properties.getEvidenceLimit(),
-                        properties.getTranscriptSnippetsPerCase(),
+                        0,
                         420)
         );
         Optional<AiWorkerContracts.RefineResponse> response = aiWorkerClient.refine(request);
@@ -575,26 +588,9 @@ public class SpringAiCounselingAgentExecutor implements CounselingAgentExecutor 
             }
             List<AiWorkerContracts.EvidenceSnippet> snippets = item.snippets() == null
                     ? List.of() : item.snippets();
-            if ((!isCase(candidate) && !snippets.isEmpty())
-                    || snippets.size() > properties.getTranscriptSnippetsPerCase()) {
-                return Optional.empty();
-            }
+            // The manifest schema does not admit raw transcripts. Reject a worker's raw excerpts.
+            if (!snippets.isEmpty()) return Optional.empty();
             selected.add(candidate);
-            if (!snippets.isEmpty()) {
-                List<TranscriptSearchService.TranscriptSnippet> verifiedSnippets = snippets.stream()
-                        .map(snippet -> new TranscriptSearchService.TranscriptSnippet(
-                                truncate(snippet.start(), 16),
-                                truncate(snippet.end(), 16),
-                                truncate(snippet.text(), 420),
-                                safeSourceUrl(snippet.sourceUrl()),
-                                (int) Math.round(snippet.score())))
-                        .toList();
-                sources.add(new TranscriptSearchService.TranscriptSource(
-                        item.slug(),
-                        Objects.toString(candidate.document().getMetadata().get("title"), item.slug()),
-                        "",
-                        verifiedSnippets));
-            }
         }
         List<String> gaps = normalizeTextList(response.evidenceGaps(), 5, 120);
         return Optional.of(new DeepContext(
@@ -645,19 +641,6 @@ public class SpringAiCounselingAgentExecutor implements CounselingAgentExecutor 
         return String.join("，", parts) + "，正在组织回应…";
     }
 
-    private List<TranscriptSearchService.TranscriptSource> retrieveTranscripts(
-            List<Candidate> selected, String query) {
-        AgentRequestContext context = ExecutionContextScope.requireCurrent();
-        List<Future<Optional<TranscriptSearchService.TranscriptSource>>> searches = selected.stream()
-                .map(candidate -> agentExecutor.submit(
-                        () -> ExecutionContextScope.call(
-                                context, () -> retrieveTranscript(candidate, query))))
-                .toList();
-        return awaitParallel(searches, "transcript retrieval").stream()
-                .flatMap(Optional::stream)
-                .toList();
-    }
-
     private <T> List<T> awaitParallel(List<? extends Future<T>> futures, String operation) {
         long configuredBudget = TimeUnit.SECONDS.toNanos(properties.getStepTimeoutSeconds());
         long cancellationMargin = Math.min(
@@ -686,40 +669,6 @@ public class SpringAiCounselingAgentExecutor implements CounselingAgentExecutor 
             futures.stream()
                     .filter(future -> !future.isDone())
                     .forEach(future -> future.cancel(true));
-        }
-    }
-
-    private Optional<TranscriptSearchService.TranscriptSource> retrieveTranscript(
-            Candidate candidate, String query) {
-        if (!isCase(candidate)) {
-            return Optional.empty();
-        }
-        String slug = extractSlug(candidate.document());
-        if (slug == null) {
-            return Optional.empty();
-        }
-        boolean acquired = false;
-        try {
-            acquired = transcriptBulkhead.tryAcquire(
-                    Math.max(1, ExecutionContextScope.requireCurrent().remaining().toMillis()),
-                    TimeUnit.MILLISECONDS);
-            if (!acquired) {
-                return Optional.empty();
-            }
-            return transcriptSearchService.search(
-                            slug, query, properties.getTranscriptSnippetsPerCase())
-                    .filter(source -> !source.snippets().isEmpty());
-        } catch (InterruptedException error) {
-            Thread.currentThread().interrupt();
-            return Optional.empty();
-        } catch (RuntimeException error) {
-            log.debug("Transcript verification skipped for slug={}, errorType={}",
-                    slug, error.getClass().getSimpleName());
-            return Optional.empty();
-        } finally {
-            if (acquired) {
-                transcriptBulkhead.release();
-            }
         }
     }
 

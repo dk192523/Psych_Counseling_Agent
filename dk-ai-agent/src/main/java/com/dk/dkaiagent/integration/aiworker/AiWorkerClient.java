@@ -4,6 +4,7 @@ import com.dk.dkaiagent.orchestration.ExecutionContextScope;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.core.env.Environment;
 import org.springframework.stereotype.Component;
 
 import java.net.URI;
@@ -15,6 +16,7 @@ import java.util.Optional;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.BooleanSupplier;
 
 @Component
 @Slf4j
@@ -24,27 +26,40 @@ public class AiWorkerClient {
     private static final String REFINE_PATH = "/internal/v1/evidence/refine";
     private static final String CONSOLIDATE_PATH = "/internal/v1/memory/consolidate";
     private static final String RECALL_PATH = "/internal/v1/memory/recall";
+    private static final String DESKTOP_MANAGED_PROPERTY = "app.ai-worker.desktop-managed";
+    private static final String PROCESS_ALIVE_PROPERTY = "app.ai-worker.process-alive";
 
     private final AiWorkerProperties properties;
     private final ObjectMapper objectMapper;
     private final HttpClient httpClient;
+    private final Environment environment;
     private final Semaphore bulkhead;
     private final AtomicInteger consecutiveFailures = new AtomicInteger();
     private final AtomicLong circuitOpenUntilMillis = new AtomicLong();
 
-    @Autowired
     public AiWorkerClient(AiWorkerProperties properties, ObjectMapper objectMapper) {
+        this(properties, objectMapper, (Environment) null);
+    }
+
+    @Autowired
+    public AiWorkerClient(AiWorkerProperties properties, ObjectMapper objectMapper, Environment environment) {
         this(properties, objectMapper, HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(properties.getConnectTimeoutSeconds()))
                 .followRedirects(HttpClient.Redirect.NEVER)
                 .version(HttpClient.Version.HTTP_1_1)
-                .build());
+                .build(), environment);
     }
 
     AiWorkerClient(AiWorkerProperties properties, ObjectMapper objectMapper, HttpClient httpClient) {
+        this(properties, objectMapper, httpClient, null);
+    }
+
+    AiWorkerClient(AiWorkerProperties properties, ObjectMapper objectMapper,
+                   HttpClient httpClient, Environment environment) {
         this.properties = properties;
         this.objectMapper = objectMapper;
         this.httpClient = httpClient;
+        this.environment = environment;
         this.bulkhead = new Semaphore(properties.getMaxConcurrency(), true);
         if (properties.isEnabled() && properties.getSharedSecret().isBlank()) {
             // Worker 已改为 fail-closed：空密钥不再是"调用免鉴权通过"，而是每次调用被 401 挡回，
@@ -126,6 +141,9 @@ public class AiWorkerClient {
             if (timeout.isZero()) {
                 return Optional.empty();
             }
+            if (!desktopWorkerAvailable()) {
+                return Optional.empty();
+            }
             byte[] json = objectMapper.writeValueAsBytes(payload);
             HttpRequest.Builder builder = HttpRequest.newBuilder(resolve(path))
                     .timeout(timeout)
@@ -137,6 +155,10 @@ public class AiWorkerClient {
                 builder.header("X-AI-Worker-Token", properties.getSharedSecret());
             }
 
+            // 序列化期间 Worker 也可能退出；发送前再次检查，避免正文进入复用端口的进程。
+            if (!desktopWorkerAvailable()) {
+                return Optional.empty();
+            }
             HttpResponse<byte[]> response = httpClient.send(
                     builder.build(), HttpResponse.BodyHandlers.ofByteArray());
             if (response.statusCode() < 200 || response.statusCode() >= 300) {
@@ -155,6 +177,26 @@ public class AiWorkerClient {
         } finally {
             bulkhead.release();
         }
+    }
+
+    private boolean desktopWorkerAvailable() {
+        try {
+            if (environment == null
+                    || !environment.getProperty(DESKTOP_MANAGED_PROPERTY, Boolean.class, false)) {
+                return true;
+            }
+            // 读取原始对象，不能把配置字符串转换成进程存活判据。
+            Object gate = environment.getProperty(PROCESS_ALIVE_PROPERTY, Object.class);
+            if (gate instanceof BooleanSupplier processAlive && processAlive.getAsBoolean()) {
+                return true;
+            }
+        } catch (RuntimeException error) {
+            // 不记录异常内容、请求标识或正文：门禁实现的异常也必须 fail-closed。
+            log.warn("Desktop AI worker process gate failed; using local agent fallback");
+            return false;
+        }
+        log.warn("Desktop AI worker process is unavailable; using local agent fallback");
+        return false;
     }
 
     private Duration effectiveTimeout() {

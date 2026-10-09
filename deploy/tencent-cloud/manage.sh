@@ -7,7 +7,6 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 COMPOSE_DIR="$ROOT_DIR/dk-ai-agent"
 COMPOSE_FILE="$COMPOSE_DIR/docker-compose.yml"
 ENV_FILE="$COMPOSE_DIR/.env"
-RAW_DIR="$ROOT_DIR/counseling-kb/raw"
 
 FRONTEND_PORT=""
 FRONTEND_BIND_ADDRESS=""
@@ -31,7 +30,7 @@ usage() {
 Usage: ./manage.sh <command> [service|backup-path]
 
 Commands:
-  check             Validate Docker, .env, corpus, disk and port 3004
+  check             Validate Docker, .env, Compose, disk and port 3004
   deploy            Build images, start all services and wait for health
   start             Start existing images without rebuilding
   restart           Restart running services and wait for health
@@ -40,6 +39,7 @@ Commands:
   logs [service]    Follow the last 200 log lines (backend/frontend/ai-worker/postgres)
   backup            Stream a PostgreSQL dump into an age-encrypted backup
   verify-backup <path> Check an encrypted backup without restoring a database
+  migration-preflight Read-only checks of the running PostgreSQL database and named volume
 
 This script never deletes Docker volumes and never kills a process occupying a port.
 EOF
@@ -121,14 +121,6 @@ validate_env() {
   chmod 600 "$ENV_FILE"
 }
 
-check_corpus() {
-  [[ -d "$RAW_DIR" ]] || die "逐字稿目录不存在：$RAW_DIR"
-  local count
-  count="$(find "$RAW_DIR" -type f | wc -l | tr -d ' ')"
-  (( count > 0 )) || die "逐字稿目录为空：$RAW_DIR"
-  log "逐字稿文件：$count"
-}
-
 own_frontend_uses_port() {
   local container_id published
   container_id="$(compose ps -q frontend 2>/dev/null || true)"
@@ -181,7 +173,6 @@ cmd_check() {
   check_docker
   require_command curl
   validate_env
-  check_corpus
   check_disk
   compose config --quiet
   check_port
@@ -487,6 +478,11 @@ case "$command_name" in
   logs) cmd_logs "$@" ;;
   backup) cmd_backup ;;
   verify-backup) cmd_verify_backup "$@" ;;
+  migration-preflight)
+    (( $# == 1 )) || die "用法：./manage.sh migration-preflight"
+    require_command python3
+    exec python3 "$ROOT_DIR/migration-preflight.py"
+    ;;
   -h|--help|help|"") usage ;;
   *) usage; die "未知命令：$command_name" ;;
 esac

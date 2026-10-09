@@ -11,6 +11,23 @@ class DeepSeekWebSearchToolTest {
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Test
+    void unconfiguredDesktopSearchNeverTouchesHttpClient() {
+        var tool = new DeepSeekWebSearchTool("sk-desktop-unconfigured", "https://api.deepseek.com",
+                "deepseek-chat", "web_search_20250305");
+        var http = org.mockito.Mockito.mock(org.springframework.web.client.RestClient.class);
+        org.springframework.test.util.ReflectionTestUtils.setField(tool, "restClient", http);
+        var environment = new org.springframework.mock.env.MockEnvironment();
+        environment.setActiveProfiles("local-desktop");
+        org.springframework.test.util.ReflectionTestUtils.invokeMethod(tool, "configureDesktopLlm",
+                new com.dk.dkaiagent.app.DesktopLlmAvailability(environment));
+
+        org.junit.jupiter.api.Assertions.assertEquals(
+                com.dk.dkaiagent.app.DesktopLlmAvailability.UNCONFIGURED_MESSAGE,
+                tool.searchWeb("今天有哪些心理健康政策更新？"));
+        org.mockito.Mockito.verifyNoInteractions(http);
+    }
+
+    @Test
     void formatsAnswerAndDeduplicatedSources() throws Exception {
         JsonNode response = objectMapper.readTree("""
                 {

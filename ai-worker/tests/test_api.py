@@ -1,4 +1,5 @@
 import json
+import os
 
 import pytest
 from fastapi.testclient import TestClient
@@ -14,6 +15,76 @@ def _settings(tmp_path):
         AI_WORKER_SHARED_SECRET="test-secret",
         COUNSELING_TRANSCRIPT_DIRECTORY=tmp_path,
     )
+
+
+def test_ready_reports_current_process_pid(tmp_path):
+    with TestClient(create_app(_settings(tmp_path))) as client:
+        response = client.get("/internal/v1/health/ready")
+
+    assert response.status_code == 200
+    assert response.json()["pid"] == os.getpid()
+
+
+def test_shutdown_requires_auth_and_desktop_callback(tmp_path):
+    with TestClient(create_app(_settings(tmp_path)), client=("127.0.0.1", 12345)) as client:
+        unauthorized = client.post("/internal/v1/admin/shutdown")
+        unavailable = client.post(
+            "/internal/v1/admin/shutdown", headers={"X-AI-Worker-Token": "test-secret"}
+        )
+
+    assert unauthorized.status_code == 401
+    assert unavailable.status_code == 404
+
+
+def test_local_shutdown_invokes_callback_and_lifespan_cleanup(tmp_path, monkeypatch):
+    events = []
+
+    async def close_service(service):
+        events.append("closed")
+
+    monkeypatch.setattr("dk_ai_worker.main.IntelligenceService.close", close_service)
+    app = create_app(_settings(tmp_path), request_shutdown=lambda: events.append("shutdown"))
+    with TestClient(app, client=("127.0.0.1", 12345)) as client:
+        response = client.post(
+            "/internal/v1/admin/shutdown", headers={"X-AI-Worker-Token": "test-secret"}
+        )
+        assert response.status_code == 202
+        assert response.json() == {"status": "shuttingDown"}
+        assert events == ["shutdown"]
+
+    assert events == ["shutdown", "closed"]
+
+
+def test_shutdown_rejects_remote_clients_and_wrong_token(tmp_path):
+    events = []
+    app = create_app(_settings(tmp_path), request_shutdown=lambda: events.append("shutdown"))
+    with TestClient(app, client=("192.0.2.1", 12345)) as client:
+        wrong_token = client.post(
+            "/internal/v1/admin/shutdown", headers={"X-AI-Worker-Token": "wrong-secret"}
+        )
+        remote = client.post(
+            "/internal/v1/admin/shutdown", headers={"X-AI-Worker-Token": "test-secret"}
+        )
+
+    assert wrong_token.status_code == 401
+    assert remote.status_code == 403
+    assert events == []
+
+
+def test_shutdown_cannot_use_development_auth_waiver(tmp_path):
+    settings = Settings(
+        DEEPSEEK_API_KEY="",
+        AI_WORKER_SHARED_SECRET="",
+        AI_WORKER_ALLOW_UNAUTHENTICATED=True,
+        COUNSELING_TRANSCRIPT_DIRECTORY=tmp_path,
+    )
+    events = []
+    app = create_app(settings, request_shutdown=lambda: events.append("shutdown"))
+    with TestClient(app, client=("127.0.0.1", 12345)) as client:
+        response = client.post("/internal/v1/admin/shutdown")
+
+    assert response.status_code == 401
+    assert events == []
 
 
 def _plan_payload():

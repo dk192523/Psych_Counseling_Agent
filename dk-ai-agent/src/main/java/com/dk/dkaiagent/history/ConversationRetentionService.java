@@ -1,5 +1,7 @@
 package com.dk.dkaiagent.history;
 
+import com.dk.dkaiagent.config.JdbcDialect;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.DependsOn;
@@ -24,12 +26,20 @@ import java.util.UUID;
 public class ConversationRetentionService {
     private static final Logger log = LoggerFactory.getLogger(ConversationRetentionService.class);
     private final JdbcTemplate jdbc;
+    private final JdbcDialect dialect;
     private final RetentionProperties properties;
     private final TransactionTemplate transaction;
 
     public ConversationRetentionService(JdbcTemplate jdbc, RetentionProperties properties,
                                         PlatformTransactionManager transactionManager) {
+        this(jdbc, properties, transactionManager, JdbcDialect.POSTGRESQL);
+    }
+
+    @Autowired
+    public ConversationRetentionService(JdbcTemplate jdbc, RetentionProperties properties,
+                                        PlatformTransactionManager transactionManager, JdbcDialect dialect) {
         this.jdbc = jdbc;
+        this.dialect = dialect;
         this.properties = properties;
         this.transaction = new TransactionTemplate(transactionManager);
         // A fresh transaction per candidate bounds locks and preserves already committed progress.
@@ -63,7 +73,7 @@ public class ConversationRetentionService {
         }
         // Use database time and bound parameters, never concatenate configured SQL intervals.
         Timestamp cutoff = jdbc.queryForObject(
-                "SELECT CURRENT_TIMESTAMP - CAST(? AS DOUBLE PRECISION) * INTERVAL '1 day'",
+                "SELECT " + dialect.agoDays(),
                 Timestamp.class, days);
         if (cutoff == null) throw new IllegalStateException("Retention cutoff unavailable");
         List<String> candidates = jdbc.query("""
@@ -120,10 +130,7 @@ public class ConversationRetentionService {
                 SELECT EXISTS (SELECT 1 FROM psych_chat_turn WHERE conversation_id = ? AND status = 'RUNNING')
                 """, Boolean.class, chatId);
         if (!Boolean.FALSE.equals(running)) return false;
-        jdbc.update("""
-                INSERT INTO psych_conversation_tombstone (conversation_id, owner_id)
-                VALUES (?, ?) ON CONFLICT (conversation_id) DO NOTHING
-                """, chatId, parent.ownerId());
+        jdbc.update(dialect.tombstoneInsert(), chatId, parent.ownerId());
         // FK cascades messages, digest and replay turns; tombstones intentionally have no parent FK.
         int removed = jdbc.update("DELETE FROM psych_conversation WHERE id = ?", chatId);
         if (removed != 1) throw new IllegalStateException("Retention deletion did not remove its locked parent");

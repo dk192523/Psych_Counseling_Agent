@@ -2,6 +2,7 @@
   <div class="psych-master-container">
     <header class="header">
       <h1 class="title" aria-label="AI 心理咨询师">
+        <BrandLogo class="header-brand-logo" :size="28" alt="" />
         <span class="title-full">AI 心理咨询师</span>
         <span class="title-compact" aria-hidden="true">心理咨询</span>
       </h1>
@@ -25,7 +26,7 @@
           <router-link v-if="isAdmin" class="account-link admin-entry desktop-account" to="/admin" title="进入管理后台">
             管理后台
           </router-link>
-          <button type="button" class="account-link desktop-account" title="把当前会话导出为 Markdown 文件" @click="exportConversation">
+          <button type="button" class="account-link desktop-account" title="把当前会话导出为 Markdown 文件" :disabled="exporting" @click="exportConversation">
             导出
           </button>
           <button type="button" class="account-link desktop-account" title="修改当前账号密码" @click="openPasswordModal">
@@ -36,7 +37,7 @@
             <div class="mobile-account-options">
               <span class="mobile-account-name">{{ me?.username }}</span>
               <router-link v-if="isAdmin" class="account-link" to="/admin">管理后台</router-link>
-              <button type="button" class="account-link" @click="exportConversation">导出当前会话</button>
+              <button type="button" class="account-link" :disabled="exporting" @click="exportConversation">导出当前会话</button>
               <button type="button" class="account-link" @click="openPasswordModal">修改密码</button>
             </div>
           </details>
@@ -62,6 +63,7 @@
       />
 
       <main class="chat-area">
+        <p v-if="exportNotice" class="export-notice" :role="exportFailed ? 'alert' : 'status'">{{ exportNotice }}</p>
         <section class="mode-toolbar" aria-label="回答模式">
           <div class="mode-switch" role="radiogroup" aria-label="选择回答模式">
             <button
@@ -103,6 +105,23 @@
     <div class="footer-container">
       <AppFooter />
     </div>
+
+    <transition name="modal-fade">
+      <div v-if="pendingDeletion" class="modal-overlay" @click.self="closeDeleteModal" @keydown.esc.prevent="closeDeleteModal" @keydown.tab="trapDeleteFocus">
+        <div ref="deleteDialog" class="modal-card" role="dialog" aria-modal="true" aria-labelledby="delete-dialog-title" aria-describedby="delete-dialog-description" tabindex="-1">
+          <header class="modal-head">
+            <h2 id="delete-dialog-title">删除会话</h2>
+            <button type="button" class="modal-close" aria-label="关闭删除确认" :disabled="deletingConversation" @click="closeDeleteModal">×</button>
+          </header>
+          <p id="delete-dialog-description" class="modal-text">确认删除“{{ pendingDeletion.title }}”吗？删除后无法恢复。</p>
+          <p v-if="deleteError" class="modal-error" role="alert">{{ deleteError }}</p>
+          <footer class="modal-foot">
+            <button type="button" class="ghost-button delete-cancel" :disabled="deletingConversation" @click="closeDeleteModal">取消</button>
+            <button type="button" class="solid-button delete-confirm" :disabled="deletingConversation" @click="submitDeleteConversation">{{ deletingConversation ? '删除中…' : '确认删除' }}</button>
+          </footer>
+        </div>
+      </div>
+    </transition>
 
     <transition name="modal-fade">
       <div v-if="passwordModalOpen" class="modal-overlay" @click.self="closePasswordModal">
@@ -170,13 +189,14 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useHead } from '@unhead/vue'
 import ChatRoom from '../components/ChatRoom.vue'
 import ConversationSidebar from '../components/ConversationSidebar.vue'
 import MemoryDigestCard from '../components/MemoryDigestCard.vue'
 import AppFooter from '../components/AppFooter.vue'
+import BrandLogo from '../components/BrandLogo.vue'
 import {
   chatWithPsychApp,
   changeMyPassword,
@@ -190,6 +210,14 @@ import { useAuth } from '../stores/auth'
 const router = useRouter()
 const { me, isAdmin, logout, clearAuth, setAuthNotice } = useAuth()
 const loggingOut = ref(false)
+const exporting = ref(false)
+const exportNotice = ref('')
+const exportFailed = ref(false)
+const pendingDeletion = ref(null)
+const deletingConversation = ref(false)
+const deleteError = ref('')
+const deleteDialog = ref(null)
+let deleteReturnFocus = null
 
 const avatarChar = computed(() => (me.value?.username || '?').charAt(0).toUpperCase())
 
@@ -362,6 +390,7 @@ const invalidateConversationList = () => {
 
 const suspendConversationReads = () => {
   readsEnabled = false
+  pendingDeletion.value = null
   conversationVersion += 1
   invalidateConversationList()
   cancelMemoryRefresh()
@@ -369,6 +398,7 @@ const suspendConversationReads = () => {
 }
 
 const isBusy = computed(() => (
+  deletingConversation.value ||
   historyLoading.value ||
   conversationLoading.value ||
   connectionStatus.value === 'connecting'
@@ -630,9 +660,42 @@ const createNewConversation = async () => {
 }
 
 const confirmDeleteConversation = async (conversation) => {
-  if (!readsEnabled) return
-  const title = conversation.title || '这段会话'
-  if (!window.confirm(`确认删除“${title}”吗？删除后无法恢复。`)) return
+  if (!readsEnabled || !conversation?.id || pendingDeletion.value || deletingConversation.value) return
+  deleteReturnFocus = document.activeElement
+  pendingDeletion.value = { id: conversation.id, title: conversation.title || '这段会话' }
+  deleteError.value = ''
+  await nextTick()
+  deleteDialog.value?.querySelector('.delete-cancel')?.focus()
+}
+
+const closeDeleteModal = () => {
+  if (deletingConversation.value) return
+  pendingDeletion.value = null
+  deleteError.value = ''
+  deleteReturnFocus?.focus?.()
+  deleteReturnFocus = null
+}
+
+const trapDeleteFocus = (event) => {
+  const buttons = Array.from(deleteDialog.value?.querySelectorAll('button:not(:disabled)') || [])
+  const first = buttons[0], last = buttons.at(-1)
+  if (!first) {
+    event.preventDefault()
+    deleteDialog.value?.focus()
+  } else if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault()
+    last.focus()
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault()
+    first.focus()
+  }
+}
+
+const submitDeleteConversation = async () => {
+  if (!readsEnabled || !pendingDeletion.value || deletingConversation.value) return
+  const conversation = pendingDeletion.value
+  deletingConversation.value = true
+  deleteError.value = ''
 
   const version = ++conversationVersion
   invalidateConversationList()
@@ -642,6 +705,9 @@ const confirmDeleteConversation = async (conversation) => {
   try {
     await deleteConversation(conversation.id)
     if (version !== conversationVersion) return
+    pendingDeletion.value = null
+    deleteReturnFocus?.focus?.()
+    deleteReturnFocus = null
     const deletedCurrent = conversation.id === chatId.value
     if (deletedCurrent) {
       stopStream()
@@ -661,8 +727,12 @@ const confirmDeleteConversation = async (conversation) => {
     }
   } catch (error) {
     console.error('删除会话失败:', error)
-    if (version === conversationVersion) historyError.value = '会话删除失败，请稍后重试。'
+    if (version === conversationVersion) {
+      historyError.value = '会话删除失败，请稍后重试。'
+      deleteError.value = historyError.value
+    }
   } finally {
+    deletingConversation.value = false
     if (version === conversationVersion) conversationLoading.value = false
   }
 }
@@ -831,9 +901,9 @@ const stopGeneration = () => {
   connectionStatus.value = 'disconnected'
 }
 
-// B3：导出当前会话为 Markdown（纯前端，不经过后端）。
-const exportConversation = () => {
-  if (messages.value.length === 0) return
+// 桌面端使用系统保存对话框；浏览器继续使用本地下载，均不向后端传输会话。
+const exportConversation = async () => {
+  if (messages.value.length === 0 || exporting.value) return
   const lines = [`# ${currentConversationTitle.value}`, '']
   const visible = messages.value.filter(m => !String(m.id || '').startsWith('welcome-'))
   for (const message of visible) {
@@ -841,13 +911,41 @@ const exportConversation = () => {
     const time = new Date(message.time).toLocaleString('zh-CN', { hour12: false })
     lines.push(`### ${who} · ${time}`, '', message.content, '')
   }
-  const blob = new Blob([lines.join('\n')], { type: 'text/markdown;charset=utf-8' })
-  const url = URL.createObjectURL(blob)
-  const anchor = document.createElement('a')
-  anchor.href = url
-  anchor.download = `${currentConversationTitle.value || '会话'}-${new Date().toISOString().slice(0, 10)}.md`
-  anchor.click()
-  URL.revokeObjectURL(url)
+  const markdown = lines.join('\n')
+  const filename = `${currentConversationTitle.value || '会话'}-${new Date().toISOString().slice(0, 10)}.md`
+  exporting.value = true
+  exportNotice.value = ''
+  exportFailed.value = false
+  try {
+    if (window.psychDesktop) {
+      const result = await window.psychDesktop.saveMarkdown(filename, markdown)
+      if (disposed) return
+      if (result === 'cancelled') exportNotice.value = '已取消导出。'
+      else if (result === 'saved') exportNotice.value = '会话已保存。'
+      else throw new Error('Desktop export failed')
+      return
+    }
+    const blob = new Blob([markdown], { type: 'text/markdown;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    try {
+      const anchor = document.createElement('a')
+      anchor.href = url
+      anchor.download = filename
+      document.body.appendChild(anchor)
+      try { anchor.click() } finally { anchor.remove() }
+      exportNotice.value = '已开始下载会话。'
+    } finally {
+      // 保留一个事件循环，让浏览器先接收下载再释放 Blob。
+      setTimeout(() => URL.revokeObjectURL(url), 0)
+    }
+  } catch {
+    if (!disposed) {
+      exportFailed.value = true
+      exportNotice.value = '会话导出失败，请检查保存位置和文件权限后重试。'
+    }
+  } finally {
+    exporting.value = false
+  }
 }
 
 const initializeConversations = async () => {
@@ -912,6 +1010,12 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+.export-notice {
+  margin: 8px 20px 0;
+  color: var(--psych-ink-secondary);
+  font-size: 13px;
+}
+
 .psych-master-container {
   display: flex;
   min-height: 100vh;
@@ -940,6 +1044,11 @@ onBeforeUnmount(() => {
 }
 
 .title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  white-space: nowrap;
   margin: 0;
   font-size: 19px;
   font-weight: 800;
@@ -1543,6 +1652,12 @@ onBeforeUnmount(() => {
 
   .title {
     font-size: 16px;
+    gap: 5px;
+  }
+
+  .header-brand-logo {
+    width: 24px;
+    height: 24px;
   }
 
   .title-full {

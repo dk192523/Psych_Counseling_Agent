@@ -102,13 +102,11 @@ services:
       APP_REGISTRATION_ENABLED: ${APP_REGISTRATION_ENABLED:-false}
       SESSION_TIMEOUT: ${SESSION_TIMEOUT:-24h}
       SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-true}
-      COUNSELING_TRANSCRIPT_DIRECTORY: /data/transcripts
       # 与 application.yml 的 ONNX_EMBEDDING_MODEL_URI 默认值保持一致（multilingual-e5-small）。
       # 曾因 compose 默认值仍是 MiniLM 而 yml 已换 e5，tokenizer(e5 词表 25 万)喂给 MiniLM
       # 模型(词表 30522)导致 Gather 越界崩溃循环——两端默认值必须同步换。
       ONNX_EMBEDDING_MODEL_URI: ${ONNX_EMBEDDING_MODEL_URI:-https://huggingface.co/intfloat/multilingual-e5-small/resolve/main/onnx/model.onnx}
     volumes:
-      - ../counseling-kb/raw:/data/transcripts:ro
       - onnx_cache:/tmp/spring-ai-onnx-generative
       - djl_cache:/home/app/.djl.ai
     expose:
@@ -140,9 +138,6 @@ services:
       # 生产编排里不放行未鉴权：worker 只 expose 不 publish，但同网段的任何容器都能直连它，
       # 而 recall 决定哪些"用户过往原话"进模型上下文。
       AI_WORKER_ALLOW_UNAUTHENTICATED: "false"
-      COUNSELING_TRANSCRIPT_DIRECTORY: /data/transcripts
-    volumes:
-      - ../counseling-kb/raw:/data/transcripts:ro
     expose:
       - "8000"
     healthcheck:

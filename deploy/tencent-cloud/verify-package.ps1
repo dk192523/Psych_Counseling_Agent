@@ -13,12 +13,19 @@ try {
             $entry.FullName.Split('/') -contains '..' -or $entries.ContainsKey($entry.FullName)) {
             throw "Unsafe or duplicate archive entry: $($entry.FullName)"
         }
+        # Check every entry before trusting its manifest, including directory entries
+        # and equivalent paths with repeated separators or '.' segments.
+        $normalizedPath = ($entry.FullName.Split('/') | Where-Object { $_ -ne '' -and $_ -ne '.' }) -join '/'
+        if ($normalizedPath -match '(?i)(^|/)counseling-kb/raw(/|$)') {
+            throw "Quarantined raw transcripts in archive: $($entry.FullName)"
+        }
         $entries[$entry.FullName] = $entry
-        if ($entry.Name -eq '.env' -or $entry.Name -match '^application-local\.ya?ml$') {
+        if ($entry.Name -eq '.env' -or $entry.Name -match '^application-local\.ya?ml$' -or
+            $entry.Name -eq 'application-local-desktop.yml') {
             throw "Private runtime configuration in archive: $($entry.FullName)"
         }
     }
-    $required = @('manage.sh', 'README_DEPLOY.md', 'nginx-site.conf.example',
+    $required = @('manage.sh', 'migration-preflight.py', 'MIGRATION_SAME_DATABASE.md', 'README_DEPLOY.md', 'nginx-site.conf.example',
         'dk-ai-agent/docker-compose.yml', 'dk-ai-agent/.env.example',
         'dk-ai-agent/.dockerignore', 'dk-ai-agent/Dockerfile',
         'dk-ai-agent/pom.xml', 'dk-ai-agent/mvnw',
@@ -40,8 +47,8 @@ try {
     # ZIPs produced by build-package.ps1 contain files without directory entries.
     # Require a real file below each exact directory prefix; an empty directory
     # or a similarly named sibling (such as src-backup/) must not satisfy this.
-    $requiredDirectories = @('dk-ai-agent/.mvn/', 'dk-ai-agent/src/',
-        'dk-ai-agent/dk-ai-agent-frontend/src/', 'ai-worker/src/', 'counseling-kb/raw/')
+    $requiredDirectories = @('dk-ai-agent/.mvn/', 'dk-ai-agent/src/main/',
+        'dk-ai-agent/dk-ai-agent-frontend/src/', 'ai-worker/src/')
     foreach ($path in $requiredDirectories) {
         $directoryPrefix = $prefix + $path
         $hasFile = $false

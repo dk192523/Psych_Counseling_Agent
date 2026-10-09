@@ -87,7 +87,8 @@ class Candidate(ContractModel):
 
 class RefineLimits(ContractModel):
     max_evidence: int = Field(ge=1, le=8)
-    snippets_per_case: int = Field(ge=1, le=3)
+    # 0 explicitly disables transcript reads; positive values request snippets.
+    snippets_per_case: int = Field(ge=0, le=3)
     snippet_max_chars: int = Field(ge=80, le=800)
 
 

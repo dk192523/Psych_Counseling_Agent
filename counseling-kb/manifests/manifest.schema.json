@@ -136,11 +136,16 @@
       },
       "then": {
         "required": [
+          "runtime_path",
           "license_evidence",
           "reviewed_by",
           "reviewed_at"
         ],
         "properties": {
+          "runtime_path": {
+            "type": "string",
+            "pattern": "^dk-ai-agent/src/main/resources/document/(?:(?:professional|policy)/)?[^/\\\\:]+\\.md$"
+          },
           "domain": {
             "enum": [
               "knowledge",
@@ -169,11 +174,6 @@
               ]
             }
           }
-        },
-        "not": {
-          "required": [
-            "runtime_path"
-          ]
         }
       }
     }

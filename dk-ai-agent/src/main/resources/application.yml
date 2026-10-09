@@ -132,6 +132,9 @@ management:
       show-details: when_authorized
 
 app:
+  system:
+    server-version: ${APP_SERVER_VERSION:dev}
+    protocol-version: ${APP_PROTOCOL_VERSION:1}
   deployment:
     # main 在 Spring 启动前校验环境变量；合并 YAML/命令行后、Bean 初始化前再次复核。
     # 仅允许单副本，禁止重叠滚动发布；instance-id 仅用于启动观测，不是分布式锁。

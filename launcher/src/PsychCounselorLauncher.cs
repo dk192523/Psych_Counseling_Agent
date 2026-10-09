@@ -2,9 +2,11 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
+using System.Drawing.Drawing2D;
 using System.IO;
 using System.Net;
 using System.Net.Sockets;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -24,7 +26,7 @@ namespace DkPsychCounselorLauncher
 
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
-            Application.Run(new LauncherForm());
+            Application.Run(new LauncherForm(HasArgument(args, "--preview-ui")));
             return 0;
         }
 
@@ -118,8 +120,17 @@ namespace DkPsychCounselorLauncher
 
         private readonly Label _statusLabel;
         private readonly RichTextBox _logBox;
-        private readonly ProgressBar _progressBar;
+        private readonly ActivityBar _progressBar;
         private readonly Button _stopButton;
+        private readonly Label _stateBadge;
+        private readonly Label _stageLabel;
+        private readonly Label _detailLabel;
+        private readonly Label _latestLogLabel;
+        private readonly Label[] _stepLabels;
+        private readonly Panel _dashboardPage;
+        private readonly Panel _logsPage;
+        private readonly DashboardButton _dashboardButton;
+        private readonly DashboardButton _logsButton;
         private readonly CancellationTokenSource _cancellation = new CancellationTokenSource();
         private readonly object _processLock = new object();
         private readonly object _logFileLock = new object();
@@ -134,6 +145,7 @@ namespace DkPsychCounselorLauncher
         private bool _allowClose;
         private int _shutdownStarted;
         private int _frontendPort = 3001;
+        private int _activeStep;
 
         private string HealthUrl
         {
@@ -145,78 +157,354 @@ namespace DkPsychCounselorLauncher
             get { return "http://127.0.0.1:" + _frontendPort + "/psych-master"; }
         }
 
-        internal LauncherForm()
+        internal LauncherForm(bool previewUi)
         {
-            _logFilePath = InitializeLogFile();
-            Text = "AI 心理咨询师 - 一键启动";
+            _logFilePath = previewUi ? null : InitializeLogFile();
+            _allowClose = previewUi;
+            Text = "AI 心理咨询师 · 本地工作台";
             StartPosition = FormStartPosition.CenterScreen;
-            ClientSize = new Size(700, 450);
-            MinimumSize = new Size(620, 390);
-            BackColor = Color.FromArgb(246, 248, 247);
+            AutoScaleDimensions = new SizeF(96F, 96F);
+            AutoScaleMode = AutoScaleMode.Dpi;
+            ClientSize = new Size(1040, 700);
+            MinimumSize = new Size(900, 620);
+            BackColor = LauncherTheme.Canvas;
+            ForeColor = LauncherTheme.Ink;
             Font = new Font("Microsoft YaHei UI", 9F, FontStyle.Regular, GraphicsUnit.Point);
+            Padding = new Padding(12);
+            DoubleBuffered = true;
 
-            Label titleLabel = new Label();
-            titleLabel.AutoSize = true;
-            titleLabel.Font = new Font(Font.FontFamily, 16F, FontStyle.Bold);
-            titleLabel.ForeColor = Color.FromArgb(31, 64, 54);
-            titleLabel.Location = new Point(22, 18);
-            titleLabel.Text = "AI 心理咨询师";
+            TableLayoutPanel shell = NewTable(2, 1);
+            shell.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 208F));
+            shell.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+            shell.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+            Controls.Add(shell);
 
-            Label hintLabel = new Label();
-            hintLabel.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
-            hintLabel.AutoEllipsis = true;
-            hintLabel.Location = new Point(24, 55);
-            hintLabel.Size = new Size(650, 22);
-            hintLabel.ForeColor = Color.FromArgb(82, 94, 89);
-            hintLabel.Text = "关闭咨询网页或本窗口后，后台服务会自动停止；历史会话数据会保留。";
+            RoundedPanel sidebar = new RoundedPanel();
+            sidebar.Dock = DockStyle.Fill;
+            sidebar.Padding = new Padding(16, 20, 16, 20);
+            sidebar.Margin = new Padding(0);
+            shell.Controls.Add(sidebar, 0, 0);
+            TableLayoutPanel navigation = NewTable(1, 7);
+            navigation.RowStyles.Add(new RowStyle(SizeType.Absolute, 108F));
+            navigation.RowStyles.Add(new RowStyle(SizeType.Absolute, 30F));
+            navigation.RowStyles.Add(new RowStyle(SizeType.Absolute, 48F));
+            navigation.RowStyles.Add(new RowStyle(SizeType.Absolute, 48F));
+            navigation.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+            navigation.RowStyles.Add(new RowStyle(SizeType.Absolute, 24F));
+            navigation.RowStyles.Add(new RowStyle(SizeType.Absolute, 74F));
+            sidebar.Controls.Add(navigation);
 
-            _statusLabel = new Label();
-            _statusLabel.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
-            _statusLabel.AutoEllipsis = true;
-            _statusLabel.Location = new Point(24, 88);
-            _statusLabel.Size = new Size(650, 25);
-            _statusLabel.Font = new Font(Font.FontFamily, 10F, FontStyle.Bold);
-            _statusLabel.ForeColor = Color.FromArgb(40, 105, 83);
-            _statusLabel.Text = "准备启动...";
+            Panel brand = new Panel();
+            brand.Dock = DockStyle.Fill;
+            brand.Margin = new Padding(0);
+            RoundedPanel mark = new RoundedPanel();
+            mark.SurfaceColor = LauncherTheme.PrimarySoft;
+            mark.BorderColor = LauncherTheme.Primary;
+            mark.Size = new Size(44, 44);
+            Label markText = NewLabel("心", 17F, FontStyle.Bold, LauncherTheme.Accent);
+            markText.TextAlign = ContentAlignment.MiddleCenter;
+            mark.Controls.Add(markText);
+            brand.Controls.Add(mark);
+            Label brandName = NewLabel("心理咨询师", 13F, FontStyle.Bold, LauncherTheme.Ink);
+            brandName.Dock = DockStyle.None;
+            brandName.SetBounds(0, 53, 176, 26);
+            brand.Controls.Add(brandName);
+            Label brandCaption = NewLabel("AI COUNSELOR", 8F, FontStyle.Regular, LauncherTheme.Muted);
+            brandCaption.Dock = DockStyle.None;
+            brandCaption.SetBounds(0, 82, 176, 20);
+            brand.Controls.Add(brandCaption);
+            navigation.Controls.Add(brand, 0, 0);
+            navigation.Controls.Add(NewLabel("本地工作空间", 8.5F, FontStyle.Regular, LauncherTheme.Muted), 0, 1);
+            _dashboardButton = NewButton("01    工作台", LauncherTheme.PrimarySoft);
+            _dashboardButton.TextAlign = ContentAlignment.MiddleLeft;
+            _dashboardButton.Click += delegate { ShowPage(false); };
+            navigation.Controls.Add(_dashboardButton, 0, 2);
+            _logsButton = NewButton("02    运行日志", LauncherTheme.Surface);
+            _logsButton.TextAlign = ContentAlignment.MiddleLeft;
+            _logsButton.Click += delegate { ShowPage(true); };
+            navigation.Controls.Add(_logsButton, 0, 3);
+            navigation.Controls.Add(NewLabel("LOCAL SESSION", 8F, FontStyle.Bold, LauncherTheme.Accent), 0, 5);
+            navigation.Controls.Add(NewLabel("独立网页窗口\n关闭时停止本项目服务\n保留历史会话与模型缓存", 8.5F, FontStyle.Regular, LauncherTheme.Muted), 0, 6);
 
-            _progressBar = new ProgressBar();
-            _progressBar.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
-            _progressBar.Location = new Point(24, 118);
-            _progressBar.Size = new Size(650, 8);
-            _progressBar.Style = ProgressBarStyle.Marquee;
-            _progressBar.MarqueeAnimationSpeed = 28;
+            TableLayoutPanel workspace = NewTable(1, 3);
+            workspace.Padding = new Padding(28, 8, 4, 0);
+            workspace.RowStyles.Add(new RowStyle(SizeType.Absolute, 88F));
+            workspace.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+            workspace.RowStyles.Add(new RowStyle(SizeType.Absolute, 86F));
+            shell.Controls.Add(workspace, 1, 0);
+            TableLayoutPanel heading = NewTable(2, 2);
+            heading.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+            heading.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 140F));
+            heading.RowStyles.Add(new RowStyle(SizeType.Absolute, 43F));
+            heading.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+            heading.Controls.Add(NewLabel("AI 心理咨询师", 23F, FontStyle.Bold, LauncherTheme.Ink), 0, 0);
+            _stateBadge = NewLabel("正在启动", 9F, FontStyle.Bold, LauncherTheme.Accent);
+            _stateBadge.TextAlign = ContentAlignment.MiddleCenter;
+            RoundedPanel badgePanel = new RoundedPanel();
+            badgePanel.SurfaceColor = LauncherTheme.Subtle;
+            badgePanel.Dock = DockStyle.Fill;
+            badgePanel.Margin = new Padding(8, 6, 0, 6);
+            badgePanel.Controls.Add(_stateBadge);
+            heading.Controls.Add(badgePanel, 1, 0);
+            Label subtitle = NewLabel("启动本地服务，准备好后自动进入咨询网页。", 9.5F, FontStyle.Regular, LauncherTheme.Muted);
+            heading.Controls.Add(subtitle, 0, 1);
+            heading.SetColumnSpan(subtitle, 2);
+            workspace.Controls.Add(heading, 0, 0);
 
+            Panel pageHost = new Panel();
+            pageHost.Dock = DockStyle.Fill;
+            pageHost.Margin = new Padding(0);
+            workspace.Controls.Add(pageHost, 0, 1);
+            _dashboardPage = new Panel();
+            _dashboardPage.Dock = DockStyle.Fill;
+            _dashboardPage.AutoScroll = true;
+            pageHost.Controls.Add(_dashboardPage);
+            TableLayoutPanel dashboard = NewTable(1, 2);
+            dashboard.Dock = DockStyle.Top;
+            dashboard.MinimumSize = new Size(0, 476);
+            dashboard.Height = 476;
+            dashboard.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+            dashboard.RowStyles.Add(new RowStyle(SizeType.Absolute, 136F));
+            _dashboardPage.Controls.Add(dashboard);
+            _dashboardPage.Resize += delegate
+            {
+                dashboard.Height = Math.Max(dashboard.MinimumSize.Height, _dashboardPage.ClientSize.Height);
+            };
+
+            RoundedPanel statusCard = new RoundedPanel();
+            statusCard.Dock = DockStyle.Fill;
+            statusCard.Padding = new Padding(22);
+            statusCard.Margin = new Padding(0, 0, 0, 14);
+            TableLayoutPanel statusContent = NewTable(1, 6);
+            statusContent.RowStyles.Add(new RowStyle(SizeType.Absolute, 25F));
+            statusContent.RowStyles.Add(new RowStyle(SizeType.Absolute, 58F));
+            statusContent.RowStyles.Add(new RowStyle(SizeType.Absolute, 26F));
+            statusContent.RowStyles.Add(new RowStyle(SizeType.Absolute, 12F));
+            statusContent.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+            statusContent.RowStyles.Add(new RowStyle(SizeType.Absolute, 67F));
+            statusCard.Controls.Add(statusContent);
+            statusContent.Controls.Add(NewLabel("本地服务 / SESSION CONTROL", 8.5F, FontStyle.Bold, LauncherTheme.Accent), 0, 0);
+            _statusLabel = NewLabel("准备启动…", 16F, FontStyle.Bold, LauncherTheme.Ink);
+            statusContent.Controls.Add(_statusLabel, 0, 1);
+            _stageLabel = NewLabel("环境检查", 9F, FontStyle.Bold, LauncherTheme.PrimaryLight);
+            statusContent.Controls.Add(_stageLabel, 0, 2);
+            _progressBar = new ActivityBar();
+            _progressBar.Dock = DockStyle.Fill;
+            _progressBar.Margin = new Padding(0, 2, 0, 3);
+            statusContent.Controls.Add(_progressBar, 0, 3);
+            _detailLabel = NewLabel("正在检查 Docker、浏览器与端口。首次启动需要下载镜像和模型，请稍候。", 9F, FontStyle.Regular, LauncherTheme.Muted);
+            _detailLabel.TextAlign = ContentAlignment.TopLeft;
+            _detailLabel.AutoEllipsis = true;
+            _detailLabel.Padding = new Padding(0, 10, 0, 2);
+            statusContent.Controls.Add(_detailLabel, 0, 4);
+            TableLayoutPanel steps = NewTable(4, 1);
+            string[] stepNames = new string[] { "环境检查", "构建服务", "健康检查", "进入咨询" };
+            _stepLabels = new Label[stepNames.Length];
+            for (int index = 0; index < stepNames.Length; index++)
+            {
+                steps.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25F));
+                _stepLabels[index] = NewLabel("0" + (index + 1) + "\n" + stepNames[index], 9F, FontStyle.Regular, LauncherTheme.Muted);
+                _stepLabels[index].Padding = new Padding(0, 10, 0, 0);
+                steps.Controls.Add(_stepLabels[index], index, 0);
+            }
+            statusContent.Controls.Add(steps, 0, 5);
+            dashboard.Controls.Add(statusCard, 0, 0);
+
+            TableLayoutPanel notes = NewTable(2, 1);
+            notes.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
+            notes.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
+            RoundedPanel logCard = new RoundedPanel();
+            logCard.Dock = DockStyle.Fill;
+            logCard.Padding = new Padding(16);
+            logCard.Margin = new Padding(0, 0, 7, 0);
+            TableLayoutPanel logEntry = NewTable(1, 3);
+            logEntry.RowStyles.Add(new RowStyle(SizeType.Absolute, 24F));
+            logEntry.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+            logEntry.RowStyles.Add(new RowStyle(SizeType.Absolute, 35F));
+            logEntry.Controls.Add(NewLabel("了解启动进展", 10F, FontStyle.Bold, LauncherTheme.Ink), 0, 0);
+            logEntry.Controls.Add(NewLabel("查看实时输出和失败原因。", 8.5F, FontStyle.Regular, LauncherTheme.Muted), 0, 1);
+            DashboardButton showLogs = NewButton("查看运行日志  →", LauncherTheme.PrimarySoft);
+            showLogs.Click += delegate { ShowPage(true); };
+            logEntry.Controls.Add(showLogs, 0, 2);
+            logCard.Controls.Add(logEntry);
+            notes.Controls.Add(logCard, 0, 0);
+            RoundedPanel dataCard = new RoundedPanel();
+            dataCard.Dock = DockStyle.Fill;
+            dataCard.Padding = new Padding(16);
+            dataCard.Margin = new Padding(7, 0, 0, 0);
+            TableLayoutPanel dataNote = NewTable(1, 2);
+            dataNote.RowStyles.Add(new RowStyle(SizeType.Absolute, 27F));
+            dataNote.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+            dataNote.Controls.Add(NewLabel("安心结束本次运行", 10F, FontStyle.Bold, LauncherTheme.Ink), 0, 0);
+            dataNote.Controls.Add(NewLabel("关闭咨询网页或点击结束按钮，\n启动器会停止服务并保留数据卷。\n下次启动可继续查看历史会话。", 8.5F, FontStyle.Regular, LauncherTheme.Muted), 0, 1);
+            dataCard.Controls.Add(dataNote);
+            notes.Controls.Add(dataCard, 1, 0);
+            dashboard.Controls.Add(notes, 0, 1);
+
+            _logsPage = new Panel();
+            _logsPage.Dock = DockStyle.Fill;
+            _logsPage.Visible = false;
+            pageHost.Controls.Add(_logsPage);
+            RoundedPanel logsCard = new RoundedPanel();
+            logsCard.Dock = DockStyle.Fill;
+            logsCard.Padding = new Padding(20);
+            _logsPage.Controls.Add(logsCard);
+            TableLayoutPanel logsLayout = NewTable(1, 4);
+            logsLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 34F));
+            logsLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 43F));
+            logsLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+            logsLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 36F));
+            logsCard.Controls.Add(logsLayout);
+            logsLayout.Controls.Add(NewLabel("运行日志", 17F, FontStyle.Bold, LauncherTheme.Ink), 0, 0);
+            TableLayoutPanel logToolbar = NewTable(3, 1);
+            logToolbar.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+            logToolbar.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 130F));
+            logToolbar.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 124F));
+            logToolbar.Controls.Add(NewLabel("实时输出 · 错误输出使用暖红色", 8.5F, FontStyle.Regular, LauncherTheme.Muted), 0, 0);
+            DashboardButton openLogFile = NewButton("打开日志文件", LauncherTheme.Subtle);
+            openLogFile.Enabled = !string.IsNullOrEmpty(_logFilePath);
+            openLogFile.Click += delegate { OpenLogFile(); };
+            logToolbar.Controls.Add(openLogFile, 1, 0);
+            DashboardButton returnHome = NewButton("返回工作台", LauncherTheme.PrimarySoft);
+            returnHome.Click += delegate { ShowPage(false); };
+            logToolbar.Controls.Add(returnHome, 2, 0);
+            logsLayout.Controls.Add(logToolbar, 0, 1);
             _logBox = new RichTextBox();
-            _logBox.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
-            _logBox.Location = new Point(24, 142);
-            _logBox.Size = new Size(650, 250);
+            _logBox.Dock = DockStyle.Fill;
+            _logBox.Margin = new Padding(0, 10, 0, 0);
             _logBox.ReadOnly = true;
-            _logBox.BackColor = Color.White;
-            _logBox.BorderStyle = BorderStyle.FixedSingle;
+            _logBox.BackColor = LauncherTheme.Canvas;
+            _logBox.BorderStyle = BorderStyle.None;
             _logBox.DetectUrls = false;
-            _logBox.Font = new Font("Consolas", 9F, FontStyle.Regular, GraphicsUnit.Point);
-            _logBox.ForeColor = Color.FromArgb(44, 52, 49);
+            _logBox.Font = new Font("Consolas", 9.5F, FontStyle.Regular, GraphicsUnit.Point);
+            _logBox.ForeColor = LauncherTheme.Ink;
+            logsLayout.Controls.Add(_logBox, 0, 2);
+            Label logPath = NewLabel(string.IsNullOrEmpty(_logFilePath) ? "日志文件不可写，实时输出仍可在此查看。" : "日志文件：" + _logFilePath, 8F, FontStyle.Regular, LauncherTheme.Muted);
+            logPath.AutoEllipsis = true;
+            logsLayout.Controls.Add(logPath, 0, 3);
 
-            _stopButton = new Button();
-            _stopButton.Anchor = AnchorStyles.Bottom | AnchorStyles.Right;
-            _stopButton.Location = new Point(554, 404);
-            _stopButton.Size = new Size(120, 32);
-            _stopButton.Text = "停止并退出";
-            _stopButton.UseVisualStyleBackColor = true;
+            TableLayoutPanel footer = NewTable(2, 2);
+            footer.Padding = new Padding(0, 14, 0, 0);
+            footer.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+            footer.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 162F));
+            footer.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+            footer.RowStyles.Add(new RowStyle(SizeType.Absolute, 25F));
+            _latestLogLabel = NewLabel("正在准备本地运行环境…", 8.5F, FontStyle.Regular, LauncherTheme.Muted);
+            _latestLogLabel.AutoEllipsis = true;
+            _latestLogLabel.Margin = new Padding(0, 0, 14, 0);
+            footer.Controls.Add(_latestLogLabel, 0, 0);
+            _stopButton = NewButton("结束运行并退出", LauncherTheme.DangerFill);
+            _stopButton.ForeColor = LauncherTheme.DangerText;
             _stopButton.Click += delegate { Close(); };
-
-            Controls.Add(titleLabel);
-            Controls.Add(hintLabel);
-            Controls.Add(_statusLabel);
-            Controls.Add(_progressBar);
-            Controls.Add(_logBox);
-            Controls.Add(_stopButton);
+            footer.Controls.Add(_stopButton, 1, 0);
+            Label footerNote = NewLabel("本次运行结束时停止服务 · 历史会话与模型缓存保留", 8F, FontStyle.Regular, LauncherTheme.Muted);
+            footer.Controls.Add(footerNote, 0, 1);
+            footer.SetColumnSpan(footerNote, 2);
+            workspace.Controls.Add(footer, 0, 2);
+            ShowPage(false);
+            ApplyPhase(StartupPhase.Environment);
 
             Shown += delegate
             {
-                Task.Run((Action)RunStartupWorkflow);
+                if (!previewUi)
+                {
+                    Task.Run((Action)RunStartupWorkflow);
+                }
             };
         }
+
+        private static TableLayoutPanel NewTable(int columns, int rows)
+        {
+            TableLayoutPanel table = new TableLayoutPanel();
+            table.ColumnCount = columns;
+            table.RowCount = rows;
+            table.Dock = DockStyle.Fill;
+            table.BackColor = Color.Transparent;
+            table.Margin = new Padding(0);
+            return table;
+        }
+
+        private Label NewLabel(string text, float size, FontStyle style, Color color)
+        {
+            Label label = new Label();
+            label.Text = text;
+            label.Font = new Font(Font.FontFamily, size, style);
+            label.ForeColor = color;
+            label.BackColor = Color.Transparent;
+            label.Dock = DockStyle.Fill;
+            label.Margin = new Padding(0);
+            label.TextAlign = ContentAlignment.MiddleLeft;
+            return label;
+        }
+
+        private DashboardButton NewButton(string text, Color fill)
+        {
+            DashboardButton button = new DashboardButton();
+            button.Text = text;
+            button.Font = new Font(Font.FontFamily, 9F, FontStyle.Bold);
+            button.Dock = DockStyle.Fill;
+            button.FillColor = fill;
+            button.Margin = new Padding(0, 3, 0, 3);
+            return button;
+        }
+
+        private void ShowPage(bool showLogs)
+        {
+            _dashboardPage.Visible = !showLogs;
+            _logsPage.Visible = showLogs;
+            if (showLogs)
+            {
+                _logsPage.BringToFront();
+            }
+            else
+            {
+                _dashboardPage.BringToFront();
+            }
+            _dashboardButton.FillColor = showLogs ? LauncherTheme.Surface : LauncherTheme.PrimarySoft;
+            _dashboardButton.ForeColor = showLogs ? LauncherTheme.Muted : LauncherTheme.PrimaryLight;
+            _logsButton.FillColor = showLogs ? LauncherTheme.PrimarySoft : LauncherTheme.Surface;
+            _logsButton.ForeColor = showLogs ? LauncherTheme.PrimaryLight : LauncherTheme.Muted;
+            _dashboardButton.Invalidate();
+            _logsButton.Invalidate();
+        }
+
+        private void OpenLogFile()
+        {
+            try
+            {
+                if (!string.IsNullOrEmpty(_logFilePath))
+                {
+                    ProcessStartInfo info = new ProcessStartInfo(_logFilePath);
+                    info.UseShellExecute = true;
+                    Process.Start(info);
+                }
+            }
+            catch (Exception exception)
+            {
+                AppendLog("无法打开日志文件：" + Sanitize(exception.Message), true);
+            }
+        }
+
+        protected override void OnHandleCreated(EventArgs e)
+        {
+            base.OnHandleCreated(e);
+            // Unsupported DWM attributes are ignored on older Windows versions.
+            try
+            {
+                int enabled = 1;
+                if (DwmSetWindowAttribute(Handle, 20, ref enabled, sizeof(int)) != 0)
+                {
+                    DwmSetWindowAttribute(Handle, 19, ref enabled, sizeof(int));
+                }
+                int rounded = 2;
+                DwmSetWindowAttribute(Handle, 33, ref rounded, sizeof(int));
+            }
+            catch (DllNotFoundException) { }
+            catch (EntryPointNotFoundException) { }
+        }
+
+        [DllImport("dwmapi.dll")]
+        private static extern int DwmSetWindowAttribute(IntPtr window, int attribute, ref int value, int valueSize);
 
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
@@ -235,7 +523,7 @@ namespace DkPsychCounselorLauncher
         {
             try
             {
-                SetStatus("正在检查运行环境...");
+                SetStatus("正在检查运行环境…", StartupPhase.Environment);
                 AppendLog("检查项目目录、Docker 和浏览器。", false);
                 _paths = LauncherPaths.Discover();
 
@@ -259,7 +547,7 @@ namespace DkPsychCounselorLauncher
                 CleanupStaleComposeProject();
                 _cancellation.Token.ThrowIfCancellationRequested();
 
-                SetStatus("正在构建并启动服务，首次运行可能需要较长时间...");
+                SetStatus("正在构建并启动服务…", StartupPhase.Build);
                 AppendLog("执行 Docker Compose 构建与启动，网页端口为 " + _frontendPort + "。首次启动还会下载镜像和模型。", false);
                 _composeWasAttempted = true;
                 CommandResult upResult = RunCommand(
@@ -279,13 +567,13 @@ namespace DkPsychCounselorLauncher
                 WaitForApplicationHealth();
                 _cancellation.Token.ThrowIfCancellationRequested();
 
-                SetStatus("服务已就绪，正在打开咨询网页...");
+                SetStatus("服务已就绪，正在打开咨询网页…", StartupPhase.Opening);
                 AppendLog("健康检查通过，打开独立浏览器窗口。", false);
                 OpenBrowserAndWait();
 
                 if (!_cancellation.IsCancellationRequested)
                 {
-                    SetStatus("咨询网页已关闭，正在停止后台服务...");
+                    SetStatus("咨询网页已关闭，正在停止后台服务…", StartupPhase.Stopping);
                     AppendLog("检测到咨询网页关闭。", false);
                     BeginShutdown(null);
                 }
@@ -298,14 +586,14 @@ namespace DkPsychCounselorLauncher
             {
                 string safeMessage = Sanitize(exception.Message);
                 AppendLog("启动失败：" + safeMessage, true);
-                SetStatus("启动失败，正在清理后台服务...");
+                SetStatus("启动失败，正在清理后台服务…", StartupPhase.Stopping);
                 BeginShutdown(safeMessage);
             }
         }
 
         private void EnsureDockerReady()
         {
-            SetStatus("正在连接 Docker Engine...");
+            SetStatus("正在连接 Docker Engine…", StartupPhase.Environment);
             if (IsDockerReady())
             {
                 AppendLog("Docker Engine 已就绪。", false);
@@ -413,7 +701,7 @@ namespace DkPsychCounselorLauncher
 
         private void CleanupStaleComposeProject()
         {
-            SetStatus("正在清理上次异常退出留下的服务...");
+            SetStatus("正在清理上次异常退出留下的服务…", StartupPhase.Environment);
             AppendLog("检查并清理同名 Compose 项目的残留容器；不会删除数据卷。", false);
             CommandResult result = RunCommand(
                 _paths.DockerCli,
@@ -432,7 +720,7 @@ namespace DkPsychCounselorLauncher
 
         private bool RunPortPreflight()
         {
-            SetStatus("正在检查启动端口...");
+            SetStatus("正在检查启动端口…", StartupPhase.Environment);
             _frontendPort = PortInspector.ResolvePreferredPort(_paths.BackendDirectory);
 
             List<PortUsage> usages = new List<PortUsage>();
@@ -809,7 +1097,7 @@ namespace DkPsychCounselorLauncher
 
         private void WaitForApplicationHealth()
         {
-            SetStatus("服务正在初始化，等待健康检查...");
+            SetStatus("服务正在初始化，等待健康检查…", StartupPhase.Health);
             AppendLog("等待 " + HealthUrl + "。首次灌入向量库时会明显更久。", false);
 
             DateTime deadline = DateTime.UtcNow.AddMinutes(20);
@@ -894,7 +1182,7 @@ namespace DkPsychCounselorLauncher
                 _browserProcess = browser;
             }
 
-            SetStatus("咨询网页已打开；关闭网页会自动停止服务。");
+            SetStatus("咨询网页已打开，可以开始了。", StartupPhase.Ready);
             AppendLog("咨询网页：" + AppUrl, false);
 
             try
@@ -926,12 +1214,13 @@ namespace DkPsychCounselorLauncher
             }
 
             _cancellation.Cancel();
-            SetStatus("正在停止后台服务，请稍候...");
+            SetStatus("正在停止后台服务，请稍候…", StartupPhase.Stopping);
             SetStopButtonEnabled(false);
             StopRunningProcesses();
 
             Task.Run(delegate
             {
+                bool cleanupSucceeded = true;
                 try
                 {
                     if (_composeWasAttempted && _paths != null && !string.IsNullOrEmpty(_paths.DockerCli))
@@ -947,18 +1236,24 @@ namespace DkPsychCounselorLauncher
                         );
                         if (result.ExitCode != 0)
                         {
+                            cleanupSucceeded = false;
                             AppendLog("后台服务停止命令未正常完成，请稍后运行 docker compose down 检查。", true);
+                        }
+                        else
+                        {
+                            AppendLog("本项目后台服务已停止；数据卷已保留。", false);
                         }
                     }
                 }
                 catch (Exception exception)
                 {
+                    cleanupSucceeded = false;
                     AppendLog("停止服务时发生错误：" + Sanitize(exception.Message), true);
                 }
                 finally
                 {
                     DeleteBrowserProfileBestEffort();
-                    CompleteShutdown(startupError);
+                    CompleteShutdown(startupError, cleanupSucceeded);
                 }
             });
         }
@@ -998,31 +1293,25 @@ namespace DkPsychCounselorLauncher
             }
         }
 
-        private void CompleteShutdown(string startupError)
+        private void CompleteShutdown(string startupError, bool cleanupSucceeded)
         {
             RunOnUiThread(delegate
             {
-                _progressBar.Style = ProgressBarStyle.Continuous;
-                _progressBar.Value = 0;
-                _statusLabel.Text = string.IsNullOrEmpty(startupError) ? "后台服务已停止。" : "启动失败，后台服务已清理。";
-
-                if (!string.IsNullOrEmpty(startupError))
-                {
-                    string displayError = startupError;
-                    if (!string.IsNullOrEmpty(_logFilePath))
-                    {
-                        displayError += Environment.NewLine + Environment.NewLine + "详细日志：" + _logFilePath;
-                    }
-                    MessageBox.Show(
-                        this,
-                        displayError,
-                        "AI 心理咨询师启动失败",
-                        MessageBoxButtons.OK,
-                        MessageBoxIcon.Error
-                    );
-                }
-
                 _allowClose = true;
+                if (!string.IsNullOrEmpty(startupError) || !cleanupSucceeded)
+                {
+                    ApplyPhase(StartupPhase.Failed);
+                    _statusLabel.Text = !string.IsNullOrEmpty(startupError) ? "启动失败，请查看原因后重试。" : "停止服务未确认，请检查运行日志。";
+                    _detailLabel.Text = (!string.IsNullOrEmpty(startupError) ? startupError + Environment.NewLine : string.Empty) +
+                        (cleanupSucceeded ? "清理流程已结束。修复原因后，关闭本窗口并重新启动。" : "后台服务可能仍在运行。请查看日志并确认 Docker Compose 停止结果。") ;
+                    _stopButton.Text = "退出启动器";
+                    _stopButton.Enabled = true;
+                    _latestLogLabel.Text = "本次运行已结束；可查看运行日志排查原因。";
+                    ShowPage(false);
+                    return;
+                }
+                ApplyPhase(StartupPhase.Stopped);
+                _statusLabel.Text = "后台服务已停止。";
                 Close();
             });
         }
@@ -1233,16 +1522,88 @@ namespace DkPsychCounselorLauncher
                 }
 
                 _logBox.SelectionStart = _logBox.TextLength;
-                _logBox.SelectionColor = isError ? Color.FromArgb(166, 55, 55) : Color.FromArgb(44, 52, 49);
+                _logBox.SelectionColor = isError ? LauncherTheme.DangerText : LauncherTheme.Ink;
                 _logBox.AppendText(line);
                 _logBox.SelectionStart = _logBox.TextLength;
                 _logBox.ScrollToCaret();
+                _latestLogLabel.Text = safeMessage.Replace(Environment.NewLine, " ");
+                _latestLogLabel.ForeColor = isError ? LauncherTheme.DangerText : LauncherTheme.Muted;
             });
         }
 
-        private void SetStatus(string status)
+        private void SetStatus(string status, StartupPhase phase)
         {
-            RunOnUiThread(delegate { _statusLabel.Text = status; });
+            RunOnUiThread(delegate
+            {
+                _statusLabel.Text = status;
+                ApplyPhase(phase);
+            });
+        }
+
+        private void ApplyPhase(StartupPhase phase)
+        {
+            Color accent = LauncherTheme.Primary;
+            bool busy = true;
+            string[] names = new string[] { "环境检查", "构建服务", "健康检查", "进入咨询" };
+            string detail;
+            if (phase == StartupPhase.Environment)
+            {
+                _activeStep = 0;
+                _stateBadge.Text = "正在启动";
+                _stageLabel.Text = "环境检查";
+                detail = "自动检查 Docker、浏览器与端口，然后准备本地服务。";
+            }
+            else if (phase == StartupPhase.Build)
+            {
+                _activeStep = 1;
+                _stateBadge.Text = "正在构建";
+                _stageLabel.Text = "构建与启动服务";
+                detail = "首次启动需要下载镜像和模型，耗时取决于网络与设备。可以打开运行日志查看进展。";
+            }
+            else if (phase == StartupPhase.Health)
+            {
+                _activeStep = 2;
+                _stateBadge.Text = "正在初始化";
+                _stageLabel.Text = "等待应用健康检查";
+                detail = "服务正在初始化并准备知识库。健康检查通过后，会自动打开独立咨询网页。";
+            }
+            else if (phase == StartupPhase.Opening || phase == StartupPhase.Ready)
+            {
+                _activeStep = phase == StartupPhase.Ready ? 4 : 3;
+                _stateBadge.Text = phase == StartupPhase.Ready ? "咨询已打开" : "服务已就绪";
+                _stageLabel.Text = phase == StartupPhase.Ready ? "本次咨询正在运行" : "打开咨询网页";
+                accent = LauncherTheme.Accent;
+                busy = phase != StartupPhase.Ready;
+                detail = "咨询地址：" + AppUrl + Environment.NewLine + "关闭咨询网页或结束本次运行时，将停止后台服务并保留数据卷。";
+            }
+            else if (phase == StartupPhase.Stopping)
+            {
+                _stateBadge.Text = "正在结束";
+                _stageLabel.Text = "停止服务与清理本次运行";
+                detail = "正在结束浏览器与 Docker Compose 服务。请等待清理完成；历史会话和模型缓存会保留。";
+            }
+            else
+            {
+                busy = false;
+                accent = phase == StartupPhase.Failed ? LauncherTheme.DangerText : LauncherTheme.Accent;
+                _stateBadge.Text = phase == StartupPhase.Failed ? "需要处理" : "运行已结束";
+                _stageLabel.Text = phase == StartupPhase.Failed ? "查看运行日志，确认失败原因" : "服务已停止";
+                detail = phase == StartupPhase.Failed ? "修复失败原因后，请关闭本窗口并重新打开启动器。" : "历史会话与模型缓存已保留。";
+            }
+
+            _detailLabel.Text = detail;
+            _stateBadge.ForeColor = accent;
+            _statusLabel.ForeColor = phase == StartupPhase.Failed ? LauncherTheme.DangerText : LauncherTheme.Ink;
+            _stageLabel.ForeColor = phase == StartupPhase.Failed ? LauncherTheme.DangerText : LauncherTheme.PrimaryLight;
+            _progressBar.SetActivity(busy, accent);
+            for (int index = 0; index < _stepLabels.Length; index++)
+            {
+                bool complete = index < _activeStep;
+                bool current = index == _activeStep;
+                _stepLabels[index].Text = (complete ? "✓" : "0" + (index + 1)) + Environment.NewLine + names[index];
+                _stepLabels[index].ForeColor = complete ? LauncherTheme.Accent :
+                    (current ? (phase == StartupPhase.Failed ? LauncherTheme.DangerText : LauncherTheme.PrimaryLight) : LauncherTheme.Muted);
+            }
         }
 
         private void SetStopButtonEnabled(bool enabled)
@@ -1272,6 +1633,211 @@ namespace DkPsychCounselorLauncher
             {
                 // The window may have been disposed during shutdown.
             }
+        }
+    }
+
+    internal enum StartupPhase
+    {
+        Environment,
+        Build,
+        Health,
+        Opening,
+        Ready,
+        Stopping,
+        Failed,
+        Stopped
+    }
+
+    internal static class LauncherTheme
+    {
+        internal static readonly Color Canvas = Color.FromArgb(11, 14, 21);
+        internal static readonly Color Surface = Color.FromArgb(22, 27, 38);
+        internal static readonly Color Subtle = Color.FromArgb(29, 37, 50);
+        internal static readonly Color Line = Color.FromArgb(42, 50, 66);
+        internal static readonly Color Primary = Color.FromArgb(99, 102, 241);
+        internal static readonly Color PrimarySoft = Color.FromArgb(35, 42, 82);
+        internal static readonly Color PrimaryLight = Color.FromArgb(165, 180, 252);
+        internal static readonly Color Accent = Color.FromArgb(34, 211, 238);
+        internal static readonly Color Ink = Color.FromArgb(229, 231, 235);
+        internal static readonly Color Muted = Color.FromArgb(156, 163, 175);
+        internal static readonly Color DangerFill = Color.FromArgb(79, 35, 48);
+        internal static readonly Color DangerText = Color.FromArgb(253, 164, 175);
+
+        internal static GraphicsPath RoundedPath(RectangleF bounds, float radius)
+        {
+            GraphicsPath path = new GraphicsPath();
+            float diameter = Math.Min(radius * 2F, Math.Min(bounds.Width, bounds.Height));
+            if (diameter <= 0F)
+            {
+                return path;
+            }
+            path.AddArc(bounds.Left, bounds.Top, diameter, diameter, 180F, 90F);
+            path.AddArc(bounds.Right - diameter, bounds.Top, diameter, diameter, 270F, 90F);
+            path.AddArc(bounds.Right - diameter, bounds.Bottom - diameter, diameter, diameter, 0F, 90F);
+            path.AddArc(bounds.Left, bounds.Bottom - diameter, diameter, diameter, 90F, 90F);
+            path.CloseFigure();
+            return path;
+        }
+    }
+
+    internal sealed class RoundedPanel : Panel
+    {
+        internal Color SurfaceColor = LauncherTheme.Surface;
+        internal Color BorderColor = LauncherTheme.Line;
+
+        internal RoundedPanel()
+        {
+            SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint |
+                ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw |
+                ControlStyles.SupportsTransparentBackColor, true);
+            BackColor = Color.Transparent;
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            base.OnPaint(e);
+            if (ClientSize.Width < 2 || ClientSize.Height < 2)
+            {
+                return;
+            }
+            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            using (GraphicsPath shape = LauncherTheme.RoundedPath(new RectangleF(0.5F, 0.5F, Width - 1F, Height - 1F), 14F))
+            using (SolidBrush fill = new SolidBrush(SurfaceColor))
+            using (Pen border = new Pen(BorderColor))
+            {
+                e.Graphics.FillPath(fill, shape);
+                e.Graphics.DrawPath(border, shape);
+            }
+        }
+    }
+
+    internal sealed class DashboardButton : Button
+    {
+        internal Color FillColor = LauncherTheme.Subtle;
+        private bool _hovered;
+
+        internal DashboardButton()
+        {
+            SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint |
+                ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw |
+                ControlStyles.SupportsTransparentBackColor, true);
+            FlatStyle = FlatStyle.Flat;
+            FlatAppearance.BorderSize = 0;
+            BackColor = Color.Transparent;
+            ForeColor = LauncherTheme.Ink;
+            Cursor = Cursors.Hand;
+            UseVisualStyleBackColor = false;
+        }
+
+        protected override void OnMouseEnter(EventArgs e)
+        {
+            _hovered = true;
+            Invalidate();
+            base.OnMouseEnter(e);
+        }
+
+        protected override void OnMouseLeave(EventArgs e)
+        {
+            _hovered = false;
+            Invalidate();
+            base.OnMouseLeave(e);
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            if (ClientSize.Width < 2 || ClientSize.Height < 2)
+            {
+                return;
+            }
+            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            Color fill = !Enabled ? LauncherTheme.Subtle : (_hovered ? ControlPaint.Light(FillColor, 0.12F) : FillColor);
+            using (GraphicsPath shape = LauncherTheme.RoundedPath(new RectangleF(0.5F, 0.5F, Width - 1F, Height - 1F), 9F))
+            using (SolidBrush brush = new SolidBrush(fill))
+            using (Pen border = new Pen(Focused && ShowFocusCues ? LauncherTheme.PrimaryLight : LauncherTheme.Line))
+            {
+                e.Graphics.FillPath(brush, shape);
+                e.Graphics.DrawPath(border, shape);
+            }
+            TextFormatFlags flags = TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis;
+            flags |= TextAlign == ContentAlignment.MiddleLeft ? TextFormatFlags.Left : TextFormatFlags.HorizontalCenter;
+            TextRenderer.DrawText(e.Graphics, Text, Font, new Rectangle(12, 0, Math.Max(1, Width - 24), Height),
+                Enabled ? ForeColor : LauncherTheme.Muted, flags);
+        }
+    }
+
+    internal sealed class ActivityBar : Control
+    {
+        private readonly System.Windows.Forms.Timer _timer;
+        private float _offset;
+        private bool _busy;
+        private Color _accent = LauncherTheme.Primary;
+
+        internal ActivityBar()
+        {
+            SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint |
+                ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw |
+                ControlStyles.SupportsTransparentBackColor, true);
+            BackColor = Color.Transparent;
+            TabStop = false;
+            _timer = new System.Windows.Forms.Timer();
+            _timer.Interval = 32;
+            _timer.Tick += delegate
+            {
+                _offset = (_offset + 1.5F) % 100F;
+                Invalidate();
+            };
+        }
+
+        internal void SetActivity(bool busy, Color accent)
+        {
+            _busy = busy;
+            _accent = accent;
+            _timer.Enabled = busy;
+            Invalidate();
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            base.OnPaint(e);
+            if (ClientSize.Width < 2 || ClientSize.Height < 2)
+            {
+                return;
+            }
+            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            using (GraphicsPath track = LauncherTheme.RoundedPath(new RectangleF(0F, 0F, Width, Height), Height / 2F))
+            using (SolidBrush background = new SolidBrush(LauncherTheme.Subtle))
+            {
+                e.Graphics.FillPath(background, track);
+                GraphicsState state = e.Graphics.Save();
+                e.Graphics.SetClip(track);
+                if (_busy)
+                {
+                    // A moving pulse indicates activity; its position is not a completion percentage.
+                    float pulseWidth = Math.Max(72F, Width * 0.24F);
+                    RectangleF pulse = new RectangleF((Width + pulseWidth) * _offset / 100F - pulseWidth, 0F, pulseWidth, Height);
+                    using (LinearGradientBrush light = new LinearGradientBrush(pulse, _accent, LauncherTheme.Accent, 0F))
+                    {
+                        e.Graphics.FillRectangle(light, pulse);
+                    }
+                }
+                else
+                {
+                    using (SolidBrush settled = new SolidBrush(Color.FromArgb(110, _accent)))
+                    {
+                        e.Graphics.FillPath(settled, track);
+                    }
+                }
+                e.Graphics.Restore(state);
+            }
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                _timer.Dispose();
+            }
+            base.Dispose(disposing);
         }
     }
 

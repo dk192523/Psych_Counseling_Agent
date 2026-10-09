@@ -1,8 +1,9 @@
 import { mount } from '@vue/test-utils'
-import { describe, it, expect } from 'vitest'
+import { afterEach, describe, it, expect, vi } from 'vitest'
 import ChatRoom from './ChatRoom.vue'
 
 describe('ChatRoom interactions', () => {
+  afterEach(() => vi.unstubAllGlobals())
   it('does not submit Chinese IME composition, but submits confirmed Enter once', async () => {
     const wrapper = mount(ChatRoom)
     const input = wrapper.get('textarea')
@@ -42,6 +43,59 @@ describe('ChatRoom interactions', () => {
     expect(wrapper.find('.markdown-body script').exists()).toBe(false)
     expect(wrapper.find('.markdown-body [onerror]').exists()).toBe(false)
     expect(wrapper.find('.markdown-body a[href^="javascript:"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+  it.each(['http://example.org/source', 'https://example.org/source?q=test#details'])('opens %s in the system browser without WebView navigation', async url => {
+    const openExternal = vi.fn().mockReturnValue(true)
+    vi.stubGlobal('psychDesktop', { openExternal })
+    const wrapper = mount(ChatRoom, { props: { messages: [{
+      id: 'source', isUser: false, time: Date.now(), content: `[来源 **说明**](${url})`
+    }] } })
+    const event = new MouseEvent('click', { bubbles: true, cancelable: true })
+    wrapper.get('.markdown-body strong').element.dispatchEvent(event)
+    expect(event.defaultPrevented).toBe(true)
+    expect(openExternal).toHaveBeenCalledExactlyOnceWith(url)
+    expect(wrapper.find('.source-link-error').exists()).toBe(false)
+    wrapper.unmount()
+  })
+  it.each(['mailto:someone@example.org', '/relative-source', 'https://user:password@example.org/source'])('blocks unsupported source %s before calling the desktop bridge', async url => {
+    const openExternal = vi.fn()
+    vi.stubGlobal('psychDesktop', { openExternal })
+    const wrapper = mount(ChatRoom, { props: { messages: [{
+      id: 'source', isUser: false, time: Date.now(), content: `[来源](${url})`
+    }] } })
+    const event = new MouseEvent('click', { bubbles: true, cancelable: true })
+    wrapper.get('.markdown-body a').element.dispatchEvent(event)
+    await wrapper.vm.$nextTick()
+    expect(event.defaultPrevented).toBe(true)
+    expect(openExternal).not.toHaveBeenCalled()
+    expect(wrapper.get('.source-link-error').text()).toContain('http/https')
+    wrapper.unmount()
+  })
+  it('preserves normal browser links with opener isolation', () => {
+    const wrapper = mount(ChatRoom, { props: { messages: [{
+      id: 'source', isUser: false, time: Date.now(), content: '[来源](https://example.org/source)'
+    }] } })
+    const anchor = wrapper.get('.markdown-body a')
+    expect(anchor.attributes('target')).toBe('_blank')
+    expect(anchor.attributes('rel')).toBe('noopener noreferrer')
+    const event = new MouseEvent('click', { bubbles: true, cancelable: true })
+    anchor.element.dispatchEvent(event)
+    expect(event.defaultPrevented).toBe(false)
+    wrapper.unmount()
+  })
+  it.each(['failure', 'exception'])('keeps the conversation visible and reports browser opening %s', async outcome => {
+    const openExternal = vi.fn(() => {
+      if (outcome === 'exception') throw new Error('browser unavailable')
+      return false
+    })
+    vi.stubGlobal('psychDesktop', { openExternal })
+    const wrapper = mount(ChatRoom, { props: { messages: [{
+      id: 'source', isUser: false, time: Date.now(), content: '[来源](https://example.org/source)'
+    }] } })
+    await wrapper.get('.markdown-body a').trigger('click')
+    expect(wrapper.get('.source-link-error').text()).toContain('系统默认浏览器')
+    expect(wrapper.get('.markdown-body a').text()).toBe('来源')
     wrapper.unmount()
   })
 })

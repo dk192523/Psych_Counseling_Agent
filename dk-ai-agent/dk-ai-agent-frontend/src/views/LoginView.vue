@@ -8,7 +8,7 @@
 
       <div class="brand-inner">
         <div class="brand-logo">
-          <span class="brand-logo-mark"></span>
+          <BrandLogo :size="52" plain class="login-brand-logo" alt="" />
           <span class="brand-logo-text">AI 心理咨询师</span>
         </div>
 
@@ -138,6 +138,7 @@
 
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import BrandLogo from '../components/BrandLogo.vue'
 import { useRoute, useRouter } from 'vue-router'
 import { login, register, getAuthConfiguration } from '../api'
 import { setMe, useAuth } from '../stores/auth'
@@ -315,19 +316,16 @@ const handleSubmit = async () => {
 .brand-logo {
   display: inline-flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
 }
 
-.brand-logo-mark {
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  background: #93c5fd;
-  box-shadow: 0 0 0 4px rgba(147, 197, 253, 0.22);
+.brand-logo .login-brand-logo {
+  width: clamp(44px, 4vw, 52px);
+  height: clamp(44px, 4vw, 52px);
 }
 
 .brand-logo-text {
-  font-size: 15px;
+  font-size: 16px;
   font-weight: 700;
   letter-spacing: 0.08em;
 }

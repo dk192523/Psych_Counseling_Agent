@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "dataset_id": "rag_golden_v1",
+  "dataset_status": "PENDING",
+  "description": "人工 RAG golden 空模板；不含已审核样本，不代表质量验收。",
+  "minimum_fully_reviewed_cases": 60,
+  "snapshot": {
+    "corpus": {
+      "id": null,
+      "version": null,
+      "path": null,
+      "sha256": null,
+      "manifest_path": null,
+      "manifest_sha256": null,
+      "production_eligible": false
+    },
+    "chunking": {
+      "implementation": null,
+      "revision": null,
+      "config": null,
+      "config_sha256": null
+    },
+    "models": {
+      "embedding": {"id": null, "revision": null, "artifact_sha256": null},
+      "tokenizer": {"id": null, "revision": null, "artifact_sha256": null},
+      "reranker": {"enabled": null, "id": null, "revision": null, "artifact_sha256": null},
+      "answer": {"id": null, "revision": null, "artifact_sha256": null}
+    },
+    "retrieval": {
+      "implementation": null,
+      "revision": null,
+      "parameters": null,
+      "parameters_sha256": null
+    }
+  },
+  "freeze": {"reviewed_by": [], "frozen_at": null, "code_revision": null},
+  "annotation_template": {
+    "id": null,
+    "query": null,
+    "split": "test",
+    "review_status": "pending",
+    "routing": {"expected_route": null, "allowed_domains": [], "should_retrieve": null},
+    "answerability": null,
+    "judgment_scope": {"method": null, "candidate_doc_ids": [], "candidate_chunk_ids": [], "notes": null},
+    "document_relevance": [{"doc_id": null, "grade": null, "rationale": null}],
+    "chunk_relevance": [{"chunk_id": null, "doc_id": null, "grade": null, "rationale": null}],
+    "supporting_facts": [{"id": null, "fact": null, "citations": [{"doc_id": null, "chunk_id": null, "evidence_quote": null}]}],
+    "expected_response": {"behavior": null, "required_elements": [], "prohibited_elements": [], "notes": null},
+    "review": {"annotator": null, "reviewers": [], "reviewed_at": null, "adjudication": null}
+  },
+  "cases": []
+}

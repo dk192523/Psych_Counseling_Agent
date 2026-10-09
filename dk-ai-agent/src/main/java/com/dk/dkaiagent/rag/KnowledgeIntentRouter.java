@@ -34,30 +34,55 @@ public final class KnowledgeIntentRouter {
 
     private KnowledgeIntentRouter() {}
 
+    /** Only explicit factual requests require an approved source; feelings and safety support stay available. */
+    public static Set<String> requiredDomains(String query) {
+        String text = Objects.toString(query, "").toLowerCase(Locale.ROOT).strip();
+        if (com.dk.dkaiagent.memory.SafetyTerms.assess(text).isSafetyRelevant()) return Set.of();
+        Route route = route(query);
+        if (route.intent() == Intent.EXAM) return Set.of("psych-exams");
+        if (route.intent() != Intent.PROFESSIONAL && route.intent() != Intent.MIXED) return Set.of();
+        boolean explicitQuestion = isPsychologyKnowledgeQuestion(text) || containsAny(text,
+                "是什么", "什么是", "什么意思", "怎么", "如何", "为什么", "哪些", "什么区别", "什么边界",
+                "解释", "介绍", "科普", "问答", "请问", "法律边界", "专业角度", "什么", "?", "？");
+        if (!explicitQuestion) return Set.of();
+        boolean policy = containsAny(text, "法律", "法规", "违法", "保密", "知情同意", "伦理", "政策",
+                "未成年人保护", "精神卫生法");
+        boolean knowledge = !policy || containsAny(text, "cbt", "认知行为", "心理学", "心理理论", "诊断", "dsm", "icd");
+        if (policy && knowledge) return Set.of("psych-policy", "psych-knowledge");
+        return Set.of(policy ? "psych-policy" : "psych-knowledge");
+    }
+
     public static Route route(String query) {
         String text = Objects.toString(query, "").toLowerCase(Locale.ROOT).strip();
         if (text.isBlank()) return routeFor(Intent.LISTEN);
 
-        // Safety/professional questions take precedence over an accompanying request to vent.
-        boolean crisis = containsAny(text, "危机", "自杀", "自伤", "轻生", "不想活", "伤害自己",
+        // Safety always wins; a diagnosis/topic mention alone must not override explicit listening.
+        boolean crisis = com.dk.dkaiagent.memory.SafetyTerms.assess(text).isSafetyRelevant()
+                || containsAny(text, "危机", "自杀", "自伤", "轻生", "不想活", "伤害自己",
                 "想死", "结束生命");
         boolean professional = containsAny(text, "专业", "诊断", "抑郁症", "焦虑症", "双相", "精神分裂",
                 "cbt", "认知行为", "认知歪曲", "认知扭曲", "心理学", "心理治疗", "循证", "指南",
-                "量表", "dsm", "icd", "咨询伦理", "保密", "知情同意", "法律", "法规", "违法",
+                "量表", "dsm", "icd", "咨询伦理", "政策", "伦理", "咨询边界", "专业知识", "保密", "知情同意", "法律", "法规", "违法",
                 "未成年人保护", "精神卫生法", "药物", "抗抑郁", "依恋理论")
                 || crisis || isPsychologyKnowledgeQuestion(text);
         boolean cases = containsAny(text, "案例", "个案", "逐字稿", "相似经历", "类似经历", "类似情况的人");
         boolean exam = containsAny(text, "真题", "题库", "刷题", "模拟题", "选择题", "判断题", "试题",
                 "考证", "备考", "考试题", "考点", "标准答案");
-        if (exam && !crisis) {
-            return routeFor(Intent.EXAM);
-        }
-        if (professional) return routeFor(cases ? Intent.MIXED : Intent.PROFESSIONAL);
-        if (containsAny(text, "只想倾诉", "只想说说", "只想吐槽", "听我说", "听我讲", "陪我聊",
+        boolean listening = containsAny(text, "只想倾诉", "只想说说", "只想吐槽", "听我说", "听我讲", "陪我聊",
                 "不用分析", "不要分析", "不需要建议", "别给建议", "不要给建议", "先别建议",
-                "先不要解释", "先别解释", "先不用解释", "先让我说完", "让我先说完")) {
+                "不用建议", "不要建议", "先不要解释", "先别解释", "先不用解释", "先让我说完", "让我先说完");
+        boolean explicitProfessionalQuestion = isPsychologyKnowledgeQuestion(text)
+                || (professional && containsAny(text, "是什么", "什么是", "什么意思", "何谓", "定义",
+                "怎么", "如何", "为什么", "哪些", "什么区别", "什么边界", "有什么不同",
+                "请解释", "解释一下", "解释下", "介绍一下", "请介绍", "科普", "想了解"));
+        boolean explicitExamRequest = containsAny(text, "真题", "题库", "刷题", "模拟题", "选择题",
+                "判断题", "试题", "考试题", "考点", "标准答案");
+        if (crisis) return routeFor(cases ? Intent.MIXED : Intent.PROFESSIONAL);
+        if (listening && !explicitProfessionalQuestion && !explicitExamRequest) {
             return routeFor(Intent.LISTEN);
         }
+        if (exam) return routeFor(Intent.EXAM);
+        if (professional) return routeFor(cases ? Intent.MIXED : Intent.PROFESSIONAL);
         if (cases) return routeFor(Intent.CASES);
         if (text.matches("[\\s你好您好嗨嗯哦啊好谢谢再见晚安早安在吗!?！？。，,.～~]+")
                 || List.of("hi", "hello", "thanks", "ok").contains(text)) {

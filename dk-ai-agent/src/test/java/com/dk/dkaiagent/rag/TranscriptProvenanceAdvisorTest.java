@@ -28,35 +28,15 @@ class TranscriptProvenanceAdvisorTest {
     Path transcriptDirectory;
 
     @Test
-    void appendsTimestampedRawExcerptForRetrievedSummary() throws IOException {
-        ObjectMapper objectMapper = new ObjectMapper();
-        writeTranscript(objectMapper);
-        TranscriptProvenanceAdvisor advisor = new TranscriptProvenanceAdvisor(
-                new TranscriptSearchService(objectMapper, transcriptDirectory)
-        );
-        Document summary = new Document(
-                "视频：https://example.com/video（案例编号 " + SLUG + "）\n父亲担心女儿洁癖和减肥。",
-                Map.of("title", "父亲求助女儿洁癖减肥", "knowledgeDomain", "psych-cases")
-        );
-        String firstStagePrompt = "父亲要不要介入女儿的洁癖减肥？\n\n首层摘要：父亲担心女儿洁癖和减肥。";
-        ChatClientRequest request = ChatClientRequest.builder()
-                .prompt(new Prompt(firstStagePrompt))
-                .context(Map.of(
-                        TranscriptProvenanceAdvisor.ORIGINAL_QUERY, "父亲要不要介入女儿的洁癖减肥？",
-                        QuestionAnswerAdvisor.RETRIEVED_DOCUMENTS, List.of(summary)
-                ))
-                .build();
-
-        ChatClientRequest enriched = advisor.before(request, null);
-
-        String promptText = enriched.prompt().getUserMessage().getText();
-        assertTrue(promptText.contains("父亲要不要介入女儿的洁癖减肥？"));
-        assertTrue(promptText.contains("首层摘要：父亲担心女儿洁癖和减肥。"));
-        assertTrue(promptText.contains("逐字稿二级检索片段"));
-        assertTrue(promptText.contains(SLUG));
-        assertTrue(promptText.contains("00:00:01-00:00:08"));
-        assertTrue(promptText.contains("https://example.com/video?t=1"));
-        assertTrue(enriched.context().containsKey(TranscriptProvenanceAdvisor.RETRIEVED_SOURCES));
+    void admittedSummaryNeverExpandsIntoUnapprovedRawTranscript() {
+        TranscriptSearchService service = mock(TranscriptSearchService.class);
+        TranscriptProvenanceAdvisor advisor = new TranscriptProvenanceAdvisor(service);
+        Document summary = new Document("案例编号 " + SLUG, Map.of("knowledgeDomain", "psych-cases"));
+        ChatClientRequest request = ChatClientRequest.builder().prompt(new Prompt("请提供原话"))
+                .context(Map.of(QuestionAnswerAdvisor.RETRIEVED_DOCUMENTS, List.of(summary))).build();
+        assertSame(request, advisor.before(request, null));
+        verifyNoInteractions(service);
+        assertFalse(request.context().containsKey(TranscriptProvenanceAdvisor.RETRIEVED_SOURCES));
     }
 
     @Test

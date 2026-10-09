@@ -1,6 +1,8 @@
 package com.dk.dkaiagent.history;
 
 import jakarta.annotation.PostConstruct;
+import com.dk.dkaiagent.config.JdbcDialect;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.UserMessage;
@@ -45,14 +47,22 @@ public class ConversationHistoryService {
     );
 
     private final JdbcTemplate jdbcTemplate;
+    private final JdbcDialect dialect;
     private final int maxMessagesPerConversation;
     private final int titleMaxLength;
 
+    public ConversationHistoryService(JdbcTemplate jdbcTemplate, int maxMessagesPerConversation, int titleMaxLength) {
+        this(jdbcTemplate, maxMessagesPerConversation, titleMaxLength, JdbcDialect.POSTGRESQL);
+    }
+
+    @Autowired
     public ConversationHistoryService(
             JdbcTemplate jdbcTemplate,
             @Value("${app.chat-history.max-messages-per-conversation:1000}") int maxMessagesPerConversation,
-            @Value("${app.chat-history.title-max-length:30}") int titleMaxLength) {
+            @Value("${app.chat-history.title-max-length:30}") int titleMaxLength,
+            JdbcDialect dialect) {
         this.jdbcTemplate = jdbcTemplate;
+        this.dialect = dialect;
         this.maxMessagesPerConversation = requirePositive(maxMessagesPerConversation,
                 "app.chat-history.max-messages-per-conversation");
         this.titleMaxLength = requirePositive(titleMaxLength, "app.chat-history.title-max-length");
@@ -62,15 +72,15 @@ public class ConversationHistoryService {
     void initializeSchema() {
         // 归属列 owner_id 由 UserRepository 的 ALTER TABLE 追加（AUTH-v1 冻结合约）：psych_user
         // 在本 Bean 之后建表（UserRepository @DependsOn 本服务），此处的建表语句无法前向引用其 FK。
-        jdbcTemplate.execute("""
+        jdbcTemplate.execute(dialect.schema("""
                 CREATE TABLE IF NOT EXISTS psych_conversation (
                     id VARCHAR(64) PRIMARY KEY,
                     title VARCHAR(120) NOT NULL,
                     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
                 )
-                """);
-        jdbcTemplate.execute("""
+                """));
+        jdbcTemplate.execute(dialect.schema("""
                 CREATE TABLE IF NOT EXISTS psych_chat_message (
                     id BIGSERIAL PRIMARY KEY,
                     conversation_id VARCHAR(64) NOT NULL
@@ -80,14 +90,14 @@ public class ConversationHistoryService {
                     client_msg_id VARCHAR(64),
                     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
                 )
-                """);
+                """));
         // 幂等键：前端为每轮发送生成 UUID，流中断后重发同一 clientMsgId 不会重复归档。
         // 旧写入 client_msg_id 为 NULL——PostgreSQL 唯一索引中 NULL 互不冲突，历史数据与
         // 不带幂等键的调用路径完全不受约束。
-        jdbcTemplate.execute("""
+        jdbcTemplate.execute(dialect.schema("""
                 ALTER TABLE psych_chat_message ADD COLUMN IF NOT EXISTS client_msg_id VARCHAR(64)
-                """);
-        jdbcTemplate.execute("""
+                """));
+        jdbcTemplate.execute(dialect.schema("""
                 CREATE TABLE IF NOT EXISTS psych_conversation_memory (
                     conversation_id VARCHAR(64) PRIMARY KEY REFERENCES psych_conversation(id) ON DELETE CASCADE,
                     digest TEXT NOT NULL DEFAULT '',
@@ -96,29 +106,29 @@ public class ConversationHistoryService {
                     digest_chars INT NOT NULL DEFAULT 0,
                     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
                 )
-                """);
-        jdbcTemplate.execute("""
+                """));
+        jdbcTemplate.execute(dialect.schema("""
                 CREATE INDEX IF NOT EXISTS idx_psych_chat_message_conversation_id_id
                 ON psych_chat_message (conversation_id, id)
-                """);
-        jdbcTemplate.execute("""
+                """));
+        jdbcTemplate.execute(dialect.schema("""
                 CREATE UNIQUE INDEX IF NOT EXISTS uk_psych_chat_message_client_msg
                 ON psych_chat_message (conversation_id, client_msg_id)
-                """);
-        jdbcTemplate.execute("""
+                """));
+        jdbcTemplate.execute(dialect.schema("""
                 CREATE INDEX IF NOT EXISTS idx_psych_conversation_updated_at
                 ON psych_conversation (updated_at DESC)
-                """);
+                """));
         // 删除墓碑：随 delete() 同事务写入，使聊天流 bootstrap 能区分"从未创建"与"刚被并发删除"，
         // 对已删 id 永久拒绝复活。刻意不加 psych_conversation 的 FK——墓碑正是在会话删除时写入的。
         // UUID 永不复用；墓碑不参与保留期清理，移除墓碑会重新开放旧 id 的 bootstrap 复活路径。
-        jdbcTemplate.execute("""
+        jdbcTemplate.execute(dialect.schema("""
                 CREATE TABLE IF NOT EXISTS psych_conversation_tombstone (
                     conversation_id VARCHAR(64) PRIMARY KEY,
                     owner_id BIGINT NOT NULL,
                     deleted_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
                 )
-                """);
+                """));
     }
 
     public ConversationSummary createConversation(long ownerId) {
@@ -263,13 +273,13 @@ public class ConversationHistoryService {
     public double hoursSincePreviousTurn(String chatId) {
         String normalizedChatId = requireText(chatId, "chatId");
         List<Double> rows = jdbcTemplate.query("""
-                SELECT EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - created_at)) / 3600.0 AS hours
+                SELECT %s AS hours
                 FROM psych_chat_message
                 WHERE conversation_id = ?
                 ORDER BY id DESC
-                OFFSET 1
-                LIMIT 1
-                """, (rs, rowNum) -> rs.getDouble("hours"), normalizedChatId);
+        OFFSET 1 ROWS
+        FETCH NEXT 1 ROWS ONLY
+                """.formatted(dialect.previousTurnHours()), (rs, rowNum) -> rs.getDouble("hours"), normalizedChatId);
         return rows.isEmpty() ? Double.POSITIVE_INFINITY : rows.getFirst();
     }
 
@@ -312,9 +322,9 @@ public class ConversationHistoryService {
                 SELECT id, role, content, created_at
                 FROM psych_chat_message
                 WHERE conversation_id = ? AND role IN ('user', 'assistant')
-                ORDER BY (content ILIKE ?) DESC, id DESC
+                ORDER BY (%s) DESC, id DESC
                 LIMIT ?
-                """, MESSAGE_ROW_MAPPER, normalizedChatId, pattern, limit);
+                """.formatted(dialect.choose("content ILIKE ?", "LOWER(content) LIKE LOWER(?)")), MESSAGE_ROW_MAPPER, normalizedChatId, pattern, limit);
     }
 
     public MemoryStats getMemoryStats(String chatId) {
@@ -334,19 +344,7 @@ public class ConversationHistoryService {
         // compare-and-set：进程内的 per-chat 锁挡不住共享同一库的第二个 JVM。WHERE 使水位只能
         // 前进——过期写者（covered_until 更小）整条更新被跳过且语句返回 0 行，自动成为 no-op，
         // 避免用只见过旧批次的 digest 覆盖胜者、造成胜者已剪枝消息永久丢失。
-        int upserted = jdbcTemplate.update("""
-                INSERT INTO psych_conversation_memory (
-                    conversation_id, digest, covered_until_message_id, covered_message_count, digest_chars, updated_at
-                )
-                VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-                ON CONFLICT (conversation_id) DO UPDATE SET
-                    digest = EXCLUDED.digest,
-                    covered_until_message_id = EXCLUDED.covered_until_message_id,
-                    covered_message_count = EXCLUDED.covered_message_count,
-                    digest_chars = EXCLUDED.digest_chars,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE psych_conversation_memory.covered_until_message_id < EXCLUDED.covered_until_message_id
-                """, normalizedChatId, normalizedDigest, coveredUntilMessageId, coveredMessageCount,
+        int upserted = jdbcTemplate.update(dialect.memoryUpsert(), normalizedChatId, normalizedDigest, coveredUntilMessageId, coveredMessageCount,
                 normalizedDigest.length());
         // 只有真正推进了水位的写者才剪枝：保持"剪枝范围必被当前 digest 覆盖"的不变量闭合。
         if (upserted > 0) {
@@ -387,11 +385,7 @@ public class ConversationHistoryService {
         if (deleted) {
             // 同事务补墓碑：堵住"校验通过后被并发删除"时 bootstrap 把"行不存在"误读为"从未创建"
             // 而复活已删会话的路径（见 appendMessage 用户路径的条件插入）。
-            jdbcTemplate.update("""
-                    INSERT INTO psych_conversation_tombstone (conversation_id, owner_id)
-                    VALUES (?, ?)
-                    ON CONFLICT (conversation_id) DO UPDATE SET deleted_at = CURRENT_TIMESTAMP
-                    """, normalizedChatId, ownerId);
+            jdbcTemplate.update(dialect.tombstoneUpsert(), normalizedChatId, ownerId);
         }
         return deleted;
     }
@@ -409,15 +403,7 @@ public class ConversationHistoryService {
             // 创建时必须写 owner_id；冲突不落行，归属交由下面的守卫统一裁决。
             // 墓碑条件：对已被并发删除的 id（delete() 同事务已写墓碑）原子地不落行——随后的
             // requireConversationOwnedBy 查不到行即抛异常（控制器 404），已删会话绝不复活。
-            jdbcTemplate.update("""
-                    INSERT INTO psych_conversation (id, title, owner_id, created_at, updated_at)
-                    SELECT ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
-                    WHERE NOT EXISTS (
-                        SELECT 1 FROM psych_conversation_tombstone t
-                        WHERE t.conversation_id = ?
-                    )
-                    ON CONFLICT (id) DO NOTHING
-                    """, normalizedChatId, initialTitle, ownerId, normalizedChatId);
+            jdbcTemplate.update(dialect.conversationBootstrap(), normalizedChatId, initialTitle, ownerId, normalizedChatId);
             // 零窗口墓碑复核：闭合"快照 vs 冲突等待"缝隙——条件插入内的 NOT EXISTS 快照先于唯一索引
             // 冲突阻塞求值，若并发删除事务在我们等待冲突期间提交，NOT EXISTS 已过期、插入会实体化并复活
             // 刚被删除的会话（同一竞态对 deleteById 还会经 owner_id FK 锁升级为死锁，Postgres 牺牲一方后
@@ -446,11 +432,7 @@ public class ConversationHistoryService {
                     """, initialTitle, normalizedChatId, DEFAULT_TITLE);
             // client_msg_id 唯一索引 + ON CONFLICT DO NOTHING：重发轮次在此原子去重，不落重复行。
             // NULL 键在 PostgreSQL 唯一索引中互不冲突，不带幂等键的写入永不触发 DO NOTHING 分支。
-            inserted = jdbcTemplate.update("""
-                    INSERT INTO psych_chat_message (conversation_id, role, content, client_msg_id, created_at)
-                    VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
-                    ON CONFLICT (conversation_id, client_msg_id) DO NOTHING
-                    """, normalizedChatId, role, normalizedContent, clientMsgId);
+            inserted = jdbcTemplate.update(dialect.userMessageInsert(), normalizedChatId, role, normalizedContent, clientMsgId);
         } else {
             // 助手路径绝不 upsert 父行：用户删会话后仍在收尾的流式回答若盲写，会把已删会话
             // 以"新会话"复活并留下孤儿消息。单语句 EXISTS 守卫与 DELETE 提交原子——删除先提交
@@ -497,8 +479,7 @@ public class ConversationHistoryService {
 
     /**
      * 会话归属查询。行不存在与 owner_id 为 NULL（遗留数据未完成归属迁移）统一收敛为
-     * Optional.empty，即"当前调用方无主"；AdminBootstrap 的启动迁移先于请求流量完成，
-     * NULL 只是兜底防线。
+     * Optional.empty，即当前调用方无权访问；启动保留无主数据，归属需人工明确映射。
      */
     private Optional<Long> findConversationOwner(String chatId) {
         List<Long> owners = jdbcTemplate.query("""

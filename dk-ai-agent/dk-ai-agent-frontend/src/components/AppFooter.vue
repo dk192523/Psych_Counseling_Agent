@@ -3,7 +3,7 @@
     <div class="footer-content">
       <div class="footer-section">
         <div class="footer-logo">
-          <h3>AI 心理咨询师</h3>
+          <h3><BrandLogo :size="28" alt="" /><span>AI 心理咨询师</span></h3>
           <p>陪你把经历说清楚，把感受放稳。</p>
         </div>
       </div>
@@ -34,6 +34,7 @@
 
 <script setup>
 import { computed } from 'vue'
+import BrandLogo from './BrandLogo.vue'
 
 // 计算当前年份
 const currentYear = computed(() => new Date().getFullYear())
@@ -68,6 +69,9 @@ const currentYear = computed(() => new Date().getFullYear())
 }
 
 .footer-logo h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   font-size: 1.25rem;
   margin-bottom: 15px;
   color: #333;

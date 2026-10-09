@@ -4,6 +4,8 @@
 
 这是一套源码构建型 Docker Compose 部署。宿主机只发布前端入口 `3004`；PostgreSQL、Java 后端 `8123`、Python AI Worker `8000` 都只在 Docker 内网通信。
 
+腾讯云发布包不包含 `counseling-kb/raw` 原始逐字稿，Compose 不配置或挂载 raw。来源清单将这些材料标为 `quarantine`、审核 `pending`、许可及 PII 状态 `unknown`，它们只保留在仓库用于离线治理。当前 Java 向 Worker 固定发送 `snippetsPerCase=0`，部署不依赖 raw 目录。不得为了通过部署检查而复制旧逐字稿。
+
 > OrcaTerm（遨驰终端）是腾讯云网页终端和文件管理工具，不是应用商店式部署面板。下面所有命令都在 OrcaTerm 的终端中执行，压缩包从它的文件管理区上传。
 > 官方参考：[OrcaTerm 文件管理](https://cloud.tencent.com/document/product/1665/84580)、[腾讯云搭建 Docker](https://cloud.tencent.com/document/product/213/46000)、[添加安全组规则](https://cloud.tencent.com/document/product/213/112614)。
 
@@ -40,6 +42,7 @@ HTTP 不加密登录 Cookie 和咨询内容，不适合给真实用户长期使�
 - 出站 HTTPS 可访问 Docker Hub、Maven Central、npm、PyPI、GitHub 模型文件和 DeepSeek API
 - Docker Engine 与 Docker Compose v2
 - `age`（加密备份必需）、Bash 与 GNU coreutils（提供 `realpath`、`stat`、`sha256sum`、`mktemp`、`mv -nT`）
+- Python 3（`migration-preflight` 只读迁移预检使用，仅依赖标准库）
 
 2 核 4 GiB 可能运行，但在首次同时构建 Java、Node、Python 镜像时更容易内存不足。服务器构建失败时优先升级内存或增加 swap，而不是反复重试。
 
@@ -65,6 +68,8 @@ HTTPS 正式部署：
 | TCP | 443 | 0.0.0.0/0 | HTTPS 网页访问 |
 
 ## 4. 用 OrcaTerm 上传并校验压缩包
+
+在本地仓库根目录构建后，用 `verify-package.ps1 -ArchivePath <完整 ZIP 路径>` 校验待上传的包。验证器会在校验 manifest 前明确拒绝任何 `counseling-kb/raw` 条目；旧版含 raw 的 ZIP 不能作为当前发布包使用。CI 同时检查正常包和合成 raw 污染包，并确认发布 Compose 没有逐字稿目录配置或挂载。
 
 在腾讯云控制台打开目标 CVM/轻量服务器的 OrcaTerm，进入文件管理，上传这两个文件到同一目录：
 
@@ -227,12 +232,11 @@ cd /opt/psych-counseling-agent
 
 - Docker daemon 与 Compose v2
 - 必填密钥是否仍是占位符
-- 逐字稿目录是否存在
 - 磁盘空间
 - `3004` 是否被其他进程占用
 - Compose 配置能否解析
 
-它不会自动杀死占用端口的进程。首次 `deploy` 会下载基础镜像、Maven/npm/Python 依赖和 ONNX 模型，并初始化向量数据，耗时取决于服务器网络。Java 容器的 readiness 会等当前语料版本完成向量灌注后才放行前端，因此脚本显示“服务已就绪”时知识库已经可用。
+它不会自动杀死占用端口的进程，也不检查或要求 raw 目录。首次 `deploy` 会下载基础镜像、Maven/npm/Python 依赖和 ONNX 模型，并按 manifest 准入结果初始化向量数据，耗时取决于服务器网络。Java 容器的 readiness 会等当前语料版本初始化完成后才放行前端；就绪不代表存在获准知识来源，当前没有合格来源时检索集为空。
 
 查看状态和日志：
 
@@ -395,71 +399,18 @@ BACKUP_AGE_IDENTITY_FILE=/安全介质/psych-backup-identity.txt \
 
 ## 10. 安全升级流程
 
-以下流程保留旧目录和固定 Compose 数据卷，不覆盖当前 `.env`。执行前先完成第 9.1 节的 `age` 安装与公钥配置；从旧版升级时须将新备份脚本同步到当前部署目录，避免旧版 `backup` 仍生成明文文件。旧脚本可以另行留档，完成切换后运行下面流程：
+已有多用户云端 PostgreSQL 按 [同库原地升级](MIGRATION_SAME_DATABASE.md) 执行。该文档随腾讯云 ZIP 一起发布，包含只读预检、age 加密备份、隔离恢复演练、维护窗口切换及回滚条件。
 
 ```bash
-(
-set -Eeuo pipefail
-cd ~
-PACKAGE='Psych_Counseling_Agent_TencentCloud_3004_YYYYMMDD-HHMMSS.zip'
-test -f "$PACKAGE" && test -f "$PACKAGE.sha256" || {
-  echo "找不到部署包或校验文件，请检查 PACKAGE 的完整文件名"
-  exit 1
-}
-sha256sum -c "$PACKAGE.sha256"
-
-RELEASE_DIR="/opt/psych-release-$(date +%Y%m%d-%H%M%S)"
-sudo mkdir -p "$RELEASE_DIR"
-sudo unzip -q "$PACKAGE" -d "$RELEASE_DIR"
-sudo chown -R "$USER":"$USER" "$RELEASE_DIR"
-
-NEW_DIR="$RELEASE_DIR/Psych_Counseling_Agent_Server"
-test -f "$NEW_DIR/manage.sh"
-test -f "$NEW_DIR/dk-ai-agent/docker-compose.yml"
-test -d "$NEW_DIR/counseling-kb/raw"
-cp /opt/psych-counseling-agent/dk-ai-agent/.env "$NEW_DIR/dk-ai-agent/.env"
-chmod 600 "$NEW_DIR/dk-ai-agent/.env"
-chmod +x "$NEW_DIR/manage.sh"
-bash -n "$NEW_DIR/manage.sh"
-
-# 先用新版本脚本完成配置、语料、磁盘和端口检查；此时旧服务仍在线。
-cd "$NEW_DIR"
-./manage.sh check
-
-cd /opt/psych-counseling-agent
-./manage.sh backup
-./manage.sh stop
-
-PREVIOUS_DIR="/opt/psych-counseling-agent.previous-$(date +%Y%m%d-%H%M%S)"
-echo "旧版本目录将保留为：$PREVIOUS_DIR"
-sudo mv /opt/psych-counseling-agent "$PREVIOUS_DIR"
-sudo mv "$NEW_DIR" /opt/psych-counseling-agent
-sudo chown -R "$USER":"$USER" /opt/psych-counseling-agent
-
-cd /opt/psych-counseling-agent
-./manage.sh check
-./manage.sh deploy
-)
+# 在新包目录中复制原 .env 后，检查仍在运行的旧 postgres。
+./manage.sh migration-preflight
 ```
 
-子 Shell 开启了失败即停：校验、解压、预检查或备份失败时，不会继续停旧服务。若目录切换后的 `deploy` 失败，按命令输出复制旧版本的完整路径并回滚：
+预检核对当前 Compose 项目、运行容器标签、实际 `postgres_data` 命名卷和数据库完整性。缺表/缺列、无主会话、归属失配、错误卷或空用户库会非零退出，需要人工确认 schema 和归属映射，不能启动新空卷来规避。
 
-```bash
-(
-set -Eeuo pipefail
-PREVIOUS_DIR='/opt/psych-counseling-agent.previous-YYYYMMDD-HHMMSS'
-FAILED_DIR="/opt/psych-counseling-agent.failed-$(date +%Y%m%d-%H%M%S)"
-test -d "$PREVIOUS_DIR"
-(cd /opt/psych-counseling-agent && ./manage.sh stop) || true
-sudo mv /opt/psych-counseling-agent "$FAILED_DIR"
-sudo mv "$PREVIOUS_DIR" /opt/psych-counseling-agent
-sudo chown -R "$USER":"$USER" /opt/psych-counseling-agent
-cd /opt/psych-counseling-agent
-./manage.sh deploy
-)
-```
+升级必须保留原 `.env`、`COMPOSE_PROJECT_NAME` 和 named volume；先完成加密备份和隔离恢复演练，再在维护窗口停旧、做最终备份和预检、最后启新。绝不执行 `down -v`。备份校验不能替代恢复演练，新旧后端不能同时运行。
 
-新版本确认稳定后再人工清理旧目录。备份随旧目录一并保留，当前目录的保留期清理不会跨到旧目录；清理旧目录前先把所需备份的三个文件迁移到受控异地存储并完成校验。不要清理名为 `psych-counseling-agent_*` 的 Docker volumes。
+新版本修改 schema 后，旧程序不一定还能读取原库。回滚必须先验证兼容性；不兼容时把升级前备份恢复到独立空库/空卷，不能直接覆盖非空业务库。不同数据库的整库恢复也仅允许空目标，非空库合并另立项目。桌面 H2 不适用于多用户云端迁移。
 
 ## 11. 常见故障
 
