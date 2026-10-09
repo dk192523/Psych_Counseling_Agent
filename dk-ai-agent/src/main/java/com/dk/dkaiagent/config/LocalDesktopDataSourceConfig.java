@@ -33,10 +33,20 @@ public class LocalDesktopDataSourceConfig {
     }
 
     static Path resolveDataDirectory(String configured, String localAppData, Path userHome, Path workingDirectory) {
+        return resolveDataDirectory(configured, localAppData, userHome, workingDirectory,
+                System.getProperty("os.name", "").startsWith("Windows"));
+    }
+
+    static Path resolveDataDirectory(String configured, String localAppData, Path userHome,
+                                     Path workingDirectory, boolean windows) {
+        // Match the Windows client data directory while retaining the existing non-Windows fallback.
+        Path fallbackRoot = windows ? userHome.resolve("AppData").resolve("Local")
+                : userHome.resolve(".local").resolve("share");
         Path directory = configured != null && !configured.isBlank() ? Path.of(configured)
                 : localAppData != null && !localAppData.isBlank()
                     ? Path.of(localAppData).resolve("PsychCounselor")
-                    : userHome.resolve(".local/share/PsychCounselor");
+                    : fallbackRoot.resolve("PsychCounselor");
+        if (windows && (configured == null || configured.isBlank())) directory = directory.resolve("data");
         if (!directory.isAbsolute()) throw new IllegalArgumentException("Desktop data directory must be absolute");
         directory = directory.normalize();
         String text = directory.toString();

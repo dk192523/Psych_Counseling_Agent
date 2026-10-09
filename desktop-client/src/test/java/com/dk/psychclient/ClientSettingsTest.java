@@ -17,6 +17,34 @@ class ClientSettingsTest {
     Path directory;
 
     @Test
+    void currentUserSettingsUseAndNormalizeLocalAppData() {
+        Path home = directory.resolve("home");
+        Path localAppData = directory.resolve("local-app-data").resolve("unused").resolve("..");
+
+        ClientSettings settings = ClientSettings.forCurrentUser(localAppData.toString(), home);
+
+        assertEquals(directory.resolve("local-app-data/PsychCounselor/client.properties"), settings.file());
+        assertEquals(directory.resolve("local-app-data/PsychCounselor/data"), settings.dataDirectory());
+        assertFalse(settings.file().startsWith(directory.resolve("install")));
+        assertFalse(Files.exists(settings.file()));
+    }
+
+    @Test
+    void currentUserSettingsFallBackToAppDataLocalWhenLocalAppDataIsMissing() {
+        Path home = directory.resolve("home");
+        Path expected = home.resolve("AppData/Local/PsychCounselor/client.properties");
+
+        for (String localAppData : new String[]{null, "", "   "}) {
+            ClientSettings settings = ClientSettings.forCurrentUser(localAppData, home);
+
+            assertEquals(expected, settings.file());
+            assertEquals(expected.getParent().resolve("data"), settings.dataDirectory());
+            assertFalse(settings.file().startsWith(directory.resolve("install")));
+            assertFalse(Files.exists(settings.file()));
+        }
+    }
+
+    @Test
     void firstRunHasNoImplicitDomainAndDoesNotWriteAFile() throws IOException {
         Path file = directory.resolve("PsychCounselor/client.properties");
         ClientSettings settings = new ClientSettings(file);

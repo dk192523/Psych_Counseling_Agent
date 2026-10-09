@@ -29,9 +29,72 @@ class LocalDesktopDataSourceConfigTest {
         Path localAppData = root.resolve("local-app-data");
 
         Path resolved = LocalDesktopDataSourceConfig.resolveDataDirectory("", localAppData.toString(),
-                root.resolve("home"), root.resolve("working"));
+                root.resolve("home"), root.resolve("working"), true);
 
-        assertEquals(localAppData.resolve("PsychCounselor"), resolved);
+        assertEquals(localAppData.resolve("PsychCounselor/data"), resolved);
+        assertFalse(resolved.startsWith(root.resolve("working")));
+        assertFalse(Files.exists(resolved));
+    }
+
+    @Test
+    void windowsFallsBackToAppDataLocalWhenLocalAppDataIsMissing() {
+        Path home = root.resolve("home");
+        Path working = root.resolve("working");
+
+        for (String localAppData : new String[]{null, "", "   "}) {
+            Path resolved = LocalDesktopDataSourceConfig.resolveDataDirectory("", localAppData,
+                    home, working, true);
+
+            assertEquals(home.resolve("AppData/Local/PsychCounselor/data"), resolved);
+            assertFalse(resolved.startsWith(working));
+            assertFalse(Files.exists(resolved));
+        }
+    }
+
+    @Test
+    void nonWindowsRetainsLocalShareFallback() {
+        Path home = root.resolve("home");
+
+        Path resolved = LocalDesktopDataSourceConfig.resolveDataDirectory("", null,
+                home, root.resolve("working"), false);
+
+        assertEquals(home.resolve(".local/share/PsychCounselor"), resolved);
+    }
+
+    @Test
+    void explicitConfiguredDirectoryTakesPrecedenceAndIsNormalized() {
+        Path configured = root.resolve("configured").resolve("unused").resolve("..");
+
+        for (boolean windows : new boolean[]{true, false}) {
+            for (String localAppData : new String[]{null, root.resolve("local-app-data").toString()}) {
+                Path resolved = LocalDesktopDataSourceConfig.resolveDataDirectory(configured.toString(),
+                        localAppData, root.resolve("home"), root.resolve("working"), windows);
+
+                assertEquals(root.resolve("configured"), resolved);
+                assertFalse(Files.exists(resolved));
+            }
+        }
+    }
+
+    @Test
+    void normalizesLocalAppDataBeforeCheckingWorkingDirectory() {
+        Path working = root.resolve("working");
+        Path localAppData = root.resolve("local-app-data").resolve("unused").resolve("..");
+
+        Path resolved = LocalDesktopDataSourceConfig.resolveDataDirectory("", localAppData.toString(),
+                root.resolve("home"), working, true);
+
+        assertEquals(root.resolve("local-app-data/PsychCounselor/data"), resolved);
+        assertThrows(IllegalArgumentException.class, () -> LocalDesktopDataSourceConfig.resolveDataDirectory(
+                "", working.resolve("unused/..").toString(), root.resolve("home"), working, true));
+    }
+
+    @Test
+    void rejectsWindowsFallbackInsideInstallDirectory() {
+        Path home = root.resolve("home");
+
+        assertThrows(IllegalArgumentException.class, () -> LocalDesktopDataSourceConfig.resolveDataDirectory(
+                "", null, home, home.resolve("AppData/Local"), true));
     }
 
     @Test

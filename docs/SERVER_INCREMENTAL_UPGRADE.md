@@ -1,8 +1,8 @@
 # 服务器旧版本增量升级指南
 
-本文用于把本仓库当前这批审计修复同步到服务器上的旧版“AI 心理咨询师”项目。它不是首次部署说明；首次部署、HTTPS、安全组和日常运维仍以 [`deploy/tencent-cloud/DEPLOY_TENCENT_CLOUD.md`](../deploy/tencent-cloud/DEPLOY_TENCENT_CLOUD.md) 为准。
+本文保留旧版“AI 心理咨询师”各轮审计修复与增量升级的历史记录，不能作为当前云端同库升级的独立操作手册。当前已有多用户 PostgreSQL 的升级、预检、备份恢复演练、停旧启新与回滚，以 [`deploy/tencent-cloud/MIGRATION_SAME_DATABASE.md`](../deploy/tencent-cloud/MIGRATION_SAME_DATABASE.md) 为准；首次部署、HTTPS、安全组和日常运维仍以 [`deploy/tencent-cloud/DEPLOY_TENCENT_CLOUD.md`](../deploy/tencent-cloud/DEPLOY_TENCENT_CLOUD.md) 为准。
 
-> 推荐使用第 3 节的完整部署包换版，不要在生产服务器上逐个复制 Java/Python 文件。完整换版能同时更新后端、Worker、前端和部署脚本，并保留服务器 `.env`、PostgreSQL 数据卷和模型缓存卷。
+> 当前升级须先按同库升级指南核对原项目、原卷和范围外存储，通过只读预检并完成 age 加密备份及隔离空库恢复演练，再在维护窗口停止旧后端后启动新后端。完整部署包用于同步更新后端、Worker、前端和脚本；使用整包并不能自动证明数据已保全或旧版本可安全回滚。下文第 3、4、6 节的命令仅保留为历史操作示例，不能跳过当前指南的门禁直接执行。
 
 ## 1. 本次更新内容
 
@@ -84,16 +84,16 @@ dk-ai-agent/src/main/java/com/dk/dkaiagent/history/ConversationUnavailableExcept
 
 ## 2. 数据库和配置兼容性
 
-### 2.1 本次没有数据库结构迁移
+### 2.1 历史首轮无结构迁移，当前版本须核对 schema
 
-本批修复没有新增或删除 PostgreSQL 表、列、索引，也不需要手工执行 SQL。已有以下数据应原样保留：
+仅本文首轮审计修复当时没有新增或删除 PostgreSQL 表、列、索引。后续版本已追加 `client_msg_id`、索引及 `psych_chat_turn` 等结构；当前 schema 由启动初始化器管理，没有迁移版本登记表。自动初始化不等于没有迁移，也不意味着任意旧库均可直接启动。升级前须按同库升级指南检查关键表/列、归属及完整性；缺表缺列或无主数据应阻塞，由管理员制定单独审核的升级方案。以下数据及其完整用户归属关系必须保全：
 
 - 用户和管理员账号；
 - 会话与消息；
 - 长期记忆摘要；
 - PgVector 向量数据。
 
-虽然没有 schema migration，升级前仍必须备份数据库，因为容器构建、目录切换或人为操作仍可能失败。
+只读预检通过仅代表当次快照通过，不证明当前云端兼容性或可恢复性。升级前必须完成 age 加密备份和隔离空库恢复演练；停写后还须生成最终备份、确认恢复并再次预检。新应用初始化可能写入 schema、恢复轮次或重新初始化向量索引，必须停旧后启新。
 
 ### 2.2 不要用新模板覆盖生产 `.env`
 
@@ -152,7 +152,7 @@ npm.cmd run build
 cd ..\..
 ```
 
-本次审计完成时的基线结果为：
+以下是本文首轮审计代码快照的历史基线（早于 2026-08-29 第二轮，原记录未注明精确执行日期），只适用于当时的代码和测试环境：
 
 ```text
 Java:   244 tests，0 failures，0 errors，6 skipped
@@ -160,7 +160,7 @@ Python: 22 passed
 Frontend: Vite production build succeeded
 ```
 
-跳过的 Java 项目是需要真实模型、数据库或显式环境变量的门控集成测试。
+当时跳过的 Java 项目是需要真实模型、数据库或显式环境变量的门控集成测试。这些历史数量及构建结果不能证明当前代码、真实云端数据库、Worker/LLM、TLS/Cookie 行为或回滚兼容性；当前发布须重新验证实际部署版本并完成同库升级指南要求的验收。
 
 然后在项目根目录生成腾讯云部署包：
 
@@ -193,6 +193,8 @@ sha256sum -c "$PACKAGE.sha256"
 必须看到 `OK`。不要用 `*.zip` 自动选包，以免服务器存在多个版本时误选旧文件。
 
 ### 3.3 备份并安全切换目录
+
+本节是历史换目录流程，未包含当前所需的完整挂载盘点、只读预检、隔离恢复演练及停写后的最终备份确认。当前生产升级请执行同库升级指南第 1–3 节；不要直接运行下面示例替代该流程。
 
 下面流程会：
 
@@ -253,6 +255,8 @@ cd "$CURRENT_DIR"
 `deploy` 使用 `--build`，会重建 Java 后端、Python Worker 和 Vue 前端镜像。不能只重启旧容器，否则新源码不会进入镜像。
 
 ## 4. 仅在无法整包换版时手工同步
+
+本节文件清单仅对应历史首轮修复，不是当前版本的完整升级清单。即使采用人工合并，当前同库升级的预检、备份恢复演练和停旧启新要求仍须满足。
 
 手工增量方式更容易遗漏删除文件或前端资源，只作为应急方案。至少要同步以下生产文件：
 
@@ -353,7 +357,7 @@ docker volume ls | grep psych-counseling-agent
 
 ## 6. 回滚
 
-如果新版本启动或验收失败，使用切换时输出的旧目录完整路径：
+同库升级后，schema 与数据可能已被新应用修改，不能假设替换旧目录即可回滚。应事先在隔离环境验证旧应用能读取升级后的 schema/数据；只有兼容性已验证，且先停止新实例并确认退出后，才可直接切回。以下仅保留历史目录切换示例，不构成兼容性证明或通用回滚方案：
 
 ```bash
 (
@@ -372,7 +376,7 @@ cd "$CURRENT_DIR"
 )
 ```
 
-本次没有数据库 schema 迁移，通常可以直接回滚应用目录并复用原数据卷。如果升级后已经产生新消息，回滚应用不会删除这些数据。只有确认数据库本身损坏或被误操作时，才考虑从 dump 恢复；恢复会覆盖备份时间点之后的数据，必须另行评估。
+若旧应用与升级后的库兼容性未验证或不兼容，应保持服务停止，先保全升级后的 age 加密备份，再按已验证方案把升级前备份恢复到独立空库/空卷，核对用户归属、数据及应用行为后切换。禁止对现有业务库执行 `pg_restore --clean` 或删除原卷“重试”。恢复到升级前备份不包含其后的写入，须另行评估和保全；具体步骤以同库升级指南第 4 节为准。
 
 新版本稳定后再手工清理：
 
@@ -398,7 +402,7 @@ cd "$CURRENT_DIR"
 
 - 前端为每轮发送生成 UUID（`PsychMaster.vue` 的 `newClientMsgId`），随 POST body 以 `clientMsgId` 传入；SSE 中断后自动/手动重发沿用同一键。
 - `psych_chat_message` 新增列 `client_msg_id VARCHAR(64)` 与唯一索引 `(conversation_id, client_msg_id)`，由 `initializeSchema` 的 `ADD COLUMN IF NOT EXISTS` / `CREATE UNIQUE INDEX IF NOT EXISTS` 幂等追加，**无需手工 SQL**；用户消息 INSERT 带 `ON CONFLICT (conversation_id, client_msg_id) DO NOTHING`，重放原子地不落行。
-- **注意**：这修正了 §2.1 "本次没有数据库结构迁移"的说法——第二轮起表结构有一次列与索引的幂等追加，仍不需要手工执行 SQL，重启 backend 即自动生效。
+- **历史说明**：第二轮起表结构已有列与索引的幂等追加。该轮由初始化器自动追加的实现记录不能作为当前任意旧库直接重启的依据；当前升级仍须先核对 schema 并满足同库升级指南的门禁。
 
 ### 8.2 前端分级容错
 
@@ -467,7 +471,7 @@ cd "$CURRENT_DIR"
 
 1. 备份数据库与环境配置，确认单副本；停旧实例后再起新实例，不能滚动重叠启动。
 2. 用 `mvnw clean package` 构建，避免旧名称知识库资源残留在 target/classes。前端需要 Node 24.15+（本轮 24.19 验证），执行 npm ci、lint、test、build。
-3. 首次启动自动新建 psych_chat_turn 和索引，不改写现有正文。回滚旧代码前先停止新实例；旧版本忽略新表，但不再具备新的幂等及安全保障。
+3. 当时首次启动自动新建 psych_chat_turn 和索引，不改写现有正文。这是该轮实现记录；当前回滚须先停止新实例，并事先验证旧应用与升级后 schema/数据兼容，不能仅凭旧版本忽略新表推断可安全回滚。
 4. 公网 `.env` 使用 SESSION_COOKIE_SECURE=true、APP_REGISTRATION_ENABLED=false，HTTPS 反代后环回绑定；本地 HTTP 启动器显式使用 false/true。不要覆盖私有 `.env`。
 5. 验收 GET /api/auth/csrf、登录后 token 轮换、关闭注册、会话读写、停止、同键重放、ADMIN metrics；抓取首页和静态资源确认安全响应头。外部脚本也必须接入 CSRF。
 6. 本轮没有部署现有运行栈、没有执行真实聊天模型 E2E；上线验收仍须验证真实 Worker/LLM 以及正式域名 TLS/Cookie 行为。
@@ -480,8 +484,8 @@ cd "$CURRENT_DIR"
    的组合会因缺 `X-CSRF-TOKEN` 被拒（403 CSRF_INVALID）。整包换版（同时替换 frontend 与
    backend 镜像）是唯一安全顺序。
 2. **新增表 `psych_chat_turn`**（局部唯一索引实现"每会话仅一个生成中轮次"+ request_hash 幂等）。
-   DDL 由 initializeSchema 幂等追加，无需手工 SQL；**回滚须先停新实例**——旧实例不认识新表，
-   但新实例写入的 turn 行会残留（无害但应知）。
+   当时 DDL 由 initializeSchema 幂等追加；当前缺表缺列的旧库须先按同库升级指南受控处理，
+   不能依赖启动自动补齐绕过预检。**回滚须先停新实例并验证兼容性**；不能把旧实例不认识新表或 turn 行残留视为无害保证。
 3. **必须 clean 构建**：`target/` 残留曾导致知识库 1654 个文档重复加载（启动时长翻倍）。
    本地构建用 `mvn clean package`，容器构建不受影响（多阶段构建自带干净上下文）。
 4. **CI 首跑**：`.github/workflows/ci.yml` 为本轮新增，push 后首次实际运行。Java job 起
@@ -505,6 +509,8 @@ Java 后端仅支持 `APP_DEPLOYMENT_MODE=single`、`APP_REPLICA_COUNT=1`（默�
 真正多副本仍需共享 Session/跨实例吊销、全局限流、turn lease/fencing、记忆整合协调和按所有权恢复 RUNNING 轮次；sticky session 与 instance ID 均不能替代这些能力。本次门禁和纯单元测试已添加，但本次未运行测试或真实数据库验证。
 ## 13. 备份恢复 SOP（2026-09-20 本地全流程演练通过）
 
+以下仅记录 2026-09-20 当时的本地容器与脚本快照演练，不证明当前生产库已备份、可完整恢复或可安全回滚。当前操作以同库升级指南的备份与隔离恢复要求为准。
+
 工具链：`manage.sh backup`（age X25519 公钥流式加密，明文不落盘）→ 三件套
 （`.dump.age` 密文 + `.sha256` + `.manifest`）→ `manage.sh verify-backup` 校验 →
 `age -d` 解密 → `pg_restore` 恢复。演练结果（本地容器，真实生产包脚本）：
@@ -516,7 +522,7 @@ Java 后端仅支持 `APP_DEPLOYMENT_MODE=single`、`APP_REPLICA_COUNT=1`（默�
   与源库逐表一致。
 
 日常 SOP：cron 每日 backup；私钥**不存服务器**（离线保存）；恢复演练每季度一次
-（恢复到临时容器比对行数即可，不必覆盖生产）。
+（恢复到隔离空库，并检查 schema、约束、归属、消息顺序、记忆水位、幂等键、墓碑和向量维度，同时验证账号登录与跨用户隔离；仅比对行数不足以证明恢复完整）。
 
 ## 14. 第七轮增量（2026-09-20：本地闭环收尾——备份演练、RAG 换型与工具修复）
 

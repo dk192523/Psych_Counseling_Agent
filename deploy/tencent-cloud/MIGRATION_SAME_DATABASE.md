@@ -2,7 +2,11 @@
 
 适用范围：腾讯云已有多用户 PostgreSQL，在**同一数据库、同一 Compose 项目、同一 `postgres_data` named volume** 上切换应用版本。不是 PostgreSQL → 桌面 H2，不合并多个数据库，不支持两个后端 JVM 同时运行。PostgreSQL 跨大版本升级另做专门方案；当前镜像要求 PostgreSQL 16。
 
-预检只覆盖上述 PostgreSQL 数据库，不能发现 bind mount 中的用户文件、对象存储/COS、其他数据库或其他卷中的数据。升级前须另行盘点这些存储的位置、所属用户、访问权限和应用引用关系，并完成经过校验的复制或备份恢复；数据库预检通过不能证明这些数据已保全。不得自动把私人聊天记录或用户文件转换为共享知识库内容。
+预检会盘点当前 Compose 的全部声明服务、挂载和顶层命名卷，并逐一检查各声明服务的运行容器实际挂载。当前明确分类为：`postgres_data` 挂载至 postgres 的 `/var/lib/postgresql/data`，是必须保全的数据库；`onnx_cache`、`djl_cache` 分别挂载至 backend 的 `/tmp/spring-ai-onnx-generative`、`/home/app/.djl.ai`，是可重新下载生成的模型缓存。分类要求服务、逻辑卷和容器目标三者匹配；仅凭卷名相同不能通过。未知命名卷（包括未引用的顶层卷）、匿名持久化卷、bind mount（含只读挂载）、额外挂载、存储驱动参数或尚不支持的 configs/secrets/volumes_from 均阻止通过，须先人工盘点，不能直接忽略。
+
+预检另外使用 Docker 项目标签过滤，只查询已验证的当前 Compose 项目中运行容器的服务标签，以发现当前配置删除或改名后仍运行的孤儿容器。任何未声明或缺失服务标签的运行容器都会在 SQL 前阻断，包括另一个旧 backend；不会输出其容器 ID、镜像、服务标签或路径，也不会自动停止它。项目运行清单最多接受 256 条、65536 个字符，超限或元数据异常均失败关闭；已声明服务继续接受逐容器挂载核对。旧实例需由管理员确认并停止后重新预检。
+
+这一清单不读取挂载内的文件，不检查未运行容器的实际挂载，也不能发现其他 Compose 项目、缺失当前项目标签的容器、容器可写层文件、对象存储/COS、远程数据库或代码通过网络访问的其他存储。未运行服务只覆盖 Compose 声明，其数量会单独报告；允许停止 backend/Worker/frontend 后再次预检，postgres 仍必须唯一且正在运行。升级前须另行盘点范围外存储的位置、所属用户、访问权限和应用引用关系，并完成经过校验的复制或备份恢复；预检通过不能证明这些数据已保全。不得自动把私人聊天记录或用户文件转换为共享知识库内容。
 
 ## 1. 先识别原项目和原卷
 
@@ -16,11 +20,13 @@ chmod +x manage.sh
 ./manage.sh migration-preflight
 ```
 
-预检依赖 Docker Compose v2 与 Python 3 标准库，不要求启动新容器。Compose 在内存解析现有配置；程序不直接读取 `.env` 内容、不输出配置/用户名/密码/正文。它只执行 Compose `config`、`ps`、Docker 容器/卷元数据检查，以及当前 postgres 内的 `psql` 只读查询；没有 `up`、`start`、`restart`、`down`、建表、修复、恢复或归属写入。
+预检依赖 Docker Compose v2 与 Python 3 标准库，不要求启动新容器。Compose 在内存解析现有配置；程序不直接读取 `.env` 内容、不输出配置/用户名/密码/正文。它只执行 Compose `config`、`ps`、按项目过滤的 Docker `ps`、Docker 容器/卷元数据检查，以及当前 postgres 内的 `psql` 只读查询；没有 `up`、`start`、`restart`、`down`、建表、修复、恢复或归属写入。
 
-输出包含项目名/实际卷名、PostgreSQL/pgvector 版本、schema 指纹、关键表/列完整性、用户/会话/消息/记忆/轮次/墓碑/知识向量计数、无主/失配及孤儿数量。当前应用由启动初始化器管理 schema，没有迁移版本登记表，因此 `schema_version=unversioned-initializers` 不是推测出的版本号；结构指纹只用于比较，不代替 schema 兼容性验证。报告是同一 `REPEATABLE READ READ ONLY` 事务内的快照；使用只读会话默认值、查询/锁超时，最终 `ROLLBACK`。它不输出行 ID 或具体归属清单。
+输出包含项目名/数据库实际卷名、固定顺序的 `mount_inventory.*` 聚合计数（声明挂载、顶层命名卷、观察到的运行容器挂载，以及服务/容器覆盖数量）、PostgreSQL/pgvector 版本、schema 指纹、关键表/列完整性、用户/会话/消息/记忆/轮次/墓碑/知识向量计数、无主/失配及孤儿数量。挂载清单只输出固定分类和数量，不输出源路径、未知卷名、目标路径、容器 ID 或解析后的环境变量值。运行容器的已知卷还需匹配 Compose 项目及逻辑卷标签；缺挂载、额外挂载或卷名变化均阻塞，失败不会进入 SQL 查询。当前应用由启动初始化器管理 schema，没有迁移版本登记表，因此 `schema_version=unversioned-initializers` 不是推测出的版本号；结构指纹只用于比较，不代替 schema 兼容性验证。数据库报告是同一 `REPEATABLE READ READ ONLY` 事务内的快照；挂载元数据按顺序观察，不能保证观察期间部署未发生变化，应在维护窗口保持编排稳定。使用只读会话默认值、查询/锁超时，最终 `ROLLBACK`。它不输出行 ID 或具体归属清单。
 
-退出码 `0` 表示本次只读快照通过；`2` 表示 `BLOCKED`。找不到唯一运行容器、标签与项目名不符、实际挂载不是预期 named volume、卷目录未初始化、用户表为空、关键表/列缺失、缺 pgvector、PostgreSQL 大版本不同、无主会话或数据完整性异常都会阻止通过。SQL/工具失败、报告缺项或意外输出同样失败关闭；原始错误被隐藏以防敏感值进入运维日志。
+结构检查按当前源码 PostgreSQL DDL 核对六张业务表的完整字段集合、类型、长度、可空性和默认值（包括 BIGSERIAL 的自有序列默认值）；字段集合必须与 `COLUMN_CONTRACT` 完全一致，多余字段通过 `blocker.unexpected_columns` 聚合计数阻断。`vector_store` 的字段契约由依赖管理，不适用业务表的多余字段检查。精确核对主键列及顺序、已验证外键的源/目标列和删除行为；墓碑不允许外键。用户名唯一索引、消息幂等唯一索引和 `status='RUNNING'` 的单会话部分唯一索引必须具备正确的列、谓词及有效状态，不能靠索引名或当前数据无重复来代替。新增检查只输出固定键的聚合差异数量，不输出实际字段定义、序列名、约束名或索引名。预检还检测 public 下已存在的 `psych_schema_history`、`flyway_schema_history`，仅输出 `blocker.preexisting_migration_history_tables` 数量；即使历史表为空也阻断，必须先人工理解其迁移状态。发现历史登记对象时输出 `schema_version=unknown-preexisting-history`，不会读取或输出其中的记录。只有全部检查通过才输出 `schema_status=baseline_candidate`；它仅表示未发现上述已知历史登记对象且结构符合当前契约，**不是执行 baseline、登记迁移版本或启动应用的许可**。未发现上述对象时 `schema_version` 为 `unversioned-initializers`，这不证明不存在其他工具的历史表；预检不会创建或写入版本表。
+
+退出码 `0` 表示本次只读快照通过；`2` 表示 `BLOCKED`。找不到唯一运行容器、标签与项目名不符、实际挂载不是预期 named volume、卷目录未初始化、用户表为空、关键表/列缺失或结构契约漂移、缺 pgvector、PostgreSQL 大版本不同、无主会话或数据完整性异常都会阻止通过。SQL/工具失败、报告缺项或意外输出同样失败关闭；原始错误被隐藏以防敏感值进入运维日志。
 
 旧 schema 缺列/缺表或 `owner_id IS NULL`/不存在的用户引用时，先停在这里，由管理员在受控环境依据可验证的账号证据制定人工映射和单独审核的 schema 升级方案。不得把无主会话交给第一个用户、管理员或新创建账号，也不得把空表/空卷当成原库。墓碑可以引用已删除用户，因此 `info.tombstone_owner_absent` 只是统计，不要求把墓碑改归其他用户；墓碑与仍存在会话重名则阻塞。
 

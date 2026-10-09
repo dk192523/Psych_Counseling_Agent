@@ -3,6 +3,44 @@ on: [push, pull_request]
 permissions:
   contents: read
 jobs:
+  migration-preflight-sql:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      preflight-postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: preflight_ci
+          POSTGRES_PASSWORD: preflight_ci_synthetic_password_only
+          POSTGRES_DB: preflight_ci
+        # No host port or project volume. GitHub removes this disposable service
+        # even if setup, the harness, or the explicit cleanup step fails.
+        options: >-
+          --label psych.migration-preflight-sql-ci=true
+          --tmpfs /var/lib/postgresql/data:rw
+          --health-cmd "pg_isready -U preflight_ci -d preflight_ci"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Execute real read-only preflight SQL against the synthetic PG16 fixture
+        run: python deploy/tencent-cloud/tests/migration_preflight_sql_ci.py
+        env:
+          PYTHONUTF8: '1'
+          MIGRATION_SQL_CI_CONTAINER: ${{ job.services['preflight-postgres'].id }}
+      - name: Remove the disposable preflight service after success or failure
+        if: always()
+        env:
+          MIGRATION_SQL_CI_CONTAINER: ${{ job.services['preflight-postgres'].id }}
+        run: |
+          if [[ "$MIGRATION_SQL_CI_CONTAINER" =~ ^[a-f0-9]{64}$ ]]; then
+            if ! docker rm --force --volumes "$MIGRATION_SQL_CI_CONTAINER" >/dev/null 2>&1; then
+              echo 'Disposable preflight service cleanup failed; raw diagnostics suppressed.'
+              exit 1
+            fi
+          fi
   desktop-windows:
     runs-on: windows-latest
     timeout-minutes: 45
@@ -21,6 +59,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Check Client Server Worker protocol compatibility
+        run: python deploy/check_protocol_compatibility.py
       - name: Check desktop build script syntax
         shell: pwsh
         run: |

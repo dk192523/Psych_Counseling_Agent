@@ -31,9 +31,12 @@ public final class ClientSettings {
     }
 
     public static ClientSettings forCurrentUser() {
-        String localAppData = System.getenv("LOCALAPPDATA");
+        return forCurrentUser(System.getenv("LOCALAPPDATA"), Path.of(System.getProperty("user.home")));
+    }
+
+    static ClientSettings forCurrentUser(String localAppData, Path userHome) {
         Path localRoot = localAppData == null || localAppData.isBlank()
-                ? Path.of(System.getProperty("user.home"), "AppData", "Local") : Path.of(localAppData);
+                ? userHome.resolve("AppData").resolve("Local") : Path.of(localAppData);
         return new ClientSettings(localRoot.resolve("PsychCounselor").resolve("client.properties"));
     }
 
