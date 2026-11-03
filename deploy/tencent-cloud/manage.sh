@@ -658,7 +658,6 @@ cmd_update() (
     die "工作区有未提交改动，update 拒绝覆盖；请先提交或清理。"
   fi
   log "更新：${current:0:8} → ${target:0:8}"
-  echo "$current" > "$ROOT_DIR/.last-update"
 
   if (( skip_backup == 0 )); then
     cmd_backup || die "更新前备份失败；已中止，服务未受影响。"
@@ -671,6 +670,9 @@ cmd_update() (
   if (( status != 0 )); then
     die "migration-preflight 未通过（含 BLOCKED）；已中止，服务未受影响。"
   fi
+
+  # 回滚点在预检通过后才落盘：备份/预检中止时不留指向自身的回滚记录。
+  echo "$current" > "$ROOT_DIR/.last-update"
 
   log "停止业务容器（postgres 与数据卷保持在线/不动）…"
   compose stop backend frontend ai-worker >/dev/null 2>&1 || die "停止业务容器失败；请用 status 检查。"

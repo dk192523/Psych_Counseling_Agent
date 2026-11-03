@@ -62,3 +62,9 @@ fencing/Redis），**不要直接改 `APP_REPLICA_COUNT`**——门禁会拒绝�
 - 日志：`docker logs` 或接 CLS；关键字 `tier=IMMINENT`（危机审计 WARN）建议配告警；
 - 备份定时：cron `0 4 * * *` 跑 `./manage.sh backup` + 每周一次 `verify-backup` 演练；
 - LLM 成本：DeepSeek 控制台看用量；本地无 usage 统计（backlog 项）。
+
+## 6. 日常更新（git clone 部署后）
+
+日常升级一条命令：`./deploy/tencent-cloud/manage.sh update`
+（备份→只读预检→停业务→拉取 GitHub 最新代码→重建→健康等待；失败自动回退。
+首次从 zip 形态切换与保数据步骤见 docs/DEPLOY_UPGRADE_SERVER.md。）

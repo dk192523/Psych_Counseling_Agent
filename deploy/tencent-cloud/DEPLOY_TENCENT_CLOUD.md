@@ -329,6 +329,13 @@ TencentOS/RHEL 系发行版若没有 `/etc/nginx/sites-available`，把模板放
 # 维护窗口内已停止旧业务服务、完成备份恢复演练后，预检并重建发布
 ./manage.sh deploy
 
+# git clone 部署形态：从 GitHub 拉取最新代码更新（备份→预检→停业务→切版本→
+# 重建→健康等待，失败自动回退更新前提交）；日常更新只需这一条
+./manage.sh update
+
+# 回滚上一次 update（读 .last-update 回滚点，回退并重建）
+./manage.sh rollback
+
 # 数据库备份（先按下文配置 age 公钥）
 ./manage.sh backup
 ```
@@ -419,6 +426,24 @@ BACKUP_AGE_IDENTITY_FILE=/安全介质/psych-backup-identity.txt \
 `deploy`/`start` 要求旧 backend、ai-worker、frontend 已停止、原 postgres 在线，并再次运行只读预检；失败不启动业务服务。`restart` 会先停止业务服务再预检，失败时保持业务服务停止。`stop` 后需先用 `start-database` 恢复经原项目/卷标签核验的 postgres，等待其就绪后重做预检。`deploy-initial` 只适用于确认无旧容器/卷的全新安装，不能用于升级、恢复、换项目名或绕过预检。
 
 升级必须保留原 `.env`、`COMPOSE_PROJECT_NAME` 和 named volume；先完成加密备份和隔离恢复演练，再在维护窗口停旧、做最终备份和预检、最后启新。绝不执行 `down -v`。备份校验不能替代恢复演练，新旧后端不能同时运行。
+
+### git clone 部署与 `update` 流程（推荐的服务器形态）
+
+zip 包适合首次安装；服务器转为 git clone 后，日常升级收敛为一条命令：
+
+```bash
+git clone https://github.com/dk192523/Psych_Counseling_Agent.git /opt/psych-src
+cp /opt/psych-counseling-agent/dk-ai-agent/.env /opt/psych-src/dk-ai-agent/.env
+# 核对 .env 的 COMPOSE_PROJECT_NAME 与原部署一致（复用命名卷的唯一钥匙）
+cd /opt/psych-src && ./deploy/tencent-cloud/manage.sh deploy
+# 此后日常更新：
+./deploy/tencent-cloud/manage.sh update
+```
+
+`update` 的保护语义：更新前 age 备份与 migration-preflight 任一失败都直接中止
+（服务不动）；数据卷与 `.env`（gitignore 内）不受 pull 影响；新版本部署失败时
+自动回退到 `.last-update` 记录的更新前提交并重建。zip→git 一次性切换与保数据
+完整步骤见 docs/DEPLOY_UPGRADE_SERVER.md。
 
 新版本修改 schema 后，旧程序不一定还能读取原库。回滚必须先验证兼容性；不兼容时把升级前备份恢复到独立空库/空卷，不能直接覆盖非空业务库。不同数据库的整库恢复也仅允许空目标，非空库合并另立项目。桌面 H2 不适用于多用户云端迁移。
 
