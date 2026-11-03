@@ -36,7 +36,9 @@ final class WorkerSidecar {
     private final Transport transport;
     private final Duration readyTimeout;
     private final Duration stopTimeout;
+    private final JobFactory jobFactory;
     private Process process;
+    private ProcessJob job;
     private URI baseUri;
     private String token;
     private boolean ready;
@@ -51,18 +53,41 @@ final class WorkerSidecar {
     }
     record Reply(int status, String body) {}
 
+    @FunctionalInterface interface JobFactory {
+        ProcessJob create() throws IOException;
+    }
+    interface ProcessJob {
+        void assign(Process child) throws IOException;
+        void terminateAndConfirm(Duration timeout) throws IOException;
+        void close() throws IOException;
+    }
+
+    // Only the injected fake-process constructor uses this; production always requires a Windows job.
+    private static final ProcessJob FAKE_PROCESS_JOB = new ProcessJob() {
+        @Override public void assign(Process child) {}
+        @Override public void terminateAndConfirm(Duration timeout) {}
+        @Override public void close() {}
+    };
+
     private WorkerSidecar(Path serverJar) {
-        this(serverJar, ProcessBuilder::start, new HttpTransport(), READY_TIMEOUT, STOP_TIMEOUT);
+        this(serverJar, ProcessBuilder::start, new HttpTransport(), READY_TIMEOUT, STOP_TIMEOUT,
+                WindowsWorkerJob::create);
     }
 
     // Package-private seams replace process/HTTP boundaries without booting Python in unit tests.
     WorkerSidecar(Path serverJar, ProcessStarter starter, Transport transport,
                   Duration readyTimeout, Duration stopTimeout) {
+        this(serverJar, starter, transport, readyTimeout, stopTimeout, () -> FAKE_PROCESS_JOB);
+    }
+
+    WorkerSidecar(Path serverJar, ProcessStarter starter, Transport transport,
+                  Duration readyTimeout, Duration stopTimeout, JobFactory jobFactory) {
         this.serverJar = serverJar;
         this.starter = starter;
         this.transport = transport;
         this.readyTimeout = readyTimeout;
         this.stopTimeout = stopTimeout;
+        this.jobFactory = jobFactory;
     }
 
     static WorkerSidecar installed() {
@@ -94,7 +119,7 @@ final class WorkerSidecar {
 
     /** Returns false after a safely cleaned startup failure. An unconfirmed live child is never discarded. */
     boolean start(char[] apiKey, BooleanSupplier cancelled) throws IOException {
-        if (process != null) throw new IOException("Worker 尚未确认停止，不能重复启动。");
+        if (process != null || job != null) throw new IOException("Worker 尚未确认停止，不能重复启动。");
         try {
             checkCancelled(cancelled);
             Path executable = installedExecutable(serverJar);
@@ -113,7 +138,12 @@ final class WorkerSidecar {
                     .redirectOutput(ProcessBuilder.Redirect.DISCARD)
                     .redirectError(ProcessBuilder.Redirect.DISCARD);
             prepareEnvironment(builder.environment(), token, apiKey, port);
-            try { process = starter.start(builder); }
+            try {
+                // Configure before launch and assign before stream/HTTP work can delay containment.
+                job = jobFactory.create();
+                process = starter.start(builder);
+                job.assign(process);
+            }
             finally { removeInjectedEnvironment(builder.environment()); }
             process.getOutputStream().close();
             AtomicBoolean gate = new AtomicBoolean();
@@ -137,16 +167,20 @@ final class WorkerSidecar {
                 Thread.sleep(100);
             }
             throw new IOException("Worker 未能按时就绪。");
-        } catch (Exception failure) {
+        } catch (Throwable failure) {
             requestGate.set(false);
             ready = false;
             boolean interrupted = failure instanceof InterruptedException || Thread.interrupted();
             try {
                 terminateAndConfirm();
+            } catch (IOException cleanupFailure) {
+                cleanupFailure.addSuppressed(failure);
+                throw cleanupFailure;
             } finally {
                 if (interrupted) Thread.currentThread().interrupt();
             }
             if (failure instanceof CancellationException cancelledFailure) throw cancelledFailure;
+            if (failure instanceof Error fatal) throw fatal;
             if (interrupted) throw new CancellationException("Worker 启动已取消。");
             return false;
         }
@@ -193,7 +227,7 @@ final class WorkerSidecar {
         catch (NumberFormatException invalid) { return false; }
     }
 
-    boolean hasProcess() { return process != null; }
+    boolean hasProcess() { return process != null || job != null; }
     boolean isReady() { return ready && process != null && process.isAlive() && requestGate.get(); }
     URI baseUri() { return baseUri; }
     String sharedSecret() { return token; }
@@ -236,7 +270,18 @@ final class WorkerSidecar {
                     try { process.waitFor(stopTimeout.toMillis(), TimeUnit.MILLISECONDS); }
                     catch (InterruptedException cancelled) { interrupted = true; }
                 }
+            }
+            // The root may already have exited while descendants are still alive. Keep the job
+            // handle until the OS confirms the complete job is empty, then release ownership.
+            if (job != null) job.terminateAndConfirm(stopTimeout);
+            if (process != null && process.isAlive()) {
+                try { process.waitFor(stopTimeout.toMillis(), TimeUnit.MILLISECONDS); }
+                catch (InterruptedException cancelled) { interrupted = true; }
                 if (process.isAlive()) throw new IOException("Worker 未确认关闭，已保留运行锁并取消备份及重复启动。");
+            }
+            if (job != null) {
+                job.close();
+                job = null;
             }
             process = null;
             ready = false;

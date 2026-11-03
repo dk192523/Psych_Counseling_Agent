@@ -152,12 +152,159 @@ class WorkerSidecarTest {
         assertFalse(worker.hasProcess());
     }
 
+    @Test void jobIsCreatedBeforeLaunchAndAssignedBeforeReadiness() throws Exception {
+        List<String> events = new ArrayList<>();
+        FakeJob job = new FakeJob(events);
+        FakeProcess child = new FakeProcess(42);
+        FakeTransport transport = new FakeTransport(42);
+        transport.onReady = () -> {
+            assertTrue(job.assigned);
+            events.add("ready");
+        };
+        WorkerSidecar worker = new WorkerSidecar(installedJar(), builder -> {
+            events.add("launch");
+            return child;
+        }, transport, Duration.ofSeconds(1), Duration.ZERO, () -> {
+            events.add("create");
+            return job;
+        });
+        assertTrue(worker.start(new char[0], () -> false));
+        assertEquals(List.of("create", "launch", "assign", "ready"), events);
+        transport.onShutdown = child::exit;
+        worker.stopAndConfirm();
+        assertEquals(List.of("create", "launch", "assign", "ready", "confirm", "close"), events);
+        assertFalse(worker.hasProcess());
+    }
+
+    @Test void jobCreationFailureNeverLaunchesAndLaunchFailureClosesEmptyJob() throws Exception {
+        AtomicBoolean launched = new AtomicBoolean();
+        WorkerSidecar unavailable = new WorkerSidecar(installedJar(), builder -> {
+            launched.set(true);
+            return new FakeProcess(42);
+        }, new FakeTransport(42), Duration.ZERO, Duration.ZERO, () -> {
+            throw new IOException("Job unavailable");
+        });
+        assertFalse(unavailable.start(new char[0], () -> false));
+        assertFalse(launched.get());
+        assertFalse(unavailable.hasProcess());
+
+        List<String> events = new ArrayList<>();
+        FakeJob job = new FakeJob(events);
+        WorkerSidecar failedLaunch = new WorkerSidecar(installedJar(), builder -> {
+            throw new IOException("Launch failed");
+        }, new FakeTransport(42), Duration.ZERO, Duration.ZERO, () -> job);
+        assertFalse(failedLaunch.start(new char[0], () -> false));
+        assertEquals(List.of("confirm", "close"), events);
+        assertFalse(failedLaunch.hasProcess());
+    }
+
+    @Test void failedAssignmentConfirmsRootDeathBeforeClosingJobAndNeverCallsReadiness() throws Exception {
+        List<String> events = new ArrayList<>();
+        FakeProcess child = new FakeProcess(42);
+        child.ignoreDestroy = true;
+        FakeJob job = new FakeJob(events);
+        job.failAssignment = true;
+        job.beforeClose = () -> assertFalse(child.isAlive());
+        FakeTransport transport = new FakeTransport(42);
+        transport.onReady = () -> fail("Unconstrained Worker must never become ready");
+        WorkerSidecar worker = new WorkerSidecar(installedJar(), builder -> child, transport,
+                Duration.ofSeconds(1), Duration.ZERO, () -> job);
+        assertFalse(worker.start(new char[0], () -> false));
+        assertTrue(child.forced);
+        assertFalse(child.isAlive());
+        assertEquals(List.of("assign", "confirm", "close"), events);
+        assertFalse(worker.hasProcess());
+    }
+
+    @Test void failedAssignmentWithUnkillableRootRetainsJobAndBlocksRestartUntilConfirmed() throws Exception {
+        List<String> events = new ArrayList<>();
+        FakeProcess child = new FakeProcess(42);
+        child.ignoreDestroy = child.ignoreForce = true;
+        FakeJob job = new FakeJob(events);
+        job.failAssignment = true;
+        WorkerSidecar worker = new WorkerSidecar(installedJar(), builder -> child, new FakeTransport(42),
+                Duration.ZERO, Duration.ZERO, () -> job);
+        assertThrows(IOException.class, () -> worker.start(new char[0], () -> false));
+        assertTrue(worker.hasProcess());
+        assertFalse(events.contains("close"));
+        assertThrows(IOException.class, () -> worker.start(new char[0], () -> false));
+        child.ignoreForce = false;
+        worker.stopAndConfirm();
+        assertFalse(worker.hasProcess());
+        assertEquals("close", events.getLast());
+    }
+
+    @Test void rootExitKeepsJobUntilDescendantDeathAndHandleClosureAreConfirmed() throws Exception {
+        List<String> events = new ArrayList<>();
+        FakeProcess child = new FakeProcess(42);
+        FakeJob job = new FakeJob(events);
+        WorkerSidecar worker = new WorkerSidecar(installedJar(), builder -> child, new FakeTransport(42),
+                Duration.ofSeconds(1), Duration.ZERO, () -> job);
+        assertTrue(worker.start(new char[0], () -> false));
+        child.exit();
+        job.failConfirmation = true;
+        assertThrows(IOException.class, worker::stopAndConfirm);
+        assertTrue(worker.hasProcess());
+        assertFalse(events.contains("close"));
+        assertThrows(IOException.class, () -> worker.start(new char[0], () -> false));
+        job.failConfirmation = false;
+        job.failClose = true;
+        assertThrows(IOException.class, worker::stopAndConfirm);
+        assertTrue(worker.hasProcess());
+        job.failClose = false;
+        worker.stopAndConfirm();
+        assertFalse(worker.hasProcess());
+    }
+
+    @Test void cancellationAndFatalStartupErrorStillConfirmAndCloseJob() throws Exception {
+        for (boolean fatal : List.of(false, true)) {
+            FakeProcess child = new FakeProcess(42);
+            FakeJob job = new FakeJob(new ArrayList<>());
+            FakeTransport transport = new FakeTransport(42);
+            transport.onReady = () -> { throw new LinkageError("native failure"); };
+            WorkerSidecar worker = new WorkerSidecar(installedJar(), builder -> child, transport,
+                    Duration.ofSeconds(1), Duration.ZERO, () -> job);
+            if (fatal) assertThrows(LinkageError.class, () -> worker.start(new char[0], () -> false));
+            else assertThrows(java.util.concurrent.CancellationException.class,
+                    () -> worker.start(new char[0], () -> job.assigned));
+            assertFalse(child.isAlive());
+            assertEquals("close", job.events.getLast());
+            assertFalse(worker.hasProcess());
+        }
+    }
+
+    static final class FakeJob implements WorkerSidecar.ProcessJob {
+        final List<String> events;
+        boolean assigned;
+        boolean failAssignment;
+        boolean failConfirmation;
+        boolean failClose;
+        Runnable beforeClose = () -> {};
+        FakeJob(List<String> events) { this.events = events; }
+        @Override public void assign(Process child) throws IOException {
+            events.add("assign");
+            if (failAssignment) throw new IOException("assignment failed");
+            assigned = true;
+        }
+        @Override public void terminateAndConfirm(Duration timeout) throws IOException {
+            events.add("confirm");
+            if (failConfirmation) throw new IOException("descendant still alive");
+        }
+        @Override public void close() throws IOException {
+            beforeClose.run();
+            if (failClose) throw new IOException("close failed");
+            events.add("close");
+        }
+    }
+
     static final class FakeTransport implements WorkerSidecar.Transport {
         private final long responsePid;
         String shutdownToken;
         Runnable onShutdown = () -> {};
+        Runnable onReady = () -> {};
         FakeTransport(long responsePid) { this.responsePid = responsePid; }
         @Override public WorkerSidecar.Reply ready(URI uri) {
+            onReady.run();
             assertEquals("127.0.0.1", uri.getHost());
             return new WorkerSidecar.Reply(200, "{\"status\":\"ok\",\"pid\":" + responsePid + "}");
         }

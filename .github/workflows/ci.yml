@@ -165,13 +165,23 @@ jobs:
           if ('static/index.html' -notin $clientEntries -or
               !($clientEntries -match '^static/assets/.+\.js$') -or
               'com/dk/psychclient/DesktopLauncher.class' -notin $clientEntries) { throw 'Client UI or launcher missing' }
-          if ($clientEntries -match '(^com/dk/dkaiagent/|/(?:LocalBackendHost|WorkerSidecar|DpapiSecretStore|LocalServerManager|LocalServerLauncher|LocalDataBackup|UserAutoStart)(?:\$|\.))') {
+          if ($clientEntries -match '(^com/dk/dkaiagent/|/(?:LocalBackendHost|WorkerSidecar|WindowsWorkerJob|DpapiSecretStore|LocalServerManager|LocalServerLauncher|LocalDataBackup|UserAutoStart)(?:\$|\.))') {
             throw 'Server code leaked into Client JAR'
           }
+          if ($clientEntries -match '^(?:counseling-kb/|document/|exam/|application(?:-[^/]+)?\.ya?ml$|mcp-)') {
+            throw 'Knowledge manifests or backend resources leaked into Client JAR'
+          }
+          $sourceManifestResource = 'counseling-kb/manifests/sources.jsonl'
+          if ($sourceManifestResource -cnotin $backendEntries) { throw 'Backend knowledge source manifest missing' }
+          if (@($backendEntries | Where-Object {
+              $_.StartsWith('counseling-kb/', [StringComparison]::Ordinal) -and
+              !$_.EndsWith('/') -and $_ -cne $sourceManifestResource
+            }).Count) { throw 'Non-allowlisted knowledge resources leaked into backend JAR' }
           if (Test-Path "$clientRoot/app/lib/backend") { throw 'Backend dependencies leaked into Client' }
           if (Test-Path "$clientRoot/app/worker") { throw 'Worker leaked into Client' }
           if ('com/dk/psychclient/LocalServerLauncher.class' -notin $serverEntries -or
               'com/dk/psychclient/WorkerSidecar.class' -notin $serverEntries -or
+              'com/dk/psychclient/WindowsWorkerJob.class' -notin $serverEntries -or
               'com/dk/psychclient/LocalDataBackup.class' -notin $serverEntries) { throw 'Server launcher or backup support missing' }
           if ($serverEntries -match '^static/|/(?:PsychCounselorClient|DesktopLauncher|ClientUiHost|ClientUpstreamTransport|ClientApiRoutes|DesktopPageBridge)(?:\$|\.)' -or
               $backendEntries -match '^static/|^application-(?!local-desktop\.yml$).*\.ya?ml$|^mcp-') {

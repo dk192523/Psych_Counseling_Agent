@@ -1,0 +1,27 @@
+# Embedded persistence and HTTP/UI boundary for the in-process JavaFX client.
+server:
+  address: 127.0.0.1
+  port: 0
+  shutdown: graceful
+  servlet:
+    context-path: /api
+    session:
+      cookie:
+        secure: false
+app:
+  desktop:
+    data-directory: ${APP_DATA_DIR:}
+  ai-worker:
+    enabled: false
+  cors:
+    allowed-origin-patterns: ""
+  docs:
+    enabled: false
+spring:
+  ai:
+    mcp:
+      client:
+        enabled: false
+  h2:
+    console:
+      enabled: false

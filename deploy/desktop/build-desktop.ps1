@@ -185,7 +185,7 @@ try {
     $CreatedWorkRoot = (New-Item -ItemType Directory -Path $WorkRoot).FullName
     $CommonClasses = @('DesktopTray', 'ClientSettings', 'ServerAddress', 'LocalServerEndpoint')
     $ClientClasses = @('DesktopLauncher', 'PsychCounselorClient', 'ClientUiHost', 'ClientUpstreamTransport', 'ClientApiRoutes', 'DesktopPageBridge') + $CommonClasses
-    $ServerClasses = @('LocalServerLauncher', 'LocalServerManager', 'LocalBackendHost', 'WorkerSidecar', 'DpapiSecretStore', 'UserAutoStart', 'AutoStartPreference', 'LocalDataBackup') + $CommonClasses
+    $ServerClasses = @('LocalServerLauncher', 'LocalServerManager', 'LocalBackendHost', 'WorkerSidecar', 'WindowsWorkerJob', 'DpapiSecretStore', 'UserAutoStart', 'AutoStartPreference', 'LocalDataBackup') + $CommonClasses
 
     foreach ($selected in $SelectedProducts) {
         $isClient = $selected -eq 'Client'
@@ -232,11 +232,16 @@ try {
             } finally { Pop-Location }
             $backendClasses = Join-Path $BackendRoot 'target/classes'
             $backendStage = Join-Path $productStage 'backend-classes'
+            $sourceManifestResource = 'counseling-kb/manifests/sources.jsonl'
+            if (!(Test-Path -LiteralPath (Join-Path $backendClasses $sourceManifestResource) -PathType Leaf)) {
+                throw "缺少后端运行必需的知识清单：$sourceManifestResource"
+            }
             New-Item -ItemType Directory -Path $backendStage | Out-Null
             foreach ($resource in @(Get-ChildItem -LiteralPath $backendClasses -Recurse -File)) {
                 $relative = $resource.FullName.Substring($backendClasses.Length + 1).Replace('\', '/')
                 $allowed = $relative.StartsWith('com/dk/dkaiagent/', [StringComparison]::Ordinal) -and $resource.Extension -eq '.class'
                 $allowed = $allowed -or $relative -in @('application.yml', 'application-local-desktop.yml')
+                $allowed = $allowed -or $relative -ceq $sourceManifestResource
                 $allowed = $allowed -or ($relative.StartsWith('document/') -and $resource.Extension -in @('.txt', '.md', '.pdf'))
                 $allowed = $allowed -or ($relative.StartsWith('exam/') -and $resource.Extension -in @('.json', '.jsonl', '.txt', '.md'))
                 if (!$allowed) { continue }
@@ -248,6 +253,9 @@ try {
                 $resourceTarget = Join-Path $backendStage $relative
                 New-Item -ItemType Directory -Path (Split-Path -Parent $resourceTarget) -Force | Out-Null
                 Copy-Item -LiteralPath $resource.FullName -Destination $resourceTarget
+            }
+            if (!(Test-Path -LiteralPath (Join-Path $backendStage $sourceManifestResource) -PathType Leaf)) {
+                throw "后端发行资源遗漏知识清单：$sourceManifestResource"
             }
             Invoke-BuildTool (Join-Path $JdkHome 'bin/jar.exe') @('--create', '--file', (Join-Path $inputRoot 'server-backend-classes.jar'), '-C', $backendStage, '.')
             $classPath.Add('server-backend-classes.jar')

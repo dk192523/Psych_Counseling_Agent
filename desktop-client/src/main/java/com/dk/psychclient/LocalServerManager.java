@@ -28,8 +28,11 @@ import java.util.UUID;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.BooleanSupplier;
+import java.util.function.Consumer;
 
 /** A user-level background server. Closing a client never closes this application's Spring context. */
 public final class LocalServerManager extends Application {
@@ -454,21 +457,53 @@ public final class LocalServerManager extends Application {
     }
 
     private void shutdown() {
-        if (!closing.compareAndSet(false, true)) return;
-        if (tray != null) {
-            tray.close();
-            tray = null;
-        }
-        stage.hide();
-        lifecycle.execute(() -> {
-            try { closeBackend(); }
-            finally {
-                lifecycle.shutdown();
-                try { Runtime.getRuntime().removeShutdownHook(shutdownHook); }
-                catch (IllegalStateException ignored) { /* JVM shutdown already started. */ }
-                Platform.runLater(Platform::exit);
+        requestShutdown(closing, lifecycle, this::closeBackend, Platform::runLater,
+                this::showShutdownFailed, () -> {
+            if (tray != null) {
+                tray.close();
+                tray = null;
             }
+            stage.hide();
+            try { Runtime.getRuntime().removeShutdownHook(shutdownHook); }
+            catch (IllegalStateException ignored) { /* JVM shutdown already started. */ }
+            Platform.exit();
         });
+    }
+
+    private void showShutdownFailed() {
+        background = false;
+        address = null;
+        Button retry = new Button("重试退出服务");
+        retry.setOnAction(event -> shutdown());
+        content.getChildren().setAll(title("本地服务尚未完全停止"),
+                text("关闭服务失败，管理程序会继续保留服务引用和运行锁。请稍后重试退出服务。"), retry);
+        restoreWindow();
+    }
+
+    // Keep the shutdown decision testable without starting a JavaFX toolkit or an actual backend.
+    static void requestShutdown(AtomicBoolean closing, ExecutorService lifecycle, BooleanSupplier closeBackend,
+                                Consumer<Runnable> dispatchUi, Runnable failed, Runnable stopped) {
+        if (!closing.compareAndSet(false, true)) return;
+        Runnable retryableFailure = () -> dispatchUi.accept(() -> {
+            closing.set(false);
+            failed.run();
+        });
+        try {
+            lifecycle.execute(() -> {
+                boolean closed;
+                try { closed = closeBackend.getAsBoolean(); }
+                catch (Exception | LinkageError failure) { closed = false; }
+                if (!closed) {
+                    retryableFailure.run();
+                    return;
+                }
+                // The UI, executor and shutdown hook remain available until ownership is released.
+                lifecycle.shutdown();
+                dispatchUi.accept(stopped);
+            });
+        } catch (RejectedExecutionException failure) {
+            retryableFailure.run();
+        }
     }
 
     @Override public void stop() { shutdown(); }
