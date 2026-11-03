@@ -152,8 +152,11 @@ KNOWN_MOUNTS = {
     ("postgres", "postgres_data", "/var/lib/postgresql/data"): "database",
     ("backend", "onnx_cache", "/tmp/spring-ai-onnx-generative"): "rebuildable_cache",
     ("backend", "djl_cache", "/home/app/.djl.ai"): "rebuildable_cache",
+    # embedding 模型本地文件卷（model.onnx 由部署引导放入，可重建的非业务数据）。
+    ("backend", "onnx_model", "/opt/models"): "rebuildable_cache",
 }
-KNOWN_STORES = {"postgres_data": "database", "onnx_cache": "rebuildable_cache", "djl_cache": "rebuildable_cache"}
+KNOWN_STORES = {"postgres_data": "database", "onnx_cache": "rebuildable_cache",
+                "djl_cache": "rebuildable_cache", "onnx_model": "rebuildable_cache"}
 
 
 def mount_counts() -> dict[str, int]:
