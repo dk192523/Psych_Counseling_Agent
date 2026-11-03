@@ -3,7 +3,13 @@ set -Eeuo pipefail
 
 umask 077
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+ROOT_DIR="$SCRIPT_DIR"
+# git-clone 部署形态：本脚本位于仓库 deploy/tencent-cloud/ 内，dk-ai-agent/ 与 .git
+# 在仓库根——按目录结构自动识别（zip 包布局两者都在脚本同级，不受影响）。
+if [[ ! -d "$ROOT_DIR/dk-ai-agent" && -d "$ROOT_DIR/../../dk-ai-agent" ]]; then
+  ROOT_DIR="$(cd "$ROOT_DIR/../.." && pwd -P)"
+fi
 COMPOSE_DIR="$ROOT_DIR/dk-ai-agent"
 COMPOSE_FILE="$COMPOSE_DIR/docker-compose.yml"
 ENV_FILE="$COMPOSE_DIR/.env"
@@ -41,6 +47,8 @@ Commands:
   logs [service]    Follow the last 200 log lines (backend/frontend/ai-worker/postgres)
   backup            Stream a PostgreSQL dump into an age-encrypted backup
   verify-backup <path> Check an encrypted backup without restoring a database
+  update [--ref <t|c>] [--skip-backup] Pull latest code from GitHub and rebuild (git-clone deploys only)
+  rollback           Rebuild the previous commit recorded by the last update
   migration-preflight Read-only checks of the running PostgreSQL database and named volume
 
 This script never deletes Docker volumes and never kills a process occupying a port.
@@ -324,7 +332,7 @@ PY
 require_migration_preflight() {
   require_command python3
   local status=0
-  python3 "$ROOT_DIR/migration-preflight.py" || status=$?
+  python3 "$SCRIPT_DIR/migration-preflight.py" || status=$?
   if (( status != 0 )); then
     warn "迁移预检未通过；不会启动 backend、ai-worker 或 frontend。数据库停止时先执行 start-database；首次安装见 deploy-initial。"
     return 2
@@ -614,6 +622,104 @@ cmd_verify_backup() {
   log "密文、完整解密流和 pg_restore --list 校验通过；未连接数据库，仍需独立恢复演练"
 }
 
+git_repo() {
+  git -c safe.directory="$ROOT_DIR" -C "$ROOT_DIR" "$@"
+}
+
+# 从 GitHub 拉取最新代码更新（git clone 部署形态专用）。
+# 数据与配置天然保留：PostgreSQL 命名卷不随容器重建消失，dk-ai-agent/.env 在
+# gitignore 内 pull 不会触碰。流程：fetch → 比对 → 备份 → 只读预检 → 停业务 →
+# 切版本 → 重建 → 健康等待；任何一步失败都在服务停止态回退到更新前提交并重建。
+cmd_update() (
+  local ref="" skip_backup=0 current target status=0
+  shift
+  while (( $# > 0 )); do
+    case "$1" in
+      --ref) [[ -n "${2:-}" ]] || die "--ref 需要一个 tag 或 commit"; ref="$2"; shift 2 ;;
+      --skip-backup) skip_backup=1; shift ;;
+      *) die "未知参数：$1（用法：./manage.sh update [--ref <tag|commit>] [--skip-backup]）" ;;
+    esac
+  done
+  require_command git
+  [[ -d "$ROOT_DIR/.git" ]] || die "未发现 .git：update 仅适用于 git clone 部署；zip 包部署请参见 docs/DEPLOY_UPGRADE_SERVER.md 的一次性切换。"
+
+  git_repo fetch origin main || die "git fetch 失败（网络或远程配置）。"
+  current=$(git_repo rev-parse HEAD) || die "无法读取当前提交。"
+  if [[ -n "$ref" ]]; then
+    target=$(git_repo rev-parse --verify --quiet "$ref^{commit}") || die "指定的 --ref 无效：$ref"
+  else
+    target=$(git_repo rev-parse origin/main)
+  fi
+  if [[ -z "$ref" && "$current" == "$target" ]]; then
+    log "已是最新（${current:0:8}）；无需更新。"
+    return 0
+  fi
+  if [[ -n "$(git_repo status --porcelain --untracked-files=no)" ]]; then
+    die "工作区有未提交改动，update 拒绝覆盖；请先提交或清理。"
+  fi
+  log "更新：${current:0:8} → ${target:0:8}"
+  echo "$current" > "$ROOT_DIR/.last-update"
+
+  if (( skip_backup == 0 )); then
+    cmd_backup || die "更新前备份失败；已中止，服务未受影响。"
+  else
+    warn "已按参数跳过更新前备份。"
+  fi
+
+  require_migration_preflight
+  status=$?
+  if (( status != 0 )); then
+    die "migration-preflight 未通过（含 BLOCKED）；已中止，服务未受影响。"
+  fi
+
+  log "停止业务容器（postgres 与数据卷保持在线/不动）…"
+  compose stop backend frontend ai-worker >/dev/null 2>&1 || die "停止业务容器失败；请用 status 检查。"
+
+  update_checkout() {
+    if [[ -n "$ref" ]]; then
+      git_repo checkout --detach "$target"
+    else
+      git_repo checkout -q main 2>/dev/null || true
+      git_repo merge --ff-only "$target"
+    fi
+  }
+  if ! update_checkout >/dev/null 2>&1; then
+    git_repo checkout --detach "$current" >/dev/null 2>&1 || true
+    die "切换版本失败；代码已回退到 ${current:0:8}，容器保持停止，可用 start 恢复。"
+  fi
+
+  if ! cmd_deploy; then
+    warn "新版本部署失败；自动回退到 ${current:0:8} 并重建…"
+    git_repo checkout --detach "$current" >/dev/null 2>&1 || true
+    if cmd_deploy; then
+      die "新版本部署失败，已回退到 ${current:0:8} 并恢复服务；请检查日志后重试。"
+    fi
+    die "回退部署也失败；容器保持停止，请用 logs 排查后手动 start。"
+  fi
+  log "更新完成：$(git_repo rev-parse --short HEAD)（回滚可用 ./manage.sh rollback）"
+)
+
+# 回滚到上一次 update 之前的提交并重建。
+cmd_rollback() (
+  local previous
+  require_command git
+  [[ -d "$ROOT_DIR/.git" ]] || die "rollback 仅适用于 git clone 部署。"
+  [[ -f "$ROOT_DIR/.last-update" ]] || die "没有可回滚的更新记录（.last-update 不存在）；仅支持回滚上一次 update。"
+  previous=$(head -n 1 "$ROOT_DIR/.last-update")
+  git_repo rev-parse --verify --quiet "$previous^{commit}" >/dev/null || die "回滚目标提交不存在：$previous"
+  log "回滚：$(git_repo rev-parse --short HEAD) → ${previous:0:8}"
+  compose stop backend frontend ai-worker >/dev/null 2>&1 || true
+  if ! git_repo checkout --detach "$previous" >/dev/null 2>&1; then
+    die "切换回滚提交失败；容器保持停止。"
+  fi
+  if ! cmd_deploy; then
+    die "回滚版本部署失败；容器保持停止，请用 logs 排查。"
+  fi
+  rm -f "$ROOT_DIR/.last-update"
+  log "已回滚并恢复服务：${previous:0:8}"
+)
+
+command_name="${1:-}"
 command_name="${1:-}"
 case "$command_name" in
   check) cmd_check ;;
@@ -627,6 +733,8 @@ case "$command_name" in
   logs) cmd_logs "$@" ;;
   backup) cmd_backup ;;
   verify-backup) cmd_verify_backup "$@" ;;
+  update) cmd_update "$@" ;;
+  rollback) cmd_rollback ;;
   migration-preflight)
     (( $# == 1 )) || die "用法：./manage.sh migration-preflight"
     require_command python3

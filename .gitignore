@@ -32,3 +32,7 @@ release/
 
 # ZCode CLI 会话目录
 .zcode/
+
+# manage.sh update 的回滚点记录
+# manage.sh update 的回滚点记录（git 布局下写在仓库根）
+.last-update
