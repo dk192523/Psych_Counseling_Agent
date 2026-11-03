@@ -120,6 +120,9 @@ foreach ($entry in $WorkerEntries) {
 }
 
 # Quarantined raw transcripts remain in the repository and are never release inputs.
+# 许可清单（非逐字稿）：Docker 构建经 kb 命名上下文打进 jar 的唯一知识输入。
+# raw 逐字稿保持隔离（下方 verify 仍拒绝任何 counseling-kb/raw 出现）。
+Copy-RequiredEntry -Source (Join-Path $RepoRoot "counseling-kb\manifests") -Destination (Join-Path $PackageRoot "counseling-kb\manifests")
 Copy-RequiredEntry -Source (Join-Path $PSScriptRoot ".env.server.example") -Destination (Join-Path $BackendTarget ".env.example")
 Copy-RequiredEntry -Source (Join-Path $PSScriptRoot "manage.sh") -Destination (Join-Path $PackageRoot "manage.sh")
 Copy-RequiredEntry -Source (Join-Path $PSScriptRoot "migration-preflight.py") -Destination (Join-Path $PackageRoot "migration-preflight.py")

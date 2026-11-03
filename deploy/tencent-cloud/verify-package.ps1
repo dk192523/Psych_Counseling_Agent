@@ -27,6 +27,7 @@ try {
     }
     $required = @('manage.sh', 'migration-preflight.py', 'MIGRATION_SAME_DATABASE.md', 'README_DEPLOY.md', 'nginx-site.conf.example',
         'dk-ai-agent/docker-compose.yml', 'dk-ai-agent/.env.example',
+        'counseling-kb/manifests/sources.jsonl',
         'dk-ai-agent/.dockerignore', 'dk-ai-agent/Dockerfile',
         'dk-ai-agent/pom.xml', 'dk-ai-agent/mvnw',
         'ai-worker/.dockerignore', 'ai-worker/Dockerfile',
