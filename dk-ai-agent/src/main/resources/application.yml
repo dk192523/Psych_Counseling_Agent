@@ -55,7 +55,10 @@ spring:
           # 首轮落地用 plain 模式（零代码改动），前缀优化留待 case 级评测后再评估。
           model-uri: ${ONNX_EMBEDDING_MODEL_URI:https://huggingface.co/intfloat/multilingual-e5-small/resolve/main/onnx/model.onnx}
         tokenizer:
-          uri: ${EMBEDDING_TOKENIZER_URI:https://huggingface.co/intfloat/multilingual-e5-small/resolve/main/tokenizer.json}
+          # tokenizer 打进 jar：此前每次启动都从 HF 下载到随机临时目录（不持久化），
+          # HF 不可达时 backend 无限崩溃循环（本地已复现 1300+ 次重启）。模型本体
+          # （470MB）经 DJL 缓存在 djl_cache 卷内持久化，首启之后启动零网络依赖。
+          uri: ${EMBEDDING_TOKENIZER_URI:classpath:/onnx/multilingual-e5-small/tokenizer.json}
         cache:
           enabled: true
 # 临时注释掉，便于大家开发调试和部署（实际需要启动 MCP 服务）

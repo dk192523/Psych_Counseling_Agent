@@ -124,6 +124,7 @@ Copy-RequiredEntry -Source (Join-Path $PSScriptRoot ".env.server.example") -Dest
 Copy-RequiredEntry -Source (Join-Path $PSScriptRoot "manage.sh") -Destination (Join-Path $PackageRoot "manage.sh")
 Copy-RequiredEntry -Source (Join-Path $PSScriptRoot "migration-preflight.py") -Destination (Join-Path $PackageRoot "migration-preflight.py")
 Copy-RequiredEntry -Source (Join-Path $PSScriptRoot "MIGRATION_SAME_DATABASE.md") -Destination (Join-Path $PackageRoot "MIGRATION_SAME_DATABASE.md")
+Copy-RequiredEntry -Source (Join-Path $RepoRoot "docs\DEPLOY_UPGRADE_SERVER.md") -Destination (Join-Path $PackageRoot "DEPLOY_UPGRADE_SERVER.md")
 Copy-RequiredEntry -Source (Join-Path $PSScriptRoot "nginx-site.conf.example") -Destination (Join-Path $PackageRoot "nginx-site.conf.example")
 Copy-RequiredEntry -Source (Join-Path $PSScriptRoot "DEPLOY_TENCENT_CLOUD.md") -Destination (Join-Path $PackageRoot "README_DEPLOY.md")
 
