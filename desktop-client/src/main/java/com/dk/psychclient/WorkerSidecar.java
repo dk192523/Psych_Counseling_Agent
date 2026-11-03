@@ -104,14 +104,15 @@ final class WorkerSidecar {
     static Path installedExecutable(Path jar) throws IOException {
         if (jar == null) throw new IOException("未安装桌面 Worker。");
         Path normalized = jar.toAbsolutePath().normalize();
+        // 不比较 toRealPath()：8.3 短路径名（CI runner 的 RUNNER~1、中文用户名~1 等）展开后
+        // 与字面路径不等，会被误判为无效安装。symlink 已由 NOFOLLOW_LINKS 的 isRegularFile
+        // 拒绝（链接解析为 false）。
         if (!"psych-counselor-server.jar".equals(normalized.getFileName().toString())
-                || !Files.isRegularFile(normalized, LinkOption.NOFOLLOW_LINKS)
-                || !normalized.equals(normalized.toRealPath())) {
+                || !Files.isRegularFile(normalized, LinkOption.NOFOLLOW_LINKS)) {
             throw new IOException("桌面 Worker 安装位置无效。");
         }
         Path executable = normalized.getParent().resolve("worker/PsychCounselorWorker.exe");
-        if (!Files.isRegularFile(executable, LinkOption.NOFOLLOW_LINKS)
-                || !executable.equals(executable.toRealPath())) {
+        if (!Files.isRegularFile(executable, LinkOption.NOFOLLOW_LINKS)) {
             throw new IOException("未安装桌面 Worker。");
         }
         return executable;

@@ -621,8 +621,10 @@ final class LocalDataBackup {
         for (Path part : normalized) {
             current = current.resolve(part);
             BasicFileAttributes attributes = Files.readAttributes(current, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+            // 不比较 toRealPath()：8.3 短路径名（如 RUNNER~1/中文用户名~1）会展开成长名而
+            // 被误判为链接——短名不是符号链接。真正的 junction/symlink 由 reparse-point
+            // 标志与 isSymbolicLink/isOther 属性检查独立覆盖。
             if (attributes.isSymbolicLink() || attributes.isOther()
-                    || !current.toRealPath().equals(current)
                     || (Platform.isWindows() && (Kernel32.INSTANCE.GetFileAttributes(current.toString())
                     & WinNT.FILE_ATTRIBUTE_REPARSE_POINT) != 0)) {
                 throw new IOException("备份路径含有符号链接、目录联接或特殊文件，已拒绝操作。");

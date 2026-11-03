@@ -140,7 +140,10 @@ class ClientUiHostTest {
     @Test void hostMustBeUniqueExactAndConnectUpgradeAreRejected() throws Exception {
         String authority = host.origin().getRawAuthority();
         assertEquals(403, raw("GET", "/api/auth/me", "Host: evil.example\r\n"));
-        assertEquals(403, raw("GET", "/api/auth/me", "Host: " + authority + "\r\nHost: evil.example\r\n"));
+        // 重复 Host 头：新版 JDK 内置服务器在连接层直接 400，旧版透传到应用层 403——
+        // 两种都是正确拒绝，断言收敛为 JDK 版本无关的语义。
+        int duplicateHost = raw("GET", "/api/auth/me", "Host: " + authority + "\r\nHost: evil.example\r\n");
+        assertTrue(duplicateHost == 400 || duplicateHost == 403, "duplicate Host must be rejected: " + duplicateHost);
         assertEquals(403, raw("GET", "/api/auth/me", "Host: " + authority + "\r\nUpgrade: websocket\r\n"));
         assertEquals(405, raw("CONNECT", "/api/auth/me", "Host: " + authority + "\r\n"));
         assertEquals(0, upstreamCalls.get());
