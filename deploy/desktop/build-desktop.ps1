@@ -1,4 +1,4 @@
-#requires -Version 7.0
+﻿#requires -Version 7.0
 [CmdletBinding()]
 param(
     [string]$JdkHome = $env:JAVA_HOME,
@@ -6,7 +6,11 @@ param(
     [ValidateSet('Client', 'Server', 'Both')][string]$Product = 'Both',
     [string]$PythonExecutable = 'python.exe',
     [ValidatePattern('^\d+\.\d+\.\d+$')][string]$Version = '0.1.0',
-    [switch]$Installer
+    [switch]$Installer,
+    # jmods 缺失时允许直接以 JDK 本体作 runtime-image（jpackage 原生支持）——
+    # 供 CI 等无法保证完整 JDK 的环境做可构建性验证；本地正式发布仍要求完整 jmods
+    # 走 jlink 裁剪路线，产物更小且模块边界精确。
+    [switch]$AllowJdkRuntime
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -128,7 +132,9 @@ $JdkHome = [IO.Path]::GetFullPath($JdkHome)
 foreach ($toolName in @('java.exe', 'jar.exe', 'jlink.exe', 'jpackage.exe')) {
     if (!(Test-Path -LiteralPath (Join-Path $JdkHome "bin/$toolName") -PathType Leaf)) { throw "JDK 缺少 $toolName。" }
 }
-if (!(Test-Path -LiteralPath (Join-Path $JdkHome 'jmods') -PathType Container)) { throw 'JDK 缺少 jmods。' }
+$JmodsAvailable = Test-Path -LiteralPath (Join-Path $JdkHome 'jmods') -PathType Container
+if (!$JmodsAvailable -and !$AllowJdkRuntime) { throw 'JDK 缺少 jmods（或用 -AllowJdkRuntime 走 JDK 本体 runtime 验证构建）。' }
+if (!$JmodsAvailable) { Write-Host 'jmods 缺失：按 -AllowJdkRuntime 使用 JDK 本体作 runtime-image（产物更大，仅验证构建）。' }
 $JdkRelease = [IO.File]::ReadAllText((Join-Path $JdkHome 'release'), [Text.Encoding]::UTF8)
 if ($JdkRelease -notmatch '(?m)^JAVA_VERSION="25(?:\.|\+|"|-)') { throw '桌面发行包要求 JDK 25。' }
 if ($JdkRelease -notmatch '(?m)^OS_ARCH="(?:amd64|x86_64)"') { throw 'JavaFX win 工件要求 x64 JDK。' }
@@ -314,8 +320,13 @@ if __name__ == "__main__":
             # Spring/JDBC/JNA/ONNX use reflection, management, naming and service providers.
             'javafx.controls,java.desktop,java.net.http,jdk.httpserver,java.sql,java.naming,java.management,java.instrument,java.security.jgss,java.security.sasl,java.rmi,java.compiler,jdk.management,jdk.crypto.ec,jdk.localedata,jdk.unsupported,jdk.zipfs'
         }
-        Invoke-BuildTool (Join-Path $JdkHome 'bin/jlink.exe') @('--module-path', "$(Join-Path $JdkHome 'jmods');$(Join-Path $TargetRoot 'javafx-modules')",
-            '--add-modules', $runtimeModules, '--bind-services', '--output', $runtimeRoot, '--strip-debug', '--no-header-files', '--no-man-pages')
+        if ($JmodsAvailable) {
+            Invoke-BuildTool (Join-Path $JdkHome 'bin/jlink.exe') @('--module-path', "$(Join-Path $JdkHome 'jmods');$(Join-Path $TargetRoot 'javafx-modules')",
+                '--add-modules', $runtimeModules, '--bind-services', '--output', $runtimeRoot, '--strip-debug', '--no-header-files', '--no-man-pages')
+        } else {
+            # CI 回退：直接引用 JDK 本体（jpackage 接受 JDK home 作为 runtime-image）。
+            $runtimeRoot = $JdkHome
+        }
         New-Item -ItemType Directory -Path $destination | Out-Null
         $nativeModules = if ($isClient) { 'ALL-UNNAMED,javafx.graphics,javafx.media,javafx.web' } else { 'ALL-UNNAMED,javafx.graphics' }
         Invoke-BuildTool (Join-Path $JdkHome 'bin/jpackage.exe') @('--type', 'app-image', '--name', $name, '--app-version', $Version,

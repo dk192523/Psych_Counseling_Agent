@@ -123,34 +123,9 @@ jobs:
             }
             Write-Host "Using existing WiX tool: $wixPath ($wixVersion)"
           }
-      - name: Ensure full JDK with jmods (hosted toolcache JDKs may be trimmed)
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          if (Test-Path -LiteralPath (Join-Path $env:JAVA_HOME 'jmods')) {
-            Write-Host "jmods present: $env:JAVA_HOME"
-          } else {
-            $zip = Join-Path $env:RUNNER_TEMP 'temurin25-jdk.zip'
-            # Invoke-WebRequest 在 runner 上对该重定向链路会静默产出无效文件——改 curl.exe
-            # 跟随重定向并校验尺寸（完整 JDK zip 约 200MB+，错误页远小于此）。
-            # Adoptium API 对 Invoke-WebRequest/curl 都产出无效响应——改 gh api 用仓库
-            # token 解析 Temurin 25 最新 release 的 GitHub 直链，再 curl 下载并校验尺寸。
-            $assetUrl = gh api repos/adoptium/temurin25-binaries/releases/latest --jq '.assets[].browser_download_url | select(contains("jdk_x64_windows_hotspot_") and endswith(".zip") and (contains("debuginfo") or contains("debugimage") | not))' | Select-Object -First 1
-            if (-not $assetUrl) { throw 'Cannot resolve Temurin asset URL' }
-            curl.exe -fsSL -o $zip $assetUrl
-            if ((Get-Item $zip).Length -lt 150MB) { throw (\"Downloaded JDK zip is implausibly small: \" + (Get-Item $zip).Length) }
-            $dest = Join-Path $env:RUNNER_TEMP 'jdk-full'
-            Expand-Archive -LiteralPath $zip -DestinationPath $dest
-            # $home 是 PowerShell 只读自动变量，不可赋值——用 $jdkFull。
-            $jdkFull = (Get-ChildItem -LiteralPath $dest -Directory | Select-Object -First 1).FullName
-            if (!(Test-Path -LiteralPath (Join-Path $jdkFull 'jmods'))) { throw 'Downloaded JDK lacks jmods' }
-            "JAVA_HOME=$jdkFull" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-            Write-Host "JAVA_HOME overridden to full JDK: $jdkFull"
-          }
       - name: Build independent Client and Server per-user EXE installers and app images
         shell: pwsh
-        run: ./deploy/desktop/build-desktop.ps1 -Product Both -JdkHome $env:JAVA_HOME -PythonExecutable python.exe -OutputDirectory release/desktop-ci -Installer
+        run: ./deploy/desktop/build-desktop.ps1 -Product Both -JdkHome $env:JAVA_HOME -PythonExecutable python.exe -OutputDirectory release/desktop-ci -Installer -AllowJdkRuntime
       - name: Verify packaged product boundaries
         shell: pwsh
         run: |
