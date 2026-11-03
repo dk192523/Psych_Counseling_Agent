@@ -53,7 +53,11 @@ spring:
           # 384 维不变（pgvector schema 零改动）；离线对比（eval/embedding_shootout.py，生产 851 文档）
           # Hit@4: 0.00 → 0.72。e5 的 query:/passage: 前缀在 document 级评测差异仅 0.01，
           # 首轮落地用 plain 模式（零代码改动），前缀优化留待 case 级评测后再评估。
-          model-uri: ${ONNX_EMBEDDING_MODEL_URI:https://huggingface.co/intfloat/multilingual-e5-small/resolve/main/onnx/model.onnx}
+          # 模型从命名卷内的本地文件加载（file: URI）：此前 470MB 模型同 tokenizer 一样每次
+          # 启动经 ResourceCacheService 下载到随机临时目录——HF 不可达即无限崩溃循环。
+          # 首次部署需把 model.onnx 放入 onnx_model 卷（见 DEPLOY_UPGRADE_SERVER.md 的
+          # 模型引导步骤；此后启动零网络依赖）。
+          model-uri: ${ONNX_EMBEDDING_MODEL_URI:file:/opt/models/multilingual-e5-small/model.onnx}
         tokenizer:
           # tokenizer 打进 jar：此前每次启动都从 HF 下载到随机临时目录（不持久化），
           # HF 不可达时 backend 无限崩溃循环（本地已复现 1300+ 次重启）。模型本体

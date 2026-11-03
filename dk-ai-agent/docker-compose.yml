@@ -105,10 +105,12 @@ services:
       # 与 application.yml 的 ONNX_EMBEDDING_MODEL_URI 默认值保持一致（multilingual-e5-small）。
       # 曾因 compose 默认值仍是 MiniLM 而 yml 已换 e5，tokenizer(e5 词表 25 万)喂给 MiniLM
       # 模型(词表 30522)导致 Gather 越界崩溃循环——两端默认值必须同步换。
-      ONNX_EMBEDDING_MODEL_URI: ${ONNX_EMBEDDING_MODEL_URI:-https://huggingface.co/intfloat/multilingual-e5-small/resolve/main/onnx/model.onnx}
+      ONNX_EMBEDDING_MODEL_URI: ${ONNX_EMBEDDING_MODEL_URI:-file:/opt/models/multilingual-e5-small/model.onnx}
     volumes:
       - onnx_cache:/tmp/spring-ai-onnx-generative
       - djl_cache:/home/app/.djl.ai
+      # embedding 模型本地文件卷（首次部署引导放入 model.onnx，此后启动零网络）
+      - onnx_model:/opt/models
     expose:
       - "8123"
     healthcheck:
@@ -168,5 +170,6 @@ services:
 
 volumes:
   postgres_data:
+  onnx_model:
   onnx_cache:
   djl_cache:
