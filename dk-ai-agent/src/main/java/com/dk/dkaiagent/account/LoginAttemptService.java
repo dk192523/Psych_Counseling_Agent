@@ -3,6 +3,7 @@ package com.dk.dkaiagent.account;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
+import java.time.Clock;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
@@ -27,7 +28,30 @@ public class LoginAttemptService {
     private static final long WINDOW_MILLIS = Duration.ofMinutes(WINDOW_MINUTES).toMillis();
     private static final long LOCK_MILLIS = Duration.ofMinutes(LOCK_MINUTES).toMillis();
 
+    public static final int MAX_ACCOUNT_KEYS = 10_000;
     private final ConcurrentMap<String, AttemptWindow> attempts = new ConcurrentHashMap<>();
+    private final Clock clock;
+    private final int maxKeys;
+    private long nextCleanup;
+
+    public LoginAttemptService() { this(Clock.systemUTC(), MAX_ACCOUNT_KEYS); }
+
+    LoginAttemptService(Clock clock, int maxKeys) {
+        if (maxKeys < 1) throw new IllegalArgumentException("Account key cap must be positive");
+        this.clock = clock;
+        this.maxKeys = maxKeys;
+    }
+
+    private static boolean validKey(String username) {
+        return username != null && !username.isBlank() && username.length() <= AuthValidation.USERNAME_MAX_LENGTH;
+    }
+
+    private boolean canAllocate(String username) {
+        expireIdleWindows();
+        return attempts.containsKey(username) || attempts.size() < maxKeys;
+    }
+
+    synchronized int accountCount() { return attempts.size(); }
 
     private record AttemptWindow(int failures, int inFlight, long windowStartMillis, long lockedUntilMillis) {
     }
@@ -37,13 +61,14 @@ public class LoginAttemptService {
      * 锁定中，或窗口内 failures + inFlight 达阈值（预算耗尽，补足锁定）→ 拒绝；否则 inFlight+1 放行。
      * 调用方获得 true 后必须恰好配对一次 recordFailure / recordSuccess / releaseInFlight 归还名额。
      */
-    public boolean tryBeginCheck(String username) {
-        if (username == null || username.isBlank()) {
+    public synchronized boolean tryBeginCheck(String username) {
+        if (!validKey(username)) {
             return false;
         }
+        if (!canAllocate(username)) return false;
         boolean[] admitted = {false};
         attempts.compute(username, (key, existing) -> {
-            long now = System.currentTimeMillis();
+            long now = clock.millis();
             if (existing == null) {
                 admitted[0] = true;
                 return new AttemptWindow(0, 1, now, 0);
@@ -67,12 +92,14 @@ public class LoginAttemptService {
     }
 
     /** 记一次真实失败并释放在途名额：累计达阈值即置锁。 */
-    public void recordFailure(String username) {
-        if (username == null || username.isBlank()) {
+    public synchronized void recordFailure(String username) {
+        if (!validKey(username)) {
             return;
         }
+        // 已准入请求必须正常结算；只有新键分配需要检查容量并回收空闲窗口。
+        if (!attempts.containsKey(username) && !canAllocate(username)) return;
         attempts.compute(username, (key, existing) -> {
-            long now = System.currentTimeMillis();
+            long now = clock.millis();
             if (existing == null) {
                 return new AttemptWindow(1, 0, now, 0);
             }
@@ -86,8 +113,8 @@ public class LoginAttemptService {
     }
 
     /** 归还在途名额但不计失败（DISABLED 早退、比对异常等路径）。 */
-    public void releaseInFlight(String username) {
-        if (username == null || username.isBlank()) {
+    public synchronized void releaseInFlight(String username) {
+        if (!validKey(username)) {
             return;
         }
         attempts.computeIfPresent(username, (key, existing) -> new AttemptWindow(
@@ -95,7 +122,7 @@ public class LoginAttemptService {
                 existing.windowStartMillis(), existing.lockedUntilMillis()));
     }
 
-    public boolean isLocked(String username) {
+    public synchronized boolean isLocked(String username) {
         if (username == null) {
             return false;
         }
@@ -103,7 +130,7 @@ public class LoginAttemptService {
         if (window == null) {
             return false;
         }
-        long now = System.currentTimeMillis();
+        long now = clock.millis();
         if (window.lockedUntilMillis() > now) {
             return true;
         }
@@ -113,20 +140,20 @@ public class LoginAttemptService {
         return false;
     }
 
-    public void recordSuccess(String username) {
+    public synchronized void recordSuccess(String username) {
         if (username != null) {
             // 登录成功可以清除失败记录，但不能释放其他尚在比对的请求。
             attempts.computeIfPresent(username, (key, existing) -> existing.inFlight() <= 1 ? null
-                    : new AttemptWindow(0, existing.inFlight() - 1, System.currentTimeMillis(), 0));
+                    : new AttemptWindow(0, existing.inFlight() - 1, clock.millis(), 0));
         }
     }
 
     @org.springframework.scheduling.annotation.Scheduled(fixedDelay = 60_000)
-    public void expireIdleWindows() {
-        long now = System.currentTimeMillis();
+    public synchronized void expireIdleWindows() {
+        long now = clock.millis();
         attempts.forEach((key, window) -> {
             if (window.inFlight() == 0 && window.lockedUntilMillis() <= now
-                    && now - window.windowStartMillis() > WINDOW_MILLIS) attempts.remove(key, window);
+                    && (window.lockedUntilMillis() > 0 || now - window.windowStartMillis() >= WINDOW_MILLIS)) attempts.remove(key, window);
         });
     }
 }

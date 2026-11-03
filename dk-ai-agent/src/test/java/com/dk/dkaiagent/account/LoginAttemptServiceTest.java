@@ -191,4 +191,37 @@ class LoginAttemptServiceTest {
         assertTrue(service.isLocked("alice"));
         assertFalse(service.tryBeginCheck("alice"));
     }
+
+    @Test
+    void randomAccountKeysAreBoundedAndExpiredIdleKeysAreReclaimed() {
+        var clock = new MutableAuthClock();
+        var bounded = new LoginAttemptService(clock, 2);
+        assertTrue(bounded.tryBeginCheck("alice"));
+        bounded.recordFailure("alice");
+        assertTrue(bounded.tryBeginCheck("bob"));
+        bounded.recordFailure("bob");
+        for (int i = 0; i < 100; i++) {
+            assertFalse(bounded.tryBeginCheck("random" + i));
+            bounded.recordFailure("random" + i);
+        }
+        assertEquals(2, bounded.accountCount());
+        clock.advance(java.time.Duration.ofMinutes(16));
+        bounded.expireIdleWindows();
+        assertEquals(0, bounded.accountCount());
+        assertTrue(bounded.tryBeginCheck("carol"));
+    }
+
+    @Test
+    void cleanupDoesNotDropInFlightAccountCounters() {
+        var clock = new MutableAuthClock();
+        var bounded = new LoginAttemptService(clock, 1);
+        assertTrue(bounded.tryBeginCheck("alice"));
+        clock.advance(java.time.Duration.ofMinutes(16));
+        bounded.expireIdleWindows();
+        assertFalse(bounded.tryBeginCheck("bob"));
+        bounded.releaseInFlight("alice");
+        clock.advance(java.time.Duration.ofMinutes(1));
+        bounded.expireIdleWindows();
+        assertTrue(bounded.tryBeginCheck("bob"));
+    }
 }

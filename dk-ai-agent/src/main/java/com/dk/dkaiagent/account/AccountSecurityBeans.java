@@ -13,7 +13,7 @@ public class AccountSecurityBeans {
      * Wave2 的 SecurityConfig 直接复用本 Bean，不得再定义第二个 PasswordEncoder。
      */
     @Bean
-    public PasswordEncoder passwordEncoder() {
-        return new BCryptPasswordEncoder(10);
+    public PasswordEncoder passwordEncoder(AuthResourceLimiter limiter) {
+        return new ResourceBoundPasswordEncoder(new BCryptPasswordEncoder(10), limiter);
     }
 }

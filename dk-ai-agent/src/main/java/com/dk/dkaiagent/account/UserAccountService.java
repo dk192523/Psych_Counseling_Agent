@@ -35,6 +35,7 @@ public class UserAccountService {
     private final UserRepository userRepository;
     private final LoginAttemptService loginAttemptService;
     private final PasswordEncoder passwordEncoder;
+    private final AuthResourceLimiter authResourceLimiter;
     private final Optional<SessionKillPort> sessionKillPort;
     private final SecureRandom secureRandom = new SecureRandom();
     // 不存在的账号比对哑哈希拉平时序，避免登录响应时间泄露账号是否存在。
@@ -44,9 +45,19 @@ public class UserAccountService {
                               LoginAttemptService loginAttemptService,
                               PasswordEncoder passwordEncoder,
                               Optional<SessionKillPort> sessionKillPort) {
+        this(userRepository, loginAttemptService, passwordEncoder, sessionKillPort, new AuthResourceLimiter());
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public UserAccountService(UserRepository userRepository,
+                              LoginAttemptService loginAttemptService,
+                              PasswordEncoder passwordEncoder,
+                              Optional<SessionKillPort> sessionKillPort,
+                              AuthResourceLimiter authResourceLimiter) {
         this.userRepository = userRepository;
         this.loginAttemptService = loginAttemptService;
         this.passwordEncoder = passwordEncoder;
+        this.authResourceLimiter = authResourceLimiter;
         this.sessionKillPort = sessionKillPort;
         this.dummyPasswordHash = passwordEncoder.encode("timing-equalization-dummy");
     }
@@ -76,6 +87,14 @@ public class UserAccountService {
     }
 
     public AuthResult authenticate(String rawUsername, String rawPassword) {
+        return authenticate(rawUsername, rawPassword, "unknown");
+    }
+
+    public AuthResult authenticate(String rawUsername, String rawPassword, String clientIp) {
+        // Debit before account lookup/allocation: successful logins and random usernames also count.
+        if (!authResourceLimiter.tryBeginLogin(clientIp)) {
+            return AuthResult.failure(AuthFailure.LOCKED, GENERIC_AUTH_ERROR_MESSAGE);
+        }
         String username = AuthValidation.normalizeUsername(rawUsername);
         // 原子准入：单次 compute 内完成锁定判定并预扣一个 BCrypt 比对名额，
         // 并发爆发波次每窗口放行的真实比对严格 ≤ LOCK_THRESHOLD（修复"先查后记"的检查-执行竞态）。
@@ -103,6 +122,8 @@ public class UserAccountService {
             quotaSettled = true;
             userRepository.updateLastLogin(user.id());
             return AuthResult.success(user);
+        } catch (AuthResourceLimiter.CapacityExceededException exhausted) {
+            return AuthResult.failure(AuthFailure.LOCKED, GENERIC_AUTH_ERROR_MESSAGE);
         } finally {
             // 比对期间抛异常（如 DB 故障）时兜底归还名额。
             if (!quotaSettled) {
