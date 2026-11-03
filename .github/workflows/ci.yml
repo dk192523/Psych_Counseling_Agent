@@ -130,7 +130,10 @@ jobs:
             Write-Host "jmods present: $env:JAVA_HOME"
           } else {
             $zip = Join-Path $env:RUNNER_TEMP 'temurin25-jdk.zip'
-            Invoke-WebRequest -Uri 'https://api.adoptium.net/v3/binary/latest/25/ga/windows/x64/jdk/hotspot/normal/eclipse?project=jdk' -OutFile $zip
+            # Invoke-WebRequest 在 runner 上对该重定向链路会静默产出无效文件——改 curl.exe
+            # 跟随重定向并校验尺寸（完整 JDK zip 约 200MB+，错误页远小于此）。
+            curl.exe -fsSL -o $zip 'https://api.adoptium.net/v3/binary/latest/25/ga/windows/x64/jdk/hotspot/normal/eclipse?project=jdk'
+            if ((Get-Item $zip).Length -lt 150MB) { throw 'Downloaded JDK zip is implausibly small' }
             $dest = Join-Path $env:RUNNER_TEMP 'jdk-full'
             Expand-Archive -LiteralPath $zip -DestinationPath $dest
             # $home 是 PowerShell 只读自动变量，不可赋值——用 $jdkFull。
@@ -263,7 +266,10 @@ jobs:
             exit 1
           fi
       - name: Build backend image from the extracted archive
-        run: docker build -t psych-release-backend .test-tmp/extracted/Psych_Counseling_Agent_Server/dk-ai-agent
+        run: >-
+          docker build
+          --build-context kb=.test-tmp/extracted/Psych_Counseling_Agent_Server/counseling-kb
+          -t psych-release-backend .test-tmp/extracted/Psych_Counseling_Agent_Server/dk-ai-agent
       - name: Build worker image from the extracted archive
         run: docker build -t psych-release-worker .test-tmp/extracted/Psych_Counseling_Agent_Server/ai-worker
       - name: Build frontend image and validate nginx from the extracted archive
