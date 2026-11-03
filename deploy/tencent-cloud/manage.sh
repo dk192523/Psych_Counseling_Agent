@@ -147,7 +147,9 @@ port_listener_details() {
   elif command -v lsof >/dev/null 2>&1; then
     lsof -nP -iTCP:"$FRONTEND_PORT" -sTCP:LISTEN 2>/dev/null || true
   elif command -v netstat >/dev/null 2>&1; then
-    netstat -lntp 2>/dev/null | awk -v port=":$FRONTEND_PORT" '$4 ~ port "$"'
+    # 与 ss/lsof 分支对齐补 || true：pipefail 下宿主 netstat 以非零退出（如
+    # Windows/精简系统的 flag 差异）会让整个赋值失败并静默终止脚本。
+    netstat -lntp 2>/dev/null | awk -v port=":$FRONTEND_PORT" '$4 ~ port "$"' || true
   fi
 }
 
@@ -740,7 +742,7 @@ case "$command_name" in
   migration-preflight)
     (( $# == 1 )) || die "用法：./manage.sh migration-preflight"
     require_command python3
-    exec python3 "$ROOT_DIR/migration-preflight.py"
+    exec python3 "$SCRIPT_DIR/migration-preflight.py"
     ;;
   -h|--help|help|"") usage ;;
   *) usage; die "未知命令：$command_name" ;;

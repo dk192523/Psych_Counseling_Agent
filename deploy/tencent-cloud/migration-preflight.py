@@ -503,7 +503,13 @@ def parse_report(output: str, expected: dict[str, str]) -> dict[str, str]:
 
 def main(root: Path | None = None) -> int:
     try:
-        container, project, volume = current_container(root or Path(__file__).resolve().parent)
+        # 布局感知：zip 部署时 dk-ai-agent/ 与本脚本同级；git clone 部署时本脚本在
+        # deploy/tencent-cloud/ 内、dk-ai-agent/ 在仓库根（与 manage.sh 的 ROOT_DIR
+        # 识别规则保持一致）。
+        base = root or Path(__file__).resolve().parent
+        if not (base / "dk-ai-agent").is_dir() and (base / ".." / ".." / "dk-ai-agent").is_dir():
+            base = (base / ".." / "..").resolve()
+        container, project, volume = current_container(base)
         print(f"compose_project={project}\npostgres_data_volume={volume}")
         sql, expected = build_sql()
         shell = ('test -s /var/lib/postgresql/data/PG_VERSION || exit 41; '
