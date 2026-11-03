@@ -39,7 +39,12 @@ public class DefaultCounselingMemoryAgent implements CounselingMemoryAgent {
     private static final int TRANSCRIPT_MAX_CHARS = 80_000;
 
     private static final Pattern SAFETY_HEADING = Pattern.compile("^#{1,6}\\s*安全备注[^\\n]*$", Pattern.MULTILINE);
-    private static final Pattern HEADING_LINE = Pattern.compile("^#{1,6}\\s", Pattern.MULTILINE);
+    // Legacy 多行正文中的任意 Markdown 标题不应结束安全段；只有摘要的固定段落作边界。
+    private static final Pattern HEADING_LINE = Pattern.compile(
+            "^#{1,6}[ \\t]+(?:人物关系链|已确认事实|用户的解释|用户的感受|模式与未解决议题|咨询阶段与许可状态|待确认问题|近期用户原话（待整合）)[ \\t]*\\r?$",
+            Pattern.MULTILINE);
+    private static final Pattern SAFETY_RECORD = Pattern.compile("^- \\[(user|assistant)] (.*)$");
+    private static final String SAFETY_RECORD_VERSION = "[safety:v1] ";
 
     private static final String CONSOLIDATE_SYSTEM_PROMPT = """
             你是心理疏导会话的记忆整合 Agent，只负责把「已有摘要 + 新增会话」合并为一份结构化长期记忆画像，不直接回答用户，不输出思维链。
@@ -193,7 +198,7 @@ public class DefaultCounselingMemoryAgent implements CounselingMemoryAgent {
         LinkedHashSet<String> lines = new LinkedHashSet<>();
         for (MemoryInput message : messages) {
             if (message.safetyRelevant()) {
-                lines.add("- [" + message.role() + "] " + message.content());
+                lines.add(encodeSafetyRecord(message.role(), message.content()));
             }
         }
         lines.addAll(inheritedLines);
@@ -204,8 +209,9 @@ public class DefaultCounselingMemoryAgent implements CounselingMemoryAgent {
     }
 
     /**
-     * Extracts the verbatim "- [role] text" lines under the 安全备注 heading of a previous digest,
-     * dropping bare placeholders like "无". Returns an empty list when no section exists.
+     * Reads v1 single-line records and migrates legacy records to the same reversible form.
+     * Legacy continuation lines are kept where boundaries are distinguishable; already truncated
+     * data and legacy text resembling a record/fixed section heading cannot be recovered reliably.
      */
     private static List<String> extractSafetyLines(String digest) {
         if (digest == null || digest.isBlank()) {
@@ -218,13 +224,56 @@ public class DefaultCounselingMemoryAgent implements CounselingMemoryAgent {
         Matcher nextHeading = HEADING_LINE.matcher(digest);
         int end = nextHeading.find(match.end()) ? nextHeading.start() : digest.length();
         List<String> lines = new ArrayList<>();
-        for (String rawLine : digest.substring(match.end(), end).split("\n")) {
-            String line = rawLine.strip();
-            if (line.startsWith("- [")) {
-                lines.add(line);
+        String role = null;
+        StringBuilder legacyContent = new StringBuilder();
+        for (String rawLine : digest.substring(match.end(), end).split("(?<=\\n)|(?<=\\r)(?!\\n)")) {
+            String line = rawLine.replaceFirst("[\\r\\n]+$", "");
+            Matcher record = SAFETY_RECORD.matcher(line);
+            if (record.matches()) {
+                if (role != null) {
+                    lines.add(encodeSafetyRecord(role, legacyContent.toString().replaceFirst("[\\r\\n]+$", "")));
+                }
+                role = null;
+                legacyContent.setLength(0);
+                String content = record.group(2);
+                if (content.startsWith(SAFETY_RECORD_VERSION)) {
+                    lines.add(encodeSafetyRecord(record.group(1),
+                            decodeSafetyContent(content.substring(SAFETY_RECORD_VERSION.length()))));
+                } else {
+                    role = record.group(1);
+                    legacyContent.append(content).append(rawLine.substring(line.length()));
+                }
+            } else if (role != null) {
+                legacyContent.append(rawLine);
             }
         }
+        if (role != null) {
+            lines.add(encodeSafetyRecord(role, legacyContent.toString().replaceFirst("[\\r\\n]+$", "")));
+        }
         return List.copyOf(lines);
+    }
+
+    // Shared Java/Python wire format: backslash -> \\, CR -> \r, LF -> \n, in that order.
+    private static String encodeSafetyRecord(String role, String content) {
+        return "- [" + role + "] " + SAFETY_RECORD_VERSION
+                + content.replace("\\", "\\\\").replace("\r", "\\r").replace("\n", "\\n");
+    }
+
+    private static String decodeSafetyContent(String content) {
+        StringBuilder decoded = new StringBuilder();
+        for (int index = 0; index < content.length(); index++) {
+            char value = content.charAt(index);
+            if (value == '\\' && index + 1 < content.length()) {
+                char escaped = content.charAt(index + 1);
+                if (escaped == '\\' || escaped == 'r' || escaped == 'n') {
+                    decoded.append(escaped == 'r' ? '\r' : escaped == 'n' ? '\n' : '\\');
+                    index++;
+                    continue;
+                }
+            }
+            decoded.append(value);
+        }
+        return decoded.toString();
     }
 
     private static String stripSafetySection(String digest) {

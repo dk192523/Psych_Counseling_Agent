@@ -10,6 +10,7 @@ import com.dk.dkaiagent.memory.SafetyTerms;
 import com.dk.dkaiagent.rag.TranscriptSearchService;
 import com.dk.dkaiagent.rag.KnowledgeAdmissionPolicy;
 import com.dk.dkaiagent.rag.KnowledgeIntentRouter;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Test;
@@ -30,6 +31,7 @@ import java.util.Optional;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -376,6 +378,92 @@ class SpringAiCounselingAgentExecutorTest {
     }
 
     @Test
+    void vectorStoreFailureEndsWithRetrievalUnavailableWithoutAnswering() {
+        Fixture fixture = professionalEvidenceFixture();
+        when(fixture.vectorStore.similaritySearch(any(SearchRequest.class)))
+                .thenThrow(new IllegalStateException("provider failure containing private query"));
+
+        var events = fixture.executor().prepareAndAnswer("CBT 是什么", "chat-id", OWNER_ID)
+                .collectList().block();
+
+        assertRetrievalUnavailable(fixture, events, "backend");
+    }
+
+    @Test
+    void vectorPermitTimeoutEndsWithRetrievalUnavailableWithoutAnswering() throws Exception {
+        Fixture fixture = professionalEvidenceFixture();
+        var executor = fixture.executor();
+        Semaphore permits = mock(Semaphore.class);
+        when(permits.tryAcquire(anyLong(), eq(TimeUnit.MILLISECONDS))).thenReturn(false);
+        ReflectionTestUtils.setField(executor, "vectorBulkhead", permits);
+
+        var events = executor.prepareAndAnswer("CBT 是什么", "chat-id", OWNER_ID)
+                .collectList().block();
+
+        assertRetrievalUnavailable(fixture, events, "permit_timeout");
+        verify(fixture.vectorStore, never()).similaritySearch(any(SearchRequest.class));
+        verify(permits, never()).release();
+    }
+
+    @Test
+    void vectorPermitInterruptionEndsWithRetrievalUnavailableWithoutAnswering() throws Exception {
+        Fixture fixture = professionalEvidenceFixture();
+        var executor = fixture.executor();
+        Semaphore permits = mock(Semaphore.class);
+        when(permits.tryAcquire(anyLong(), eq(TimeUnit.MILLISECONDS)))
+                .thenThrow(new InterruptedException("permit wait interrupted"));
+        ReflectionTestUtils.setField(executor, "vectorBulkhead", permits);
+
+        var events = executor.prepareAndAnswer("CBT 是什么", "chat-id", OWNER_ID)
+                .collectList().block();
+
+        assertRetrievalUnavailable(fixture, events, "interrupted");
+        verify(fixture.vectorStore, never()).similaritySearch(any(SearchRequest.class));
+        verify(permits, never()).release();
+    }
+
+    @Test
+    void successfulZeroHitsKeepTheExistingEvidenceGapPath() {
+        Fixture fixture = professionalEvidenceFixture();
+        when(fixture.vectorStore.similaritySearch(any(SearchRequest.class))).thenReturn(List.of());
+        when(fixture.counselingApp.doChatWithAgentContextByStreamPrepared(
+                eq(OWNER_ID), eq("CBT 是什么"), eq("chat-id"), anyString()))
+                .thenReturn(Flux.just("目前缺少足够的可用依据。"));
+
+        var events = fixture.executor().prepareAndAnswer("CBT 是什么", "chat-id", OWNER_ID)
+                .collectList().block();
+
+        assertEquals(List.of("status", "status", "status", "status", "delta", "done"), eventTypes(events));
+        assertFalse(events.stream().anyMatch(CounselingStreamEvent::fallback));
+        assertEquals("deep", events.getLast().effectiveMode());
+        assertEquals("目前缺少足够的可用依据。", events.get(4).content());
+        assertEquals(null, fixture.metrics.find("counseling.retrieval.failures").counter());
+        verify(fixture.counselingApp, never()).doChatWithRagByStreamPrepared(anyLong(), anyString(), anyString());
+        verify(fixture.counselingApp).doChatWithAgentContextByStreamPrepared(
+                eq(OWNER_ID), eq("CBT 是什么"), eq("chat-id"), anyString());
+    }
+
+    private static void assertRetrievalUnavailable(
+            Fixture fixture, List<CounselingStreamEvent> events, String reason) {
+        assertEquals(List.of("status", "status", "error"), eventTypes(events));
+        var error = events.getLast();
+        assertEquals("retrieval_unavailable", error.phase());
+        assertEquals("deep", error.effectiveMode());
+        assertTrue(error.content().contains("知识检索暂不可用"));
+        assertFalse(error.content().contains("没有"));
+        assertFalse(error.content().contains("无资料"));
+        assertFalse(error.content().contains("不足"));
+        assertFalse(error.content().contains("private query"));
+        assertFalse(events.stream().anyMatch(CounselingStreamEvent::fallback));
+        assertEquals(1.0, fixture.metrics.get("counseling.retrieval.failures")
+                .tag("reason", reason).counter().count());
+        verify(fixture.counselingApp, never()).doChatWithRagByStreamPrepared(anyLong(), anyString(), anyString());
+        verify(fixture.counselingApp, never()).doChatWithAgentContextByStreamPrepared(
+                anyLong(), anyString(), anyString(), anyString());
+        verify(fixture.aiWorkerClient, never()).refine(any());
+    }
+
+    @Test
     void workerListenModeInjectsResponseStrategyIntoDeepContext() {
         // 回应策略：worker 判定 listen（用户在宣泄）→ 深度上下文必须携带
         // "只反映与陪伴、不提问"的内部指令与选题方向，且标注为系统指令而非用户事实。
@@ -432,7 +520,7 @@ class SpringAiCounselingAgentExecutorTest {
     }
 
     @Test
-    void timedOutVectorWorkIsCancelledBeforeFallback() throws Exception {
+    void timedOutVectorWorkIsCancelledBeforeRetrievalUnavailable() throws Exception {
         Fixture fixture = new Fixture();
         fixture.properties.setStepTimeoutSeconds(1);
         when(fixture.historyService.getRecentMessages("chat-id", fixture.properties.getHistoryMessages()))
@@ -451,16 +539,13 @@ class SpringAiCounselingAgentExecutorTest {
             }
             return List.of();
         });
-        when(fixture.counselingApp.doChatWithRagByStreamPrepared(OWNER_ID, "message", "chat-id"))
-                .thenReturn(Flux.just("fallback answer"));
-
         List<CounselingStreamEvent> events = fixture.executor()
                 .prepareAndAnswer("message", "chat-id", OWNER_ID)
                 .collectList()
                 .block();
 
         assertTrue(interrupted.await(2, TimeUnit.SECONDS));
-        assertEquals(List.of("status", "status", "fallback", "delta", "done"), eventTypes(events));
+        assertRetrievalUnavailable(fixture, events, "timeout");
     }
 
     @Test
@@ -542,6 +627,7 @@ class SpringAiCounselingAgentExecutorTest {
         private final AiWorkerClient aiWorkerClient = mock(AiWorkerClient.class);
         private final ConversationMemoryService memoryService = mock(ConversationMemoryService.class);
         private final DeepThinkingProperties properties = new DeepThinkingProperties();
+        private final SimpleMeterRegistry metrics = new SimpleMeterRegistry();
         // These tests isolate planning/grading; the real admission boundary is covered separately.
         private final KnowledgeAdmissionPolicy admissionPolicy = mock(KnowledgeAdmissionPolicy.class);
 
@@ -569,6 +655,7 @@ class SpringAiCounselingAgentExecutorTest {
                     AGENT_SCHEDULER
             );
             ReflectionTestUtils.setField(executor, "admissionPolicy", admissionPolicy);
+            ReflectionTestUtils.setField(executor, "metrics", metrics);
             return executor;
         }
     }

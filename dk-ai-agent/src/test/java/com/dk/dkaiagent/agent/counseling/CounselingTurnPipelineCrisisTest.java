@@ -6,6 +6,8 @@ import com.dk.dkaiagent.memory.RiskTier;
 import com.dk.dkaiagent.memory.SafetyProperties;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.Mockito;
 import reactor.core.publisher.Flux;
 
@@ -84,6 +86,55 @@ class CounselingTurnPipelineCrisisTest {
         assertEquals("delta", events.get(0).type());
         assertEquals("done", events.get(events.size() - 1).type());
         assertFalse(events.get(events.size() - 1).fallback());
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void interpersonalDangerUsesVictimInstructionsInBothModes(boolean deepThinking) {
+        List<CounselingStreamEvent> events = pipeline.run(new CounselingTurnPipeline.CounselingTurnRequest(
+                OWNER_ID, "chat-id", "他现在拿刀堵着我", null, deepThinking)).collectList().block();
+        String text = events.stream().map(CounselingStreamEvent::content).reduce("", String::concat);
+
+        assertTrue(text.contains("不要争辩、夺取武器"));
+        assertTrue(text.contains("当地报警或紧急服务"));
+        assertFalse(text.contains("伤害自己"));
+        assertFalse(text.contains("那些念头"));
+        assertEquals("done", events.get(events.size() - 1).type());
+        verify(executor, never()).prepareAndAnswer(anyString(), anyString(), anyLong());
+        verify(counselingApp, never()).doChatWithRagByStreamPrepared(anyLong(), anyString(), anyString());
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void harmToOthersUsesDeescalationInstructionsInBothModes(boolean deepThinking) {
+        List<CounselingStreamEvent> events = pipeline.run(new CounselingTurnPipeline.CounselingTurnRequest(
+                OWNER_ID, "chat-id", "我现在要拿刀杀了他", null, deepThinking)).collectList().block();
+        String text = events.stream().map(CounselingStreamEvent::content).reduce("", String::concat);
+
+        assertTrue(text.contains("暂停接近对方"));
+        assertTrue(text.contains("与危险物和对方保持距离"));
+        assertTrue(text.contains("寻找线下帮助"));
+        assertFalse(text.contains("伤害自己"));
+        assertEquals("done", events.get(events.size() - 1).type());
+        verify(executor, never()).prepareAndAnswer(anyString(), anyString(), anyLong());
+        verify(counselingApp, never()).doChatWithRagByStreamPrepared(anyLong(), anyString(), anyString());
+    }
+
+    @Test
+    void outputSupplementUsesVictimInstructionsWhenCrisisTemplateIsDisabled() {
+        SafetyProperties safety = new SafetyProperties();
+        safety.setCrisisResponseEnabled(false);
+        ReflectionSupport.setField(pipeline, "safetyProperties", safety);
+
+        List<CounselingStreamEvent> events = pipeline.run(new CounselingTurnPipeline.CounselingTurnRequest(
+                OWNER_ID, "chat-id", "他现在拿刀堵着我", null, false)).collectList().block();
+        String text = events.stream().map(CounselingStreamEvent::content).reduce("", String::concat);
+
+        verify(counselingApp).doChatWithRagByStreamPrepared(OWNER_ID, "他现在拿刀堵着我", "chat-id");
+        assertTrue(text.contains("当地报警或紧急服务"));
+        assertTrue(text.contains("不要争辩、夺取武器"));
+        assertFalse(text.contains("伤害自己"));
+        assertFalse(text.contains("那些念头"));
     }
 
     @Test

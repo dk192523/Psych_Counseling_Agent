@@ -232,7 +232,7 @@ class DefaultCounselingMemoryAgentTest {
         CounselingMemoryAgent.ConsolidationOutcome first = agent.consolidate(
                 "", List.of(new CounselingMemoryAgent.MemoryInput("user", "我有时候想死", false)), 1_200);
         assertTrue(first.success());
-        assertTrue(first.digest().contains("- [user] 我有时候想死"));
+        assertTrue(first.digest().contains("- [user] [safety:v1] 我有时候想死"));
 
         // 第二次整合：纯普通批次 + 第一次 digest 作为 existingDigest，旧安全备注必须继承
         when(aiWorkerClient.consolidate(any())).thenReturn(Optional.of(
@@ -243,7 +243,7 @@ class DefaultCounselingMemoryAgentTest {
                 1_200);
 
         assertTrue(second.success());
-        assertTrue(second.digest().contains("- [user] 我有时候想死"),
+        assertTrue(second.digest().contains("- [user] [safety:v1] 我有时候想死"),
                 "historical crisis record must carry forward when the new batch has no crisis messages");
         assertTrue(second.digest().contains("## 已确认事实"));
     }
@@ -291,6 +291,55 @@ class DefaultCounselingMemoryAgentTest {
                 "digest budget below the frozen contract floor must be clamped up to 200");
         assertEquals(3_000, requests.get(1).limits().maxDigestChars(),
                 "digest budget above the frozen contract ceiling must be clamped down to 3000");
+    }
+
+    @Test
+    void multilineSafetyUsesSharedPythonV1FixtureAndSurvivesRepeatedConsolidation() {
+        when(aiWorkerClient.consolidate(any())).thenReturn(Optional.of(
+                workerResponse("## 已确认事实\n暂无\n\n## 待确认问题\n暂无", "python-worker")));
+        // Keep this literal and expected record identical to test_service.py's cross-language fixture.
+        String content = "首行\\n\r\n\r\n## 正文标题\n- [user] 正文列表\n- 列表\r尾部\\";
+        String record = "- [user] [safety:v1] 首行\\\\n\\r\\n\\r\\n## 正文标题\\n- [user] 正文列表\\n- 列表\\r尾部\\\\";
+        CounselingMemoryAgent.ConsolidationOutcome first = agent.consolidate(
+                "", List.of(new CounselingMemoryAgent.MemoryInput("user", content, true)), 1_200);
+        assertTrue(first.digest().endsWith("## 安全备注\n" + record));
+
+        CounselingMemoryAgent.ConsolidationOutcome repeated = agent.consolidate(
+                first.digest(), List.of(new CounselingMemoryAgent.MemoryInput("user", content, true)), 1_200);
+        assertEquals(first.digest(), repeated.digest(), "decoded content dedupes against the inherited v1 record");
+
+        CounselingMemoryAgent.ConsolidationOutcome later = agent.consolidate(
+                repeated.digest(), List.of(new CounselingMemoryAgent.MemoryInput("user", "普通近况", false)), 1_200);
+        assertEquals(first.digest(), later.digest(), "blank lines, CRLF, Markdown and backslashes survive later batches");
+    }
+
+    @Test
+    void legacyMultilineIsMigratedWithoutSplittingArbitraryMarkdownHeadings() {
+        when(aiWorkerClient.consolidate(any())).thenReturn(Optional.of(
+                workerResponse("## 已确认事实\n普通事实", "python-worker")));
+        String legacy = "## 安全备注\r\n- [user] 旧记录\\path\r\n\r\n## 正文标题\r\n- 普通列表\r\n"
+                + "- [assistant] 另一条旧记录\r\n\r\n## 待确认问题\r\n仍需核实";
+        String content = "旧记录\\path\r\n\r\n## 正文标题\r\n- 普通列表";
+        CounselingMemoryAgent.ConsolidationOutcome outcome = agent.consolidate(
+                legacy, List.of(new CounselingMemoryAgent.MemoryInput("user", content, true)), 1_200);
+
+        String expected = "## 安全备注\n- [user] [safety:v1] 旧记录\\\\path\\r\\n\\r\\n## 正文标题\\r\\n- 普通列表"
+                + "\n- [assistant] [safety:v1] 另一条旧记录";
+        assertTrue(outcome.digest().endsWith(expected), "legacy records migrate and dedupe against new messages");
+        assertFalse(outcome.digest().contains("仍需核实"));
+    }
+
+    @Test
+    void localFallbackKeepsMultilineSafetyWhitespaceAndBatchFirstOrdering() {
+        when(aiWorkerClient.consolidate(any())).thenReturn(Optional.empty());
+        when(chatModel.call(any(Prompt.class))).thenReturn(response("## 已确认事实\n暂无"));
+        CounselingMemoryAgent.ConsolidationOutcome outcome = agent.consolidate(
+                "## 安全备注\n- [user] 历史单行记录",
+                List.of(new CounselingMemoryAgent.MemoryInput("assistant", "  开头\n\n结尾  ", true)), 1_200);
+
+        assertTrue(outcome.digest().endsWith("## 安全备注\n"
+                + "- [assistant] [safety:v1]   开头\\n\\n结尾  \n"
+                + "- [user] [safety:v1] 历史单行记录"));
     }
 
     private static AiWorkerContracts.ConsolidateResponse workerResponse(String digest, String engine) {

@@ -20,7 +20,7 @@ class CounselingDocumentLoaderUnitTest {
     @Test
     void approvedProductionSourcesHaveStableMetadataAndSupportShortFilenames() throws IOException {
         String markdown = "Source-URL: https://example.org/source\nStatus: published\n\n正文。\n\n---\n\n第二块。";
-        CounselingDocumentLoader loader = loader(approved("a.md").toString(), resource("a.md", markdown));
+        CounselingDocumentLoader loader = loader(approved("a.md", markdown).toString(), resource("a.md", markdown));
         List<Document> first = loader.loadMarkdowns();
         List<Document> second = loader.loadMarkdowns();
         assertEquals(2, first.size());
@@ -42,10 +42,11 @@ class CounselingDocumentLoaderUnitTest {
     }
 
     @Test
-    void editedSourceKeepsDocumentIdentityButChangesVersionAndChunkIdentity() throws IOException {
-        String manifest = approved("a.md").toString();
-        var before = loader(manifest, resource("a.md", "原文")).loadMarkdowns().getFirst().getMetadata();
-        var after = loader(manifest, resource("a.md", "修改后的正文")).loadMarkdowns().getFirst().getMetadata();
+    void separatelyReviewedEditKeepsDocumentIdentityButChangesVersionAndChunkIdentity() throws IOException {
+        var before = loader(approved("a.md", "原文").toString(), resource("a.md", "原文"))
+                .loadMarkdowns().getFirst().getMetadata();
+        var after = loader(approved("a.md", "修改后的正文").toString(), resource("a.md", "修改后的正文"))
+                .loadMarkdowns().getFirst().getMetadata();
         assertEquals(before.get("documentId"), after.get("documentId"));
         assertNotEquals(before.get("sourceVersion"), after.get("sourceVersion"));
         assertNotEquals(before.get("contentHash"), after.get("contentHash"));
@@ -56,7 +57,7 @@ class CounselingDocumentLoaderUnitTest {
 
     @Test
     void identicalChunksAndDistinctSourcesHaveDistinctIdentities() throws IOException {
-        List<Document> chunks = loader(approved("b.md") + "\n" + approved("a.md"),
+        List<Document> chunks = loader(approved("b.md", "重复\n\n---\n\n重复") + "\n" + approved("a.md", "重复"),
                 resource("b.md", "重复\n\n---\n\n重复"), resource("a.md", "重复")).loadMarkdowns();
         assertEquals("a.md", chunks.getFirst().getMetadata().get("filename"));
         assertEquals(3, chunks.size());
@@ -89,10 +90,10 @@ class CounselingDocumentLoaderUnitTest {
 
     @Test
     void approvedKnowledgeAndPolicyResolveOnlyExplicitClasspathFiles() throws IOException {
-        ObjectNode knowledge = approved("knowledge.md").put("domain", "knowledge")
+        ObjectNode knowledge = approved("knowledge.md", "知识内容").put("domain", "knowledge")
                 .put("runtime_path", "dk-ai-agent/src/main/resources/document/professional/knowledge.md")
                 .put("pii_status", "no_pii");
-        ObjectNode policy = approved("policy.md").put("domain", "policy")
+        ObjectNode policy = approved("policy.md", "政策内容").put("domain", "policy")
                 .put("runtime_path", "dk-ai-agent/src/main/resources/document/policy/policy.md");
         ResourcePatternResolver resolver = resolver(knowledge + "\n" + policy);
         when(resolver.getResources("classpath*:document/professional/knowledge.md"))
@@ -186,6 +187,63 @@ class CounselingDocumentLoaderUnitTest {
                 CounselingDocumentLoader.sha256("abc"));
     }
 
+    @Test
+    void singleByteEditOrLineEndingChangeRequiresNewReview() throws IOException {
+        String manifest = approved("a.md", "body\n").toString();
+        assertFalse(loader(manifest, resource("a.md", "body\n")).loadMarkdowns().isEmpty());
+        for (String changed : List.of("bodz\n", "body\r\n", "body")) {
+            CounselingDocumentLoader changedLoader = loader(manifest, resource("a.md", changed));
+            IllegalStateException failure = assertThrows(IllegalStateException.class, changedLoader::loadMarkdowns);
+            assertTrue(failure.getCause().getMessage().contains("SHA-256"));
+        }
+    }
+
+    @Test
+    void matchingUtf8BytesWithCrLfRemainAdmitted() throws IOException {
+        String markdown = "审核正文\r\n";
+        var metadata = loader(approved("a.md", markdown).toString(), resource("a.md", markdown))
+                .loadMarkdowns().getFirst().getMetadata();
+        assertEquals(CounselingDocumentLoader.sha256(markdown.getBytes(StandardCharsets.UTF_8)),
+                metadata.get("sourceVersion"));
+    }
+
+    @Test
+    void missingOrMalformedReviewedHashFailsBeforeDocumentLoad() throws IOException {
+        ObjectNode missing = approved("a.md");
+        missing.remove("reviewed_content_sha256");
+        assertRejected(missing.toString());
+        for (String invalid : List.of("A".repeat(64), "a".repeat(63), "g".repeat(64),
+                "a".repeat(65), "a".repeat(64) + "\n", "")) {
+            assertRejected(approved("a.md").put("reviewed_content_sha256", invalid).toString());
+        }
+        assertRejected(approved("a.md").putNull("reviewed_content_sha256").toString());
+        assertRejected(approved("a.md").put("reviewed_content_sha256", 123).toString());
+    }
+
+    @Test
+    void nonproductionSourcesNeedNoReviewedContentHash() throws IOException {
+        for (String use : List.of("quarantine", "reference", "evaluation")) {
+            ObjectNode row = approved("a.md").put("use", use);
+            row.remove("reviewed_content_sha256");
+            assertExcluded(row.toString());
+        }
+    }
+
+    @Test
+    void matchingHashCannotAdmitMalformedUtf8() throws IOException {
+        byte[] malformed = {(byte) 0xff};
+        ObjectNode row = approved("a.md").put("reviewed_content_sha256",
+                CounselingDocumentLoader.sha256(malformed));
+        Resource invalidUtf8 = new ByteArrayResource(malformed) {
+            @Override
+            public String getFilename() {
+                return "a.md";
+            }
+        };
+        CounselingDocumentLoader loader = loader(row.toString(), invalidUtf8);
+        assertThrows(IllegalStateException.class, loader::loadMarkdowns);
+    }
+
     private static void assertExcluded(String manifest) throws IOException {
         ResourcePatternResolver resolver = resolver(manifest);
         assertTrue(new CounselingDocumentLoader(resolver).loadMarkdowns().isEmpty(), manifest);
@@ -201,12 +259,17 @@ class CounselingDocumentLoaderUnitTest {
     }
 
     private static ObjectNode approved(String filename) {
+        return approved(filename, "原文");
+    }
+
+    private static ObjectNode approved(String filename, String reviewedMarkdown) {
         return new ObjectMapper().createObjectNode().put("id", filename).put("title", "审核文档")
                 .put("domain", "cases/summaries").put("use", "production")
                 .put("license", "项目原创；已核验生产用途").put("license_status", "approved")
                 .put("license_evidence", "review/authorization-2026-10-09").put("pii_status", "redacted")
                 .put("review_status", "approved").put("reviewed_by", "knowledge-reviewer")
                 .put("reviewed_at", "2026-10-09").put("notes", "仅作为单元测试来源")
+                .put("reviewed_content_sha256", CounselingDocumentLoader.sha256(reviewedMarkdown))
                 .put("runtime_path", "dk-ai-agent/src/main/resources/document/" + filename);
     }
 

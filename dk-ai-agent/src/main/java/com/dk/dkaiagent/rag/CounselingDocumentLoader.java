@@ -15,6 +15,8 @@ import org.springframework.stereotype.Component;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.ByteBuffer;
+import java.nio.charset.CodingErrorAction;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
@@ -114,6 +116,11 @@ public class CounselingDocumentLoader {
             String piiStatus = enumText(entry, "pii_status", PII_STATUSES);
             String reviewStatus = enumText(entry, "review_status", REVIEW_STATUSES);
             String runtimePath = optionalText(entry, "runtime_path");
+            String reviewedContentSha256 = optionalText(entry, "reviewed_content_sha256");
+            if (("production".equals(use) && reviewedContentSha256 == null)
+                    || (reviewedContentSha256 != null && !reviewedContentSha256.matches("[0-9a-f]{64}"))) {
+                throw new IOException("知识清单 reviewed_content_sha256 缺失或格式无效: " + id);
+            }
             if (runtimePath != null && !runtimePaths.add(runtimePath)) {
                 throw new IOException("知识清单 runtime_path 重复: " + id);
             }
@@ -134,7 +141,8 @@ public class CounselingDocumentLoader {
             };
             // Exam questions, raw transcripts and prompt references never enter counseling RAG.
             if (knowledgeDomain != null) {
-                approved.add(new ApprovedSource(id, approvedClasspathPath(runtimePath), knowledgeDomain));
+                approved.add(new ApprovedSource(id, approvedClasspathPath(runtimePath), knowledgeDomain,
+                        reviewedContentSha256));
             }
         }
         approved.sort(Comparator.comparing(ApprovedSource::classpathPath));
@@ -194,7 +202,7 @@ public class CounselingDocumentLoader {
         }
     }
 
-    private record ApprovedSource(String id, String classpathPath, String domain) { }
+    private record ApprovedSource(String id, String classpathPath, String domain, String reviewedContentSha256) { }
 
     private List<Document> loadResource(Resource resource, ApprovedSource source) throws IOException {
         String filename = resource.getFilename();
@@ -203,10 +211,16 @@ public class CounselingDocumentLoader {
         }
         // Read once so the version and parsed chunks always describe the same snapshot.
         byte[] sourceBytes = resource.getContentAsByteArray();
-        String markdown = new String(sourceBytes, StandardCharsets.UTF_8);
+        String sourceVersion = sha256(sourceBytes);
+        if (!sourceVersion.equals(source.reviewedContentSha256())) {
+            throw new IOException("生产知识正文与已审核 SHA-256 不一致，必须重新审核: " + source.id());
+        }
+        String markdown = StandardCharsets.UTF_8.newDecoder()
+                .onMalformedInput(CodingErrorAction.REPORT)
+                .onUnmappableCharacter(CodingErrorAction.REPORT)
+                .decode(ByteBuffer.wrap(sourceBytes)).toString();
         String sourceId = "classpath:" + source.classpathPath();
         String documentId = sha256(source.domain() + "\u0000" + sourceId);
-        String sourceVersion = sha256(markdown);
         String status = metadataValue(STATUS, markdown, "active");
         String citationUrl = metadataValue(SOURCE_URL, markdown, null);
         MarkdownDocumentReaderConfig config = MarkdownDocumentReaderConfig.builder()
@@ -238,9 +252,13 @@ public class CounselingDocumentLoader {
     }
 
     static String sha256(String content) {
+        return sha256(content.getBytes(StandardCharsets.UTF_8));
+    }
+
+    static String sha256(byte[] content) {
         try {
             return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
-                    .digest(content.getBytes(StandardCharsets.UTF_8)));
+                    .digest(content));
         } catch (NoSuchAlgorithmException e) {
             throw new IllegalStateException("当前 JDK 不支持 SHA-256", e);
         }

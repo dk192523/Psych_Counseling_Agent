@@ -12,6 +12,8 @@ import com.dk.dkaiagent.orchestration.ExecutionContextScope;
 import com.dk.dkaiagent.rag.KnowledgeIntentRouter;
 import com.dk.dkaiagent.rag.KnowledgeAdmissionPolicy;
 import jakarta.annotation.Resource;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import com.dk.dkaiagent.rag.TranscriptSearchService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
@@ -23,6 +25,7 @@ import org.springframework.ai.document.Document;
 import org.springframework.ai.vectorstore.SearchRequest;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Flux;
 import reactor.core.scheduler.Scheduler;
@@ -79,6 +82,9 @@ public class SpringAiCounselingAgentExecutor implements CounselingAgentExecutor 
      */
     private static final String STANDARD_PATH_NOTICE = "这轮改用常规方式回应你，内容不受影响…";
 
+    private static final String RETRIEVAL_UNAVAILABLE_NOTICE =
+            "知识检索暂不可用，暂时无法核对这次回答所需的依据。请稍后重试。";
+
     private static final String PLANNER_PROMPT = """
             你是心理疏导知识库的检索规划 Agent。你只负责生成结构化检索计划，不直接回答用户，也不输出思维链。
             当前叙述可能是单方、片段化或情绪化的；不得把用户对他人动机和对错的判断直接改写成事实。
@@ -103,6 +109,9 @@ public class SpringAiCounselingAgentExecutor implements CounselingAgentExecutor 
 
     @Resource
     private KnowledgeAdmissionPolicy admissionPolicy = new KnowledgeAdmissionPolicy();
+
+    @Autowired(required = false)
+    private MeterRegistry metrics = new SimpleMeterRegistry();
 
     private final CounselingApp counselingApp;
     private final ConversationHistoryService historyService;
@@ -166,14 +175,28 @@ public class SpringAiCounselingAgentExecutor implements CounselingAgentExecutor 
 
             AtomicReference<DeepContext> deepContext = new AtomicReference<>();
             AtomicBoolean useFallback = new AtomicBoolean(false);
+            AtomicBoolean retrieving = new AtomicBoolean(false);
+            AtomicBoolean retrievalUnavailable = new AtomicBoolean(false);
 
             Flux<CounselingStreamEvent> preparation = Flux.<CounselingStreamEvent, PreparationState>generate(
                             () -> new PreparationState(message, chatId, requestContext),
-                            (state, sink) -> advancePreparation(state, deepContext, sink)
+                            (state, sink) -> advancePreparation(state, deepContext, retrieving, sink)
                     )
                     .subscribeOn(agentScheduler)
                     .timeout(Duration.ofSeconds(properties.getStepTimeoutSeconds()))
                     .onErrorResume(error -> {
+                        RetrievalFailure failure = retrievalFailure(error);
+                        if (failure != null || (retrieving.get() && error instanceof TimeoutException)) {
+                            RetrievalFailureReason reason = failure == null
+                                    ? RetrievalFailureReason.TIMEOUT : failure.reason;
+                            retrievalUnavailable.set(true);
+                            metrics.counter("counseling.retrieval.failures", "reason", reason.metricTag).increment();
+                            // Never log queries, counseling text, exception messages, or provider payloads.
+                            log.warn("Knowledge retrieval unavailable; requestId={}, reason={}",
+                                    requestContext.requestId(), reason.metricTag);
+                            return Flux.just(CounselingStreamEvent.error(
+                                    "retrieval_unavailable", RETRIEVAL_UNAVAILABLE_NOTICE, "deep"));
+                        }
                         useFallback.set(true);
                         log.warn("Deep counseling preparation failed; requestId={}, "
                                         + "using Java RAG fallback, errorType={}",
@@ -183,6 +206,9 @@ public class SpringAiCounselingAgentExecutor implements CounselingAgentExecutor 
                     });
 
             Flux<CounselingStreamEvent> answer = Flux.defer(() -> {
+                if (retrievalUnavailable.get()) {
+                    return Flux.empty();
+                }
                 if (useFallback.get()) {
                     return mapAnswer(
                             counselingApp.doChatWithRagByStreamPrepared(ownerId, message, chatId), "standard", true);
@@ -205,6 +231,7 @@ public class SpringAiCounselingAgentExecutor implements CounselingAgentExecutor 
     private PreparationState advancePreparation(
             PreparationState state,
             AtomicReference<DeepContext> contextReference,
+            AtomicBoolean retrieving,
             reactor.core.publisher.SynchronousSink<CounselingStreamEvent> sink) {
         return ExecutionContextScope.call(state.requestContext, () -> {
             switch (state.stage) {
@@ -224,7 +251,9 @@ public class SpringAiCounselingAgentExecutor implements CounselingAgentExecutor 
                                     () -> memoryService.recallEpisodes(
                                             state.chatId, state.message, recallQueries(state.plan))));
                     try {
+                        retrieving.set(true);
                         state.candidates = retrieveCandidates(state.plan, state.message);
+                        retrieving.set(false);
                         state.episodes = awaitEpisodes(episodesFuture);
                     } catch (RuntimeException error) {
                         episodesFuture.cancel(true);
@@ -368,11 +397,25 @@ public class SpringAiCounselingAgentExecutor implements CounselingAgentExecutor 
                 ? List.of(originalMessage)
                 : plan.retrievalQueries();
         AgentRequestContext context = ExecutionContextScope.requireCurrent();
-        List<Future<List<Document>>> searches = queries.stream()
-                .map(query -> agentExecutor.submit(
-                        () -> ExecutionContextScope.call(context, () -> retrieveQuery(query, route))))
-                .toList();
-        for (List<Document> hits : awaitParallel(searches, "vector retrieval")) {
+        List<Future<List<Document>>> searches = new ArrayList<>();
+        List<List<Document>> results;
+        try {
+            for (String query : queries) {
+                searches.add(agentExecutor.submit(
+                        () -> ExecutionContextScope.call(context, () -> retrieveQuery(query, route))));
+            }
+            results = awaitParallel(searches, "vector retrieval");
+        } catch (RuntimeException error) {
+            searches.stream().filter(future -> !future.isDone()).forEach(future -> future.cancel(true));
+            RetrievalFailure failure = retrievalFailure(error);
+            if (failure != null) throw failure;
+            RetrievalFailureReason reason = error.getCause() instanceof InterruptedException
+                    ? RetrievalFailureReason.INTERRUPTED
+                    : error.getCause() instanceof TimeoutException
+                    ? RetrievalFailureReason.TIMEOUT : RetrievalFailureReason.BACKEND;
+            throw new RetrievalFailure(reason, error);
+        }
+        for (List<Document> hits : results) {
             for (Document document : hits) {
                 String key = candidateKey(document);
                 Document existing = deduplicated.get(key);
@@ -405,7 +448,7 @@ public class SpringAiCounselingAgentExecutor implements CounselingAgentExecutor 
                     Math.max(1, ExecutionContextScope.requireCurrent().remaining().toMillis()),
                     TimeUnit.MILLISECONDS);
             if (!acquired) {
-                return List.of();
+                throw new RetrievalFailure(RetrievalFailureReason.PERMIT_TIMEOUT, null);
             }
             SearchRequest request = SearchRequest.builder()
                     .query(query)
@@ -417,12 +460,11 @@ public class SpringAiCounselingAgentExecutor implements CounselingAgentExecutor 
             return hits == null ? List.of() : List.copyOf(hits);
         } catch (InterruptedException error) {
             Thread.currentThread().interrupt();
-            return List.of();
+            throw new RetrievalFailure(RetrievalFailureReason.INTERRUPTED, error);
+        } catch (RetrievalFailure error) {
+            throw error;
         } catch (RuntimeException error) {
-            log.warn("Vector query failed; requestId={}, errorType={}",
-                    ExecutionContextScope.requireCurrent().requestId(),
-                    error.getClass().getSimpleName());
-            return List.of();
+            throw new RetrievalFailure(RetrievalFailureReason.BACKEND, error);
         } finally {
             if (acquired) {
                 vectorBulkhead.release();
@@ -971,6 +1013,32 @@ public class SpringAiCounselingAgentExecutor implements CounselingAgentExecutor 
         RETRIEVE,
         GRADE,
         COMPLETE
+    }
+
+    private enum RetrievalFailureReason {
+        BACKEND("backend"), PERMIT_TIMEOUT("permit_timeout"), INTERRUPTED("interrupted"), TIMEOUT("timeout");
+
+        private final String metricTag;
+
+        RetrievalFailureReason(String metricTag) {
+            this.metricTag = metricTag;
+        }
+    }
+
+    private static final class RetrievalFailure extends RuntimeException {
+        private final RetrievalFailureReason reason;
+
+        private RetrievalFailure(RetrievalFailureReason reason, Throwable cause) {
+            super("Knowledge retrieval unavailable", cause);
+            this.reason = reason;
+        }
+    }
+
+    private static RetrievalFailure retrievalFailure(Throwable error) {
+        for (Throwable cause = error; cause != null; cause = cause.getCause()) {
+            if (cause instanceof RetrievalFailure failure) return failure;
+        }
+        return null;
     }
 
     private static final class PreparationState {

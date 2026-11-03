@@ -112,7 +112,30 @@ class CounselingTurnLifecycleTest {
         String visible = events.stream().filter(e -> e.type().equals("delta")).map(CounselingStreamEvent::content).reduce("", String::concat);
         assertFalse(visible.contains("尊重你的决定"));
         assertTrue(visible.contains("12356"));
+        assertFalse(visible.contains("念头"));
+        assertFalse(visible.contains("伤害自己"));
         verify(turns).finish(1,"chat","key",visible,"COMPLETED",deep ? "deep" : "standard",false);
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void unconfiguredLlmRetainsHistoricalSupportInBothModes(boolean deep) {
+        ReflectionTestUtils.setField(pipeline, "desktopLlmUnconfigured", true);
+        when(app.outputRiskTier("chat")).thenReturn(com.dk.dkaiagent.memory.RiskTier.PASSIVE);
+        var events = pipeline.run(new CounselingTurnPipeline.CounselingTurnRequest(
+                1, "chat", "嗯", "key", deep)).collectList().block();
+        assertEquals(1, events.size());
+        assertEquals("error", events.getFirst().type());
+        assertEquals("llm_unconfigured", events.getFirst().phase());
+        String text = events.getFirst().content();
+        assertTrue(text.contains(DesktopLlmAvailability.UNCONFIGURED_MESSAGE));
+        assertTrue(text.contains("12356"));
+        assertTrue(text.contains("当地报警、急救或紧急服务"));
+        assertFalse(text.contains("念头"));
+        assertFalse(text.contains("伤害自己"));
+        verifyNoInteractions(turns);
+        verifyNoInteractions(ReflectionTestUtils.getField(pipeline, "counselingAgentExecutor"));
+        verify(app, never()).doChatWithRagByStreamPrepared(anyLong(), anyString(), anyString());
     }
     @Test void emptyAnswerCannotCompleteSuccessfully() {
         when(app.doChatWithRagByStreamPrepared(1, "hello", "chat")).thenReturn(Flux.empty());

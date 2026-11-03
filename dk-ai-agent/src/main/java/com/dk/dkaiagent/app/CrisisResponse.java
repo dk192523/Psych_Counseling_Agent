@@ -1,7 +1,7 @@
 package com.dk.dkaiagent.app;
 
 import com.dk.dkaiagent.memory.SafetyProperties;
-import jakarta.annotation.Resource;
+import com.dk.dkaiagent.memory.SafetyTerms;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
@@ -63,6 +63,33 @@ public class CrisisResponse {
         return TEMPLATES.get(index).formatted(resources);
     }
 
+    /** 按当前消息中的危险类别选择模板，避免把遭受暴力或伤人意图误写成自伤。 */
+    public String render(String message) {
+        return switch (SafetyTerms.crisisCategory(message)) {
+            case DANGER_FROM_OTHERS -> """
+                    我听到了，你现在正面临他人的危险。**你现在能安全地联系紧急服务或身边可信任的人吗？**
+
+                    - 如果能在不增加危险的情况下离开，请到有人、能求助的安全地点；不要争辩、夺取武器或冒险穿过对方。
+                    - 如果无法安全离开，请尽可能与对方保持距离，寻找能够遮挡或隔开的地方。
+                    - 立即联系当地报警或紧急服务（以当地公布为准），说明你的位置和正在发生的危险；如有人受伤，也请联系当地急救。
+                    - 在安全的前提下联系可信任的人，让对方帮助报警或寻找线下援助。
+
+                    先以脱离眼前危险为重，回复我可以等到安全之后。
+                    """;
+            case HARM_TO_OTHERS -> """
+                    我听到你现在有伤害他人的冲动。**先暂停接近对方，也先不要去找对方。**
+
+                    - 放下手中的刀具或其他危险物并退开，不要随身携带；与危险物和对方保持距离。
+                    - 立即联系一个可信任的人，直接告诉对方你担心自己会伤人，请对方协助寻找线下帮助。
+                    - 如果你担心自己马上会行动，或已经有人受伤，请立即联系当地报警、急救或紧急服务（以当地公布为准），说明你的位置和风险。
+
+                    你现在能先停下来，与对方和危险物分开吗？
+                    """;
+            case SELF_HARM -> render();
+            case UNSPECIFIED -> "先确认你和身边人的安全。如果有眼前的危险，请立即联系当地报警、急救或紧急服务（以当地公布为准），并向可信任的人寻求线下帮助。";
+        };
+    }
+
     /**
      * 输出侧检查的补充文本：措辞做成"温和提醒"而不是"纠偏"——它在两种情况下出现：
      * 模型应和了自伤意念（此时它兼任纠偏），或模型忘了给资源（此时它兜底补上）。
@@ -72,6 +99,24 @@ public class CrisisResponse {
         String resources = String.join("；", safetyProperties.getHotlines());
         return "另外想让你知道：如果那些念头变得强烈，随时可以求助——" + resources
                 + "。你不需要一个人扛，我在这儿，你可以继续说。";
+    }
+
+    /** 输出检查及无模型配置时也沿用当前消息的危险类别。 */
+    public String supplement(String message) {
+        return supplement(message, false);
+    }
+
+    /** 历史风险只保留了等级时，补充中性求助资源，不推断当前存在自伤意图。 */
+    public String supplement(String message, boolean historicalRisk) {
+        return switch (SafetyTerms.crisisCategory(message)) {
+            case DANGER_FROM_OTHERS, HARM_TO_OTHERS -> render(message);
+            case UNSPECIFIED -> historicalRisk
+                    ? render(message) + "\n\n如果你需要心理支持，也可以联系："
+                            + String.join("；", safetyProperties.getHotlines())
+                            + "（以当地公布为准）。"
+                    : render(message);
+            case SELF_HARM -> supplement();
+        };
     }
 
     /**

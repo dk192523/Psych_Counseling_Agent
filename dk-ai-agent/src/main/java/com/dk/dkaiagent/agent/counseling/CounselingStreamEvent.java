@@ -26,4 +26,8 @@ public record CounselingStreamEvent(
     public static CounselingStreamEvent done(String effectiveMode, boolean fallback) {
         return new CounselingStreamEvent("done", "", null, effectiveMode, fallback);
     }
+
+    public static CounselingStreamEvent error(String phase, String content, String effectiveMode) {
+        return new CounselingStreamEvent("error", content, phase, effectiveMode, false);
+    }
 }

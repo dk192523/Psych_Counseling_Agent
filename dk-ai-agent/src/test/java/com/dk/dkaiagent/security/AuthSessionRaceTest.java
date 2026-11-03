@@ -47,7 +47,7 @@ class AuthSessionRaceTest {
                     .when(sessions).registerLogin(eq(7L),any());
         } else {
             doAnswer(call -> { var result=call.callRealMethod(); users.adminResetPassword(1,7); return result; })
-                    .when(users).authenticate("alice","OldPassword123");
+                    .when(users).authenticate(eq("alice"),eq("OldPassword123"),anyString());
         }
         var request = new MockHttpServletRequest();
         var error = assertThrows(ResponseStatusException.class, () -> controller.login(

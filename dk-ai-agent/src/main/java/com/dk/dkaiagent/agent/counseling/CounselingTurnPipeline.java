@@ -92,7 +92,8 @@ public class CounselingTurnPipeline {
             RiskTier historyRisk = counselingApp.outputRiskTier(request.chatId());
             String message = DesktopLlmAvailability.UNCONFIGURED_MESSAGE;
             if (tier.isSafetyRelevant() || (historyRisk != null && historyRisk.isSafetyRelevant())) {
-                message += "\n\n" + crisisResponse.supplement();
+                message += "\n\n" + crisisResponse.supplement(request.message(),
+                        historyRisk != null && historyRisk.isSafetyRelevant());
             }
             return Flux.just(failure("llm_unconfigured", message));
         }
@@ -135,7 +136,8 @@ public class CounselingTurnPipeline {
             // 高风险轮次先检查完整输出，再向客户端发送通过检查的文本。
             // A neutral follow-up does not disarm checking while risk is still in persisted history.
             RiskTier guardTier = tier.isSafetyRelevant() ? tier : counselingApp.outputRiskTier(request.chatId());
-            return SafetyOutputGuard.guard(events, guardTier, crisisResponse.supplement());
+            return SafetyOutputGuard.guard(events, guardTier, crisisResponse.supplement(request.message(),
+                    !tier.isSafetyRelevant() && guardTier != null && guardTier.isSafetyRelevant()));
             });
             // Hard deadline, including continuously arriving tokens; timeout() alone only bounds idle time.
             return source.takeUntilOther(Mono.delay(Duration.ofSeconds(180))
@@ -154,9 +156,12 @@ public class CounselingTurnPipeline {
                             afterCommit(request.chatId(), insufficient.isPresent());
                             metrics.counter("counseling.turns", "outcome", "completed").increment();
                         }
+                        if ("error".equals(event.type())) {
+                            finishInterrupted(request, turn, visible.toString(), "FAILED", event, terminal);
+                        }
                         return Mono.just(event);
                     })
-                    .takeUntil(event -> "done".equals(event.type()))
+                    .takeUntil(event -> "done".equals(event.type()) || "error".equals(event.type()))
                     .concatWith(Flux.defer(() -> terminal.get() ? Flux.empty()
                             : Flux.error(new IllegalStateException("missing completion event"))))
                     .onErrorResume(error -> {
@@ -224,7 +229,7 @@ public class CounselingTurnPipeline {
 
     /** 危机模板响应：用户消息已归档，模板流式发出，回答照常归档并触发记忆整合。 */
     private Flux<CounselingStreamEvent> crisisResponse(CounselingTurnRequest request) {
-        String text = crisisResponse.render();
+        String text = crisisResponse.render(request.message());
         return Flux.fromIterable(crisisResponse.toChunks(text))
                 .map(chunk -> CounselingStreamEvent.delta(chunk, "standard", false))
                 .concatWithValues(CounselingStreamEvent.done("standard", false));

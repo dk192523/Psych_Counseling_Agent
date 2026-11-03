@@ -35,13 +35,13 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * 安全过滤链端到端测试（冻结合约 AUTH-v1）。@WebMvcTest 只装载 Web 层，@Import 真实
+ * 安全过滤链端到端测试（冻结合约 AUTH-v1）。@WebMvcTest(properties = "app.registration.enabled=true") 只装载 Web 层，@Import 真实
  * SecurityConfig 以验证过滤链本身；业务依赖全部 mock。
  *
  * 注意：server.servlet.context-path=/api 在 MockMvc 中不生效，控制器与过滤链匹配的都是
  * servlet 相对路径（/health、/auth/login、/admin/**、/ai/**），对外即 /api 前缀下的同名端点。
  */
-@WebMvcTest
+@WebMvcTest(properties = "app.registration.enabled=true")
 @Import(SecurityConfig.class)
 class SecurityFilterChainTest {
 
@@ -85,6 +85,11 @@ class SecurityFilterChainTest {
     @MockitoBean
     private com.dk.dkaiagent.app.ChatRateLimitService chatRateLimitService;
 
+    @org.junit.jupiter.api.BeforeEach
+    void allowRegistrationAdmission() {
+        when(registerThrottle.tryBeginRegister(anyString(), anyString())).thenReturn(true);
+    }
+
     private static PsychUser activeUser(long id, String username) {
         return new PsychUser(id, username, "$2a$10$hash", "USER", "ACTIVE", NOW, NOW, null, null, null);
     }
@@ -98,7 +103,7 @@ class SecurityFilterChainTest {
                         .content("{\"username\":\"alice\",\"password\":\"password-1\"}"))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.error").value("CSRF_INVALID"));
-        verify(userAccountService, never()).authenticate(any(), any());
+        verify(userAccountService, never()).authenticate(any(), any(), any());
     }
 
     @Test
@@ -108,7 +113,7 @@ class SecurityFilterChainTest {
         var json = new com.fasterxml.jackson.databind.ObjectMapper().readTree(bootstrap.getResponse().getContentAsString());
         String token = json.get("token").asText();
         String header = json.get("headerName").asText();
-        when(userAccountService.authenticate("alice", "password-1")).thenReturn(
+        when(userAccountService.authenticate(eq("alice"), eq("password-1"), anyString())).thenReturn(
                 new UserAccountService.AuthResult(true, null, activeUser(7L, "alice"), null));
         when(userAccountService.sessionStatus(any())).thenReturn(UserAccountService.STATUS_ACTIVE);
         mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/auth/login")
@@ -181,7 +186,7 @@ class SecurityFilterChainTest {
     void loginIsPublicAndReachesController() throws Exception {
         // 凭据错误返回控制器映射的 BAD_CREDENTIALS（而非入口点的 UNAUTHORIZED），
         // 证明白名单放行、请求确实抵达控制器。
-        when(userAccountService.authenticate("alice", "wrong-pass-1")).thenReturn(
+        when(userAccountService.authenticate(eq("alice"), eq("wrong-pass-1"), anyString())).thenReturn(
                 new UserAccountService.AuthResult(false,
                         UserAccountService.AuthFailure.BAD_CREDENTIALS, null, "用户名或密码错误"));
 
@@ -194,7 +199,7 @@ class SecurityFilterChainTest {
 
     @Test
     void loginDisabledAccountReturnsDisabledCode() throws Exception {
-        when(userAccountService.authenticate("alice", "password-1")).thenReturn(
+        when(userAccountService.authenticate(eq("alice"), eq("password-1"), anyString())).thenReturn(
                 new UserAccountService.AuthResult(false,
                         UserAccountService.AuthFailure.DISABLED, null, "该账号已被停用"));
 
@@ -207,7 +212,7 @@ class SecurityFilterChainTest {
 
     @Test
     void loginSuccessReturnsAuthUserDto() throws Exception {
-        when(userAccountService.authenticate("alice", "password-1")).thenReturn(
+        when(userAccountService.authenticate(eq("alice"), eq("password-1"), anyString())).thenReturn(
                 new UserAccountService.AuthResult(true, null, activeUser(7L, "alice"), null));
         // 会话登记后状态复核：ACTIVE 放行。
         when(userAccountService.sessionStatus(any())).thenReturn(UserAccountService.STATUS_ACTIVE);
@@ -224,7 +229,7 @@ class SecurityFilterChainTest {
     @Test
     void loginRaceDisableIsRejectedAfterSessionRegistration() throws Exception {
         // 登录与停用并发：凭据校验通过后账号被停用 → 会话登记后的状态复核兜住，401 拒绝。
-        when(userAccountService.authenticate("alice", "password-1")).thenReturn(
+        when(userAccountService.authenticate(eq("alice"), eq("password-1"), anyString())).thenReturn(
                 new UserAccountService.AuthResult(true, null, activeUser(7L, "alice"), null));
         when(userAccountService.sessionStatus(any())).thenReturn(UserAccountService.STATUS_DISABLED);
 
@@ -289,7 +294,7 @@ class SecurityFilterChainTest {
     @Test
     void registerThrottledMapsTo429() throws Exception {
         // 注册限流超限：泛化 429，不触达注册用例。
-        when(registerThrottle.isRegisterBlocked(anyString())).thenReturn(true);
+        when(registerThrottle.tryBeginRegister(anyString(), anyString())).thenReturn(false);
 
         mockMvc.perform(post("/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
