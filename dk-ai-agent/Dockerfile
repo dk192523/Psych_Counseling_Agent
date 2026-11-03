@@ -8,6 +8,9 @@ WORKDIR /build
 COPY pom.xml .
 COPY .mvn ./.mvn
 COPY src ./src
+# 生产知识清单在 build context（dk-ai-agent/）之外——经 compose 的 additional_contexts
+# （命名上下文 kb）注入到 pom 期望的父级路径，jar 内才会恰好一份 sources.jsonl。
+COPY --from=kb manifests /counseling-kb/manifests
 RUN mvn -B -DskipTests package
 
 FROM eclipse-temurin:25-jre

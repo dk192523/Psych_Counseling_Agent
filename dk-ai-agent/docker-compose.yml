@@ -29,6 +29,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      # 知识清单在 context 外，经命名上下文供 Dockerfile COPY --from=kb 使用
+      additional_contexts:
+        kb: ../counseling-kb
     restart: unless-stopped
     init: true
     stop_grace_period: 45s
