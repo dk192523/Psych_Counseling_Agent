@@ -54,17 +54,36 @@ sudo apt install -y age   # 若未装
 预检 BLOCKED（退出码 2）说明 schema 与新代码预期不符——**停止，勿继续**，
 按 MIGRATION_SAME_DATABASE.md 人工核对后再来。
 
+## 1b. 模型引导（一次性，必做）
+
+新版本 backend 从本地文件加载 embedding 模型（`onnx_model` 卷内
+`multilingual-e5-small/model.onnx`，470MB）——首次部署前放入一次：
+
+```bash
+# 服务器上下载（hf-mirror 对国内更快；能直连 HF 就用官方域名）
+wget -O /tmp/model.onnx   https://hf-mirror.com/intfloat/multilingual-e5-small/resolve/main/onnx/model.onnx
+
+# 先创建卷（由 compose 定义），再放入文件
+cd /opt/psych-src/dk-ai-agent
+docker compose --env-file .env up -d postgres        # 让 compose 项目建立（仅 postgres）
+docker run --rm -v psych-counseling-agent_onnx_model:/target   -v /tmp:/src:ro alpine sh -c   "mkdir -p /target/multilingual-e5-small && cp /src/model.onnx /target/multilingual-e5-small/"
+rm /tmp/model.onnx
+```
+
+> 跳过此步 backend 会因找不到模型文件而启动失败（报 file:/opt/models/... 不存在）。
+> 放好之后的所有重启/更新都不再需要任何外网。
+
 ## 2. 换版（维护窗口，约 10-15 分钟）
 
 ```bash
 # 停老栈（业务+postgres 全停，数据卷保留）
 cd /opt/psych-counseling-agent && sudo ./manage.sh stop
 
-# 新栈首次部署（会构建三镜像；ONNX 模型 470MB 首次下载）
+# 新栈首次部署（会构建三镜像；模型已在 1b 步放入卷内）
 cd /opt/psych-src && sudo ./deploy/tencent-cloud/manage.sh deploy
 ```
 
-**预期长等待**（非故障）：e5 模型下载 + 向量库全量重灌（851 文档）约 8-15 分钟，
+**预期长等待**（非故障）：向量库全量重灌（851 文档）约 5-10 分钟，
 期间 readiness 拒绝流量，`manage.sh` 会自动等到健康。
 
 ## 3. 升级验收
