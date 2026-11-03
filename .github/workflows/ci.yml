@@ -136,10 +136,10 @@ jobs:
             # 跟随重定向并校验尺寸（完整 JDK zip 约 200MB+，错误页远小于此）。
             # Adoptium API 对 Invoke-WebRequest/curl 都产出无效响应——改 gh api 用仓库
             # token 解析 Temurin 25 最新 release 的 GitHub 直链，再 curl 下载并校验尺寸。
-            $assetUrl = gh api repos/adoptium/temurin25-binaries/releases/latest --jq '.assets[].browser_download_url | select(contains("jdk_x64_windows_hotspot_") and endswith(".zip"))' | Select-Object -First 1
+            $assetUrl = gh api repos/adoptium/temurin25-binaries/releases/latest --jq '.assets[].browser_download_url | select(contains("jdk_x64_windows_hotspot_") and endswith(".zip") and (contains("debuginfo") or contains("debugimage") | not))' | Select-Object -First 1
             if (-not $assetUrl) { throw 'Cannot resolve Temurin asset URL' }
             curl.exe -fsSL -o $zip $assetUrl
-            if ((Get-Item $zip).Length -lt 150MB) { throw 'Downloaded JDK zip is implausibly small' }
+            if ((Get-Item $zip).Length -lt 150MB) { throw (\"Downloaded JDK zip is implausibly small: \" + (Get-Item $zip).Length) }
             $dest = Join-Path $env:RUNNER_TEMP 'jdk-full'
             Expand-Archive -LiteralPath $zip -DestinationPath $dest
             # $home 是 PowerShell 只读自动变量，不可赋值——用 $jdkFull。
