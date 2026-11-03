@@ -31,9 +31,11 @@ Usage: ./manage.sh <command> [service|backup-path]
 
 Commands:
   check             Validate Docker, .env, Compose, disk and port 3004
-  deploy            Build images, start all services and wait for health
-  start             Start existing images without rebuilding
-  restart           Restart running services and wait for health
+  deploy            Preflight existing data, then build and start (old apps must be stopped)
+  deploy-initial    Explicit first install; refuses existing project containers/volumes
+  start-database    Start only the verified existing PostgreSQL volume for preflight
+  start             Preflight existing data, then start (old apps must be stopped)
+  restart           Stop apps, preflight with PostgreSQL online, then start apps
   stop              Stop containers; named database/model volumes are retained
   status            Show container and HTTP health status
   logs [service]    Follow the last 200 log lines (backend/frontend/ai-worker/postgres)
@@ -42,6 +44,8 @@ Commands:
   migration-preflight Read-only checks of the running PostgreSQL database and named volume
 
 This script never deletes Docker volumes and never kills a process occupying a port.
+deploy-initial never migrates, restores or overwrites existing data.
+Migration/identity checks fail closed with exit code 2; other operational errors use 1.
 EOF
 }
 
@@ -174,7 +178,7 @@ cmd_check() {
   require_command curl
   validate_env
   check_disk
-  compose config --quiet
+  compose config --quiet >/dev/null 2>&1 || die "Compose 配置无效；原始诊断已隐藏，请在受控环境排查。"
   check_port
   log "部署检查通过：${FRONTEND_BIND_ADDRESS}:${FRONTEND_PORT}"
 }
@@ -199,17 +203,145 @@ wait_until_ready() {
   done
 
   compose ps || true
-  compose logs --tail=120 backend frontend ai-worker || true
-  die "服务在超时时间内未就绪，请查看上方容器状态和日志。"
+  die "服务在超时时间内未就绪；请在受控环境用 logs 命令查看日志。"
+}
+
+deployment_guard() {
+  # No .env parsing in Python; resolved Compose metadata never leaves memory.
+  require_command python3
+  python3 - "$ENV_FILE" "$COMPOSE_FILE" "$1" <<'PY'
+import json
+import os
+from pathlib import Path
+import re
+import subprocess
+import sys
+
+class Blocked(Exception):
+    pass
+
+def run(args, env=None):
+    try:
+        result = subprocess.run(args, env=env, text=True, encoding="utf-8", errors="strict",
+                                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=180)
+    except (OSError, subprocess.TimeoutExpired, UnicodeError):
+        raise Blocked("Docker 元数据查询不可用或超时；原始诊断已隐藏。") from None
+    if result.returncode:
+        raise Blocked("Docker 元数据查询失败；不会启动服务，原始诊断已隐藏。")
+    if len(result.stdout) > 1048576:
+        raise Blocked("Docker 元数据超出检查上限；需人工盘点。")
+    return result.stdout
+
+def name(value):
+    if not isinstance(value, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}", value):
+        raise Blocked("项目或卷标识无效；不会启动服务。")
+    return value
+
+def rows(args):
+    return [json.loads(row) for row in run(args).splitlines()]
+
+try:
+    env_file, compose_file, mode = sys.argv[1:]
+    env = dict(os.environ)
+    for key in re.findall(r"\$\{([A-Za-z_][A-Za-z0-9_]*)", Path(compose_file).read_text(encoding="utf-8")):
+        env.pop(key, None)
+    command = ["docker", "compose", "--env-file", env_file, "-f", compose_file]
+    config = json.loads(run(command + ["config", "--format", "json"], env))
+    project = name(config.get("name"))
+    project_filter = "label=com.docker.compose.project=" + project
+    active = rows(["docker", "ps", "--filter", project_filter, "--format",
+                   '{{json (.Label "com.docker.compose.service")}}'])
+    if any(service != "postgres" for service in active):
+        raise Blocked("必须先停止旧 backend、ai-worker、frontend 及未知项目服务；不会启动业务服务。")
+    if mode == "business-stopped":
+        sys.exit(0)
+
+    if set(config.get("services", {})) != {"postgres", "backend", "frontend", "ai-worker"}:
+        raise Blocked("服务清单不符合部署契约；需先人工盘点。")
+    expected = {
+        ("postgres", "postgres_data", "/var/lib/postgresql/data"),
+        ("backend", "onnx_cache", "/tmp/spring-ai-onnx-generative"),
+        ("backend", "djl_cache", "/home/app/.djl.ai"),
+    }
+    volumes = config.get("volumes", {})
+    if set(volumes) != {"postgres_data", "onnx_cache", "djl_cache"}:
+        raise Blocked("持久化存储声明不符合部署契约；需先人工盘点。")
+    names = set()
+    for definition in volumes.values():
+        definition = definition or {}
+        names.add(name(definition.get("name")))
+        if definition.get("driver", "local") != "local" or definition.get("driver_opts") or definition.get("external"):
+            raise Blocked("不能自动启动外部卷或自定义存储驱动；需先人工盘点。")
+    if len(names) != 3:
+        raise Blocked("持久化卷标识重复；不会启动服务。")
+    observed = set()
+    for service, definition in config.get("services", {}).items():
+        if any(definition.get(field) for field in ("tmpfs", "configs", "secrets", "volumes_from")):
+            raise Blocked("存在额外挂载；当前入口不能证明数据位置。")
+        for mount in definition.get("volumes", []):
+            key = (service, mount.get("source"), mount.get("target"))
+            if mount.get("type") != "volume" or key not in expected or key in observed:
+                raise Blocked("存在未知卷、bind mount、数据目录或重复挂载；不会启动服务。")
+            observed.add(key)
+    if observed != expected:
+        raise Blocked("数据库或缓存挂载声明缺失；不会启动服务。")
+
+    if mode == "initial":
+        containers = run(["docker", "ps", "-a", "--filter", project_filter, "--format", '{{json .ID}}'])
+        if containers.strip():
+            raise Blocked("发现本项目已有容器（含停止状态）；deploy-initial 不能迁移、恢复或覆盖数据。")
+        existing = rows(["docker", "volume", "ls", "--format", '{{json .Name}}'])
+        if any(not isinstance(item, str) for item in existing):
+            raise Blocked("卷清单异常；不能证明首次安装。")
+        if names.intersection(existing):
+            raise Blocked("目标命名卷已存在（即使为空也拒绝）；请按已有数据流程处理。")
+        # Also catch an old installation whose project name was accidentally changed.
+        old_databases = run(["docker", "volume", "ls", "--filter",
+                             "label=com.docker.compose.volume=postgres_data", "--format", '{{json .Name}}'])
+        if old_databases.strip():
+            raise Blocked("发现已有 Compose postgres_data 卷；需确认原项目身份，不能使用首次安装入口。")
+        print("[deploy] 首次安装检查通过：没有本项目旧容器或目标卷；不执行迁移、恢复或覆盖。")
+    elif mode == "database":
+        if active:
+            raise Blocked("postgres 已运行；直接执行 migration-preflight，不重复启动数据库。")
+        volume = name(volumes["postgres_data"].get("name"))
+        labels = json.loads(run(["docker", "volume", "inspect", "--format", '{{json .Labels}}', volume]))
+        if not isinstance(labels, dict) or labels.get("com.docker.compose.project") != project or labels.get("com.docker.compose.volume") != "postgres_data":
+            raise Blocked("原数据库卷缺失或项目/逻辑卷标签不符；不会创建替代卷。")
+        if run(["docker", "ps", "--filter", "volume=" + volume, "--format", '{{json .ID}}']).strip():
+            raise Blocked("原数据库卷仍被运行容器使用；需先人工排查。")
+        print("[deploy] 原数据库卷身份检查通过；只启动 postgres，随后必须执行预检。")
+    else:
+        raise Blocked("未知部署检查模式。")
+except (Blocked, ValueError, TypeError, KeyError, AttributeError, OSError):
+    error = sys.exc_info()[1]
+    message = str(error) if isinstance(error, Blocked) else "部署元数据无效；原始内容已隐藏。"
+    print("[deploy][BLOCKED] " + message, file=sys.stderr)
+    sys.exit(2)
+PY
+}
+
+require_migration_preflight() {
+  require_command python3
+  local status=0
+  python3 "$ROOT_DIR/migration-preflight.py" || status=$?
+  if (( status != 0 )); then
+    warn "迁移预检未通过；不会启动 backend、ai-worker 或 frontend。数据库停止时先执行 start-database；首次安装见 deploy-initial。"
+    return 2
+  fi
 }
 
 cmd_deploy() {
   cmd_check
-  log "开始构建并启动容器。首次会下载基础镜像、依赖和 ONNX 模型。"
-  if ! compose up -d --build --remove-orphans; then
-    compose ps || true
-    compose logs --tail=120 backend frontend ai-worker postgres || true
-    die "Docker Compose 启动失败。"
+  if [[ "${1:-}" == "initial" ]]; then
+    deployment_guard initial
+  else
+    deployment_guard business-stopped
+    require_migration_preflight
+  fi
+  log "开始构建并启动容器；首次会下载基础镜像、依赖和 ONNX 模型。"
+  if ! compose up -d --build --remove-orphans >/dev/null 2>&1; then
+    die "Docker Compose 启动失败；原始诊断已隐藏，请在受控环境查看日志。"
   fi
   wait_until_ready
   compose ps
@@ -217,8 +349,9 @@ cmd_deploy() {
 
 cmd_start() {
   cmd_check
-  if ! compose up -d --no-build --remove-orphans; then
-    compose ps || true
+  deployment_guard business-stopped
+  require_migration_preflight
+  if ! compose up -d --no-build --remove-orphans >/dev/null 2>&1; then
     die "启动失败；若镜像尚未构建，请改用 ./manage.sh deploy。"
   fi
   wait_until_ready
@@ -228,9 +361,23 @@ cmd_start() {
 cmd_restart() {
   check_docker
   validate_env
-  compose restart
+  log "先停止业务服务，保留 postgres 在线；预检失败时业务服务保持停止。"
+  compose stop frontend backend ai-worker >/dev/null 2>&1 || die "停止业务服务失败；不会继续重启。"
+  deployment_guard business-stopped
+  require_migration_preflight
+  compose up -d --no-build --no-deps backend ai-worker frontend >/dev/null 2>&1 \
+    || die "业务服务启动失败；原始诊断已隐藏，请在受控环境查看日志。"
   wait_until_ready
   compose ps
+}
+
+cmd_start_database() {
+  check_docker
+  validate_env
+  deployment_guard database
+  compose up -d --no-build --no-deps postgres >/dev/null 2>&1 \
+    || die "postgres 启动失败；业务服务未启动，原始诊断已隐藏。"
+  log "只启动了 postgres；等待数据库就绪后执行 migration-preflight，再执行 deploy 或 start。"
 }
 
 cmd_stop() {
@@ -471,6 +618,8 @@ command_name="${1:-}"
 case "$command_name" in
   check) cmd_check ;;
   deploy) cmd_deploy ;;
+  deploy-initial) cmd_deploy initial ;;
+  start-database) cmd_start_database ;;
   start) cmd_start ;;
   restart) cmd_restart ;;
   stop) cmd_stop ;;

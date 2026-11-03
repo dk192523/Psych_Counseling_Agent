@@ -42,7 +42,7 @@ HTTP 不加密登录 Cookie 和咨询内容，不适合给真实用户长期使�
 - 出站 HTTPS 可访问 Docker Hub、Maven Central、npm、PyPI、GitHub 模型文件和 DeepSeek API
 - Docker Engine 与 Docker Compose v2
 - `age`（加密备份必需）、Bash 与 GNU coreutils（提供 `realpath`、`stat`、`sha256sum`、`mktemp`、`mv -nT`）
-- Python 3（`migration-preflight` 只读迁移预检使用，仅依赖标准库）
+- Python 3（所有部署/启动入口的身份门禁及 `migration-preflight` 使用，仅依赖标准库）
 
 2 核 4 GiB 可能运行，但在首次同时构建 Java、Node、Python 镜像时更容易内存不足。服务器构建失败时优先升级内存或增加 swap，而不是反复重试。
 
@@ -225,8 +225,12 @@ SESSION_COOKIE_SECURE=true
 ```bash
 cd /opt/psych-counseling-agent
 ./manage.sh check
-./manage.sh deploy
+./manage.sh deploy-initial
 ```
+
+首次安装必须显式使用 `deploy-initial`。它要求本项目没有旧容器（含已停止容器）、三个目标 named volume 均不存在、无 bind 数据目录或未知持久化挂载；发现其他项目留下的 Compose `postgres_data` 卷也会阻断，须先确认安装身份并采用独立部署环境。此入口不迁移、不恢复、不覆盖现有数据。失败的新装可能已经生成卷，不能再次把它视为全新安装，更不能删卷来绕过检查；先人工核对状态。
+
+已有数据库必须按第 10 节升级。普通 `deploy`、`start` 在任何业务服务启动前强制预检，数据库未运行或预检失败时退出 `2`，不会退回首次安装。其他环境/启动错误退出 `1`，原始 Docker 诊断默认隐藏以免敏感值进入日志。
 
 `check` 会检查：
 
@@ -291,7 +295,7 @@ sudo systemctl reload nginx
 
 ```bash
 cd /opt/psych-counseling-agent
-./manage.sh deploy
+./manage.sh restart
 curl -I https://你的域名
 ```
 
@@ -309,16 +313,20 @@ TencentOS/RHEL 系发行版若没有 `/etc/nginx/sites-available`，把模板放
 # 只看 Java 后端
 ./manage.sh logs backend
 
-# 重启，不重建镜像
+# 停止业务服务后预检，通过才重新启动；postgres 保持在线
 ./manage.sh restart
 
 # 停止容器，保留数据库和模型缓存卷
 ./manage.sh stop
 
-# 启动已构建镜像
+# stop 后只恢复经卷身份核验的 postgres，不启动业务服务
+./manage.sh start-database
+# 等待 postgres 就绪并完成预检
+./manage.sh migration-preflight
+# 启动已构建镜像前再次强制预检
 ./manage.sh start
 
-# 重新构建并发布当前源码
+# 维护窗口内已停止旧业务服务、完成备份恢复演练后，预检并重建发布
 ./manage.sh deploy
 
 # 数据库备份（先按下文配置 age 公钥）
@@ -408,6 +416,8 @@ BACKUP_AGE_IDENTITY_FILE=/安全介质/psych-backup-identity.txt \
 
 预检核对当前 Compose 项目、运行容器标签、实际 `postgres_data` 命名卷和数据库完整性。缺表/缺列、无主会话、归属失配、错误卷或空用户库会非零退出，需要人工确认 schema 和归属映射，不能启动新空卷来规避。
 
+`deploy`/`start` 要求旧 backend、ai-worker、frontend 已停止、原 postgres 在线，并再次运行只读预检；失败不启动业务服务。`restart` 会先停止业务服务再预检，失败时保持业务服务停止。`stop` 后需先用 `start-database` 恢复经原项目/卷标签核验的 postgres，等待其就绪后重做预检。`deploy-initial` 只适用于确认无旧容器/卷的全新安装，不能用于升级、恢复、换项目名或绕过预检。
+
 升级必须保留原 `.env`、`COMPOSE_PROJECT_NAME` 和 named volume；先完成加密备份和隔离恢复演练，再在维护窗口停旧、做最终备份和预检、最后启新。绝不执行 `down -v`。备份校验不能替代恢复演练，新旧后端不能同时运行。
 
 新版本修改 schema 后，旧程序不一定还能读取原库。回滚必须先验证兼容性；不兼容时把升级前备份恢复到独立空库/空卷，不能直接覆盖非空业务库。不同数据库的整库恢复也仅允许空目标，非空库合并另立项目。桌面 H2 不适用于多用户云端迁移。
@@ -449,7 +459,7 @@ FRONTEND_BIND_ADDRESS=127.0.0.1
 SESSION_COOKIE_SECURE=true
 ```
 
-然后确认访问地址确实是 `https://`，并执行 `./manage.sh deploy` 让容器读取新环境变量。
+然后确认访问地址确实是 `https://`，并执行 `./manage.sh restart` 让业务容器读取新环境变量（会先停止业务服务并预检）。
 
 ## 12. 当前上线边界
 

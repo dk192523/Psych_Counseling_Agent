@@ -392,8 +392,13 @@ def _heuristic_plan(request: PlanRequest) -> PlanDraft:
     )
 
 
-_HEADING_LINE = re.compile(r"^#{1,6}\s", re.MULTILINE)
+_HEADING_LINE = re.compile(
+    r"^#{1,6}[ \t]+(?:人物关系链|已确认事实|用户的解释|用户的感受|模式与未解决议题|咨询阶段与许可状态|待确认问题|近期用户原话（待整合）)[ \t]*\r?$",
+    re.MULTILINE,
+)
 _SAFETY_HEADING = re.compile(r"^#{1,6}\s*安全备注[^\n]*$", re.MULTILINE)
+_SAFETY_RECORD = re.compile(r"^- \[(user|assistant)] (.*)$")
+_SAFETY_RECORD_VERSION = "[safety:v1] "
 
 _DIGEST_HARD_CAP = 3_000
 
@@ -419,7 +424,7 @@ def _strip_safety_section(digest: str) -> str:
 
 def _safety_section(messages: list[MemoryMessage]) -> str:
     lines = [
-        f"- [{message.role}] {message.content}"
+        _encode_safety_record(message.role, message.content)
         for message in messages
         if message.safety_relevant
     ]
@@ -428,8 +433,19 @@ def _safety_section(messages: list[MemoryMessage]) -> str:
     return "## 安全备注\n" + "\n".join(lines)
 
 
+def _encode_safety_record(role: str, content: str) -> str:
+    """Java/Python 共用 v1 格式：依次转义反斜杠、CR、LF，正文只占一行。"""
+    escaped = content.replace("\\", "\\\\").replace("\r", "\\r").replace("\n", "\\n")
+    return f"- [{role}] {_SAFETY_RECORD_VERSION}{escaped}"
+
+
+def _decode_safety_content(content: str) -> str:
+    # 未知转义保持原样，避免损坏非规范记录中的反斜杠。
+    return re.sub(r"\\([\\rn])", lambda match: {"\\": "\\", "r": "\r", "n": "\n"}[match[1]], content)
+
+
 def _extract_safety_lines(digest: str) -> list[str]:
-    """从既有摘要的安全备注段提取逐字 "- [role] text" 行，丢弃 "无" 之类占位。"""
+    """读取 v1 并迁移 legacy。旧多行仅尽力保留，无法恢复已截断或边界歧义的数据。"""
     if not digest:
         return []
     match = _SAFETY_HEADING.search(digest)
@@ -437,20 +453,34 @@ def _extract_safety_lines(digest: str) -> list[str]:
         return []
     next_heading = _HEADING_LINE.search(digest, match.end())
     end = next_heading.start() if next_heading else len(digest)
-    return [
-        line.strip()
-        for line in digest[match.end() : end].splitlines()
-        if line.strip().startswith("- [")
-    ]
+    lines: list[str] = []
+    role: str | None = None
+    legacy_content: list[str] = []
+    # 只把 CR/LF 当物理换行，与 Java 一致；不能用 splitlines 拆正文中的 Unicode 分隔符。
+    for raw_line in re.split(r"(?<=\n)|(?<=\r)(?!\n)", digest[match.end() : end]):
+        line = raw_line.rstrip("\r\n")
+        record = _SAFETY_RECORD.fullmatch(line)
+        if record is not None:
+            if role is not None:
+                lines.append(_encode_safety_record(role, "".join(legacy_content).rstrip("\r\n")))
+            role, legacy_content = None, []
+            content = record[2]
+            if content.startswith(_SAFETY_RECORD_VERSION):
+                lines.append(_encode_safety_record(record[1], _decode_safety_content(content[len(_SAFETY_RECORD_VERSION) :])))
+            else:
+                role = record[1]
+                legacy_content.append(content + raw_line[len(line) :])
+        elif role is not None:
+            legacy_content.append(raw_line)
+    if role is not None:
+        lines.append(_encode_safety_record(role, "".join(legacy_content).rstrip("\r\n")))
+    return lines
 
 
 def _merge_safety_sections(inherited_lines: list[str], batch_section: str) -> str:
     """本批安全行在前、继承行在后，按整行去重：重复整合既不丢历史危机记录，也不无限膨胀。"""
-    batch_lines = (
-        [line.strip() for line in batch_section.splitlines() if line.strip().startswith("- [")]
-        if batch_section
-        else []
-    )
+    batch_lines = _extract_safety_lines(batch_section) if batch_section else []
+    inherited_lines = _extract_safety_lines("## 安全备注\n" + "\n".join(inherited_lines))
     merged: list[str] = []
     seen: set[str] = set()
     for line in [*batch_lines, *inherited_lines]:
@@ -479,22 +509,17 @@ def _fit_digest(body: str, safety_section: str, max_chars: int) -> str:
 
 def _heuristic_consolidation(request: ConsolidateRequest) -> str:
     parts: list[str] = []
-    base = request.existing_digest.strip()
+    base = _strip_safety_section(request.existing_digest).strip()
     if base:
         parts.append(base)
     user_messages = [message for message in request.messages if message.role == "user"][-10:]
     if user_messages:
         lines = [f"- {message.content[:80]}" for message in user_messages]
         parts.append("## 近期用户原话（待整合）\n" + "\n".join(lines))
-    fresh_safety = [
-        message
-        for message in request.messages
-        if message.safety_relevant and message.content not in base
-    ]
-    safety = _safety_section(fresh_safety)
-    if safety:
-        parts.append(safety)
-    return _truncate("\n\n".join(parts), min(request.limits.max_digest_chars, _DIGEST_HARD_CAP))
+    safety = _merge_safety_sections(
+        _extract_safety_lines(request.existing_digest), _safety_section(request.messages)
+    )
+    return _fit_digest("\n\n".join(parts), safety, request.limits.max_digest_chars)
 
 
 def _bm25_rrf_scores(request: RecallRequest) -> tuple[dict[int, float], bool]:

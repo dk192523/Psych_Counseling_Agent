@@ -19,15 +19,22 @@ sudo certbot --nginx -d your-domain.com        # 自动改 nginx 配置并配 80
 
 ## 2. 生产部署验收单（每次换版过一遍）
 
+已有 PostgreSQL 的操作以 [同库原地升级](../deploy/tencent-cloud/MIGRATION_SAME_DATABASE.md) 为准。`migration-preflight` 是只读快照，不能替代备份恢复演练或生产验收。首次安装使用显式 `./manage.sh deploy-initial`；该入口拒绝本项目已有容器和目标卷，不迁移、不恢复、不覆盖现有数据，不能用来绕过升级门禁。
+
 - [ ] `sha256sum -c *.zip.sha256` 校验包完整
-- [ ] 复制旧 `.env`（**勿覆盖**，见升级文档 §12 第 1 条：CSRF 要求前后端同版本部署）
-- [ ] `./manage.sh backup`（age 加密，成功才算继续）
-- [ ] `./manage.sh deploy`（整包换版 + clean 构建）
+- [ ] 复制原 `.env`，保留 `COMPOSE_PROJECT_NAME`、数据库身份和原 named volume；不以新模板覆盖原配置
+- [ ] 新包目录 `./manage.sh migration-preflight` 通过；原 postgres 保持在线
+- [ ] 原目录 `./manage.sh backup` 成功，三件套异地保管；完成独立 PostgreSQL 16 + pgvector 空库的隔离恢复演练
+- [ ] 维护窗口限制写流量，等待在途请求结束；停止旧 backend、ai-worker、frontend，保持原 postgres 在线
+- [ ] 生成最终加密备份并确认隔离恢复，再从新目录重新预检；核对项目、卷和归属
+- [ ] 新目录 `./manage.sh deploy`（先自动预检，通过后才构建启动；业务服务未停、postgres 不在线或预检失败均阻断）
 - [ ] `.env` 确认：`ADMIN_INITIAL_PASSWORD` 已设（新库首次启动强制要求）、
       `SESSION_COOKIE_SECURE=true`（TLS 后）、`AI_WORKER_SHARED_SECRET` 非空
 - [ ] 冒烟：登录 → 发一条消息（流式正常）→ 发"我决定了，今晚就自杀"（危机模板秒回含 12356）
-      → 历史会话完整 → `./manage.sh verify-backup` 最新备份可验
-- [ ] 回滚预案：停新目录 → 旧目录 `./manage.sh start`（`psych_chat_turn` 为增量表，回滚无损）
+      → 历史会话完整 → `./manage.sh verify-backup backups/psych-YYYYMMDD-HHMMSS.dump.age` 最新备份可验
+- [ ] 回滚预案事先验证旧应用与升级后 schema/数据兼容；不兼容时保持暂停，保全升级后备份，将升级前备份恢复到独立空库/空卷并核对后切换。备份时间点之后的写入需要单独处理，不能承诺无损回滚
+
+`./manage.sh stop` 保留卷但移除容器，之后不能直接 `start` 绕过预检。先用 `./manage.sh start-database` 核验原卷标签并只启动 postgres，等待数据库就绪，再预检和 `start`。`restart` 会先停止业务服务、保留 postgres 在线，预检失败时业务服务保持停止。迁移/身份门禁退出码为 `2`，常规操作错误为 `1`；失败时不要改项目名、创建空卷或调用首次安装命令重试。
 
 ## 3. 数据加密与密钥管理（生产决策项）
 

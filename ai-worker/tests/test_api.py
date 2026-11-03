@@ -390,7 +390,7 @@ def test_consolidate_llm_output_gets_verbatim_safety_section(tmp_path, monkeypat
     body = response.json()
     assert body["degraded"] is False
     assert "（模型改写过的安全内容）" not in body["digest"]
-    assert "- [user] 我昨晚想到了伤害自己的念头。" in body["digest"]
+    assert "- [user] [safety:v1] 我昨晚想到了伤害自己的念头。" in body["digest"].splitlines()
     assert len(body["digest"]) <= 1200
 
 
@@ -419,7 +419,7 @@ def test_consolidate_carries_forward_inherited_safety_notes(tmp_path, monkeypatc
     assert response.status_code == 200
     body = response.json()
     assert body["degraded"] is False
-    assert "- [user] 我上周说过想死" in body["digest"], (
+    assert "- [user] [safety:v1] 我上周说过想死" in body["digest"].splitlines(), (
         "inherited safety notes must survive a batch without new crisis messages"
     )
 

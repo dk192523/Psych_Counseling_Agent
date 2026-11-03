@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 from datetime import date
+import hashlib
 import json
 from pathlib import Path, PurePosixPath
 import re
@@ -98,6 +99,8 @@ def validate_sources(manifest: Path, root: Path = KB_ROOT) -> list[str]:
                     local_errors.append(f"invalid {field}: {value}")
                 elif "pattern" in rule and re.search(rule["pattern"], value) is None:
                     local_errors.append(f"invalid {field} format")
+                elif field == "reviewed_content_sha256" and re.fullmatch(r"[0-9a-f]{64}", value) is None:
+                    local_errors.append(f"invalid {field} format")
             if local_errors:
                 errors.extend(f"{prefix}: {error}" for error in local_errors)
                 continue
@@ -179,6 +182,16 @@ def validate_sources(manifest: Path, root: Path = KB_ROOT) -> list[str]:
                             "within dk-ai-agent/src/main/resources/"
                         )
                 if runtime_resolved is not None:
+                    try:
+                        # Hash raw bytes: newline normalization would detach approval
+                        # from the actual file admitted by the runtime loader.
+                        runtime_bytes = runtime_resolved.read_bytes()
+                        runtime_bytes.decode("utf-8", errors="strict")
+                        actual_hash = hashlib.sha256(runtime_bytes).hexdigest()
+                        if entry.get("reviewed_content_sha256") != actual_hash:
+                            errors.append(f"{prefix}: production reviewed_content_sha256 does not match runtime Markdown bytes")
+                    except (OSError, UnicodeError):
+                        errors.append(f"{prefix}: cannot read production runtime Markdown as UTF-8 bytes")
                     document_base = (root.parent / "dk-ai-agent/src/main/resources/document").resolve()
                     try:
                         runtime_parts = runtime_resolved.relative_to(document_base).parts

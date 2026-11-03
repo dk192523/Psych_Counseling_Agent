@@ -1,6 +1,8 @@
 package com.dk.dkaiagent.controller;
 
 import com.dk.dkaiagent.account.AuthValidation;
+import com.dk.dkaiagent.account.AuthResourceLimiter;
+import com.dk.dkaiagent.account.TrustedClientIpResolver;
 import com.dk.dkaiagent.account.PsychUser;
 import com.dk.dkaiagent.account.RegisterThrottleService;
 import com.dk.dkaiagent.account.UserAccountService;
@@ -48,8 +50,15 @@ public class AuthController {
     private final RegisterThrottleService registerThrottle;
     private final SecurityContextRepository securityContextRepository = new HttpSessionSecurityContextRepository();
 
-    @Value("${app.registration.enabled:true}")
-    private boolean registrationEnabled = true;
+    @Value("${app.registration.enabled:false}")
+    private boolean registrationEnabled = false;
+
+    private TrustedClientIpResolver clientIpResolver = new TrustedClientIpResolver("");
+
+    @Value("${app.auth.trusted-proxy-addresses:}")
+    void configureTrustedProxies(String proxies) {
+        clientIpResolver = new TrustedClientIpResolver(proxies);
+    }
 
     @GetMapping("/csrf")
     public java.util.Map<String, Object> csrf(CsrfToken token) {
@@ -75,13 +84,12 @@ public class AuthController {
         // 未认证注册限流：409/201 可被批量枚举账号存在性（并为首启抢注提供探测手段），
         // 双键窗口（来源 IP + 归一化用户名）超限统一泛化 429，不区分触发维度。
         String normalizedUsername = AuthValidation.normalizeUsername(request.username());
-        String clientIp = resolveClientIp(servletRequest);
-        if (registerThrottle.isRegisterBlocked(clientIp) || registerThrottle.isUsernameBlocked(normalizedUsername)) {
+        String clientIp = clientIpResolver.resolve(servletRequest);
+        if (!registerThrottle.tryBeginRegister(clientIp, normalizedUsername)) {
             log.warn("注册请求被限流：ip={}, username={}", clientIp, normalizedUsername);
             return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
                     .body(new ApiError("RATE_LIMITED", "请求过于频繁，请稍后再试"));
         }
-        registerThrottle.recordRegister(clientIp, normalizedUsername);
         try {
             PsychUser user = userAccountService.register(request.username(), request.password());
             establishSession(user, servletRequest, servletResponse);
@@ -99,7 +107,8 @@ public class AuthController {
     public ResponseEntity<?> login(@RequestBody LoginRequest request,
                                    HttpServletRequest servletRequest,
                                    HttpServletResponse servletResponse) {
-        UserAccountService.AuthResult result = userAccountService.authenticate(request.username(), request.password());
+        UserAccountService.AuthResult result = userAccountService.authenticate(
+                request.username(), request.password(), clientIpResolver.resolve(servletRequest));
         if (!result.ok()) {
             // BAD_CREDENTIALS 与 LOCKED 共用泛化文案不枚举账号存在性；DISABLED 单独可识别供前端提示。
             String code = switch (result.failure()) {
@@ -170,17 +179,10 @@ public class AuthController {
         }
     }
 
-    /** 来源 IP：nginx 同源反代下取 X-Forwarded-For 首跳，直连时 remoteAddr。仅用于限流键。 */
-    private static String resolveClientIp(HttpServletRequest request) {
-        String forwarded = request.getHeader("X-Forwarded-For");
-        if (forwarded != null && !forwarded.isBlank()) {
-            int comma = forwarded.indexOf(',');
-            String firstHop = (comma > 0 ? forwarded.substring(0, comma) : forwarded).trim();
-            if (!firstHop.isEmpty()) {
-                return firstHop;
-            }
-        }
-        return request.getRemoteAddr();
+    @ExceptionHandler(AuthResourceLimiter.CapacityExceededException.class)
+    public ResponseEntity<ApiError> handleCapacityExceeded(AuthResourceLimiter.CapacityExceededException exception) {
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                .body(new ApiError("RATE_LIMITED", "请求过于频繁，请稍后再试"));
     }
 
     @ExceptionHandler(AuthValidation.ValidationException.class)
