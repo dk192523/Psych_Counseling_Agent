@@ -63,9 +63,10 @@ sudo apt install -y age   # 若未装
 # 服务器上下载（hf-mirror 对国内更快；能直连 HF 就用官方域名）
 wget -O /tmp/model.onnx   https://hf-mirror.com/intfloat/multilingual-e5-small/resolve/main/onnx/model.onnx
 
-# 先创建卷（由 compose 定义），再放入文件
+# 用 compose 正规建卷（带 compose 标签——手工 docker volume create 的无标签卷
+# 会被迁移预检以"卷标签不符"正确拦截），再回填模型文件
 cd /opt/psych-src/dk-ai-agent
-docker compose --env-file .env up -d postgres        # 让 compose 项目建立（仅 postgres）
+docker compose --env-file .env create backend        # 只创建容器与卷，不启动
 docker run --rm -v psych-counseling-agent_onnx_model:/target   -v /tmp:/src:ro alpine sh -c   "mkdir -p /target/multilingual-e5-small && cp /src/model.onnx /target/multilingual-e5-small/"
 rm /tmp/model.onnx
 ```
