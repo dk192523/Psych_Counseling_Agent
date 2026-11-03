@@ -123,6 +123,21 @@ jobs:
             }
             Write-Host "Using existing WiX tool: $wixPath ($wixVersion)"
           }
+      - name: Ensure full JDK with jmods (hosted toolcache JDKs may be trimmed)
+        shell: pwsh
+        run: |
+          if (Test-Path -LiteralPath (Join-Path $env:JAVA_HOME 'jmods')) {
+            Write-Host "jmods present: $env:JAVA_HOME"
+          } else {
+            $zip = Join-Path $env:RUNNER_TEMP 'temurin25-jdk.zip'
+            Invoke-WebRequest -Uri 'https://api.adoptium.net/v3/binary/latest/25/ga/windows/x64/jdk/hotspot/normal/eclipse?project=jdk' -OutFile $zip
+            $dest = Join-Path $env:RUNNER_TEMP 'jdk-full'
+            Expand-Archive -LiteralPath $zip -DestinationPath $dest
+            $home = (Get-ChildItem -LiteralPath $dest -Directory | Select-Object -First 1).FullName
+            if (!(Test-Path -LiteralPath (Join-Path $home 'jmods'))) { throw 'Downloaded JDK lacks jmods' }
+            "JAVA_HOME=$home" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            Write-Host "JAVA_HOME overridden to full JDK: $home"
+          }
       - name: Build independent Client and Server per-user EXE installers and app images
         shell: pwsh
         run: ./deploy/desktop/build-desktop.ps1 -Product Both -JdkHome $env:JAVA_HOME -PythonExecutable python.exe -OutputDirectory release/desktop-ci -Installer
