@@ -507,7 +507,13 @@ final class LocalDataBackup {
             String currentSid = Advapi32Util.getAccountByName(Secur32Util.getUserNameEx(2)).sidString;
             var descriptor = Advapi32Util.getFileSecurityDescriptor(path.toFile(), false);
             String ownerSid = Advapi32Util.convertSidToStringSid(descriptor.getOwner());
-            if (!ownerSid.equals(currentSid)) throw new IOException("备份路径必须由当前 Windows 用户拥有。");
+            // 提权（Administrators 成员）进程在 Windows 默认所有者语义下新建对象的 owner 是
+            // Administrators 组而非用户本身——严格 owner==当前用户会把"以管理员身份运行的
+            // 安装/CI"全部误拒。与 requirePrivatePath 的信任三元组对齐：当前用户/SYSTEM/
+            // Administrators 均视为自有；后续 setAcl 会立即收窄为私有 DACL，实质安全不变。
+            if (!trustedBackupSid(ownerSid, currentSid)) {
+                throw new IOException("备份路径必须由当前 Windows 用户或其管理员组拥有。");
+            }
         }
     }
 
