@@ -312,7 +312,7 @@ class MigrationPreflightTests(unittest.TestCase):
         for fragment in ("i.indisunique", "i.indisvalid", "i.indisready", "i.indislive",
                          "i.indimmediate", "NOT i.indnullsnotdistinct", "i.indexprs IS NULL",
                          "i.indnatts=i.indnkeyatts", "am.amname='btree'", "op.opcdefault",
-                         "x.collation<>a.attcollation", "x.options<>0",
+                         'x."collation"<>a.attcollation', "x.options<>0",
                          "pg_get_expr(i.indpred,i.indrelid) IS NOT DISTINCT FROM r.predicate"):
             self.assertIn(fragment, queries["critical_unique_index_mismatch"])
         self.assertNotIn("uk_psych_running_turn", queries["critical_unique_index_mismatch"])

@@ -420,10 +420,12 @@ SELECT count(*) FROM required r WHERE NOT EXISTS (
             JOIN pg_attribute a ON a.attrelid=i.indrelid AND a.attnum=x.num
             ORDER BY x.ord)=r.cols
         AND NOT EXISTS (SELECT 1 FROM unnest(i.indclass,i.indcollation,i.indoption)
-            WITH ORDINALITY x(opclass,collation,options,ord)
+            -- collation 是 PostgreSQL 保留字，作 WITH ORDINALITY 列别名必须加引号，
+            -- 裸写会语法错误（CI 首跑失败的根因之一）。
+            WITH ORDINALITY x(opclass,"collation",options,ord)
             JOIN pg_opclass op ON op.oid=x.opclass
             JOIN pg_attribute a ON a.attrelid=i.indrelid AND a.attname=r.cols[x.ord::integer]
-            WHERE NOT op.opcdefault OR x.collation<>a.attcollation OR x.options<>0)
+            WHERE NOT op.opcdefault OR x."collation"<>a.attcollation OR x.options<>0)
         AND pg_get_expr(i.indpred,i.indrelid) IS NOT DISTINCT FROM r.predicate)
 """ % index_rows
     return queries

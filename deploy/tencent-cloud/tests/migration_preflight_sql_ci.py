@@ -80,13 +80,19 @@ def require_disposable_container(container: str) -> None:
     labels = config.get("Labels")
     require(isinstance(labels, dict) and labels.get(LABEL) == "true",
             "The service container is missing the synthetic CI fixture label.")
+    # 存储不变量按两个来源共同判定：① HostConfig.Tmpfs 恰为目标路径（值为 "rw" 或
+    # 被旧版 Docker 归一化为 ""）；② Mounts 数组里不允许出现任何非 tmpfs 条目
+    # （防 bind/命名卷混入）——较新 Docker 不再把 tmpfs 计入 Mounts，数组可能为空；
+    # ③ Binds 必须为空。
     mounts = metadata.get("Mounts")
-    require(isinstance(mounts, list) and len(mounts) == 1
-            and isinstance(mounts[0], dict)
-            and mounts[0].get("Type") == "tmpfs"
-            and mounts[0].get("Destination") == "/var/lib/postgresql/data"
-            and mounts[0].get("RW") is True
-            and host_config.get("Tmpfs") == {"/var/lib/postgresql/data": "rw"}
+    tmpfs = host_config.get("Tmpfs")
+    require(isinstance(tmpfs, dict) and set(tmpfs) == {"/var/lib/postgresql/data"}
+            and tmpfs["/var/lib/postgresql/data"] in ("rw", "")
+            and isinstance(mounts, list)
+            and all(isinstance(entry, dict) and entry.get("Type") == "tmpfs"
+                    and entry.get("Destination") == "/var/lib/postgresql/data"
+                    and entry.get("RW") is True
+                    for entry in mounts)
             and "Binds" in host_config and host_config["Binds"] in (None, []),
             "The service container must use only the expected disposable CI storage.")
     ports = network.get("Ports")
@@ -100,8 +106,10 @@ def main() -> int:
     require(os.environ.get("GITHUB_ACTIONS") == "true" and os.environ.get("CI") == "true",
             "This fixture runner is restricted to GitHub Actions CI.")
     container = os.environ.get("MIGRATION_SQL_CI_CONTAINER", "")
-    require(re.fullmatch(r"[a-f0-9]{64}", container) is not None,
-            "A full disposable CI service container ID is required.")
+    # job.services.<id>.id 在不同 runner/Docker 组合下可能是 12 位短 ID 或 64 位全 ID；
+    # docker inspect 两种形式都接受，门禁同步兼容两者（仍拒绝任何其他字符串）。
+    require(re.fullmatch(r"[a-f0-9]{12}|[a-f0-9]{64}", container) is not None,
+            "A disposable CI service container ID is required.")
     require_disposable_container(container)
 
     spec = importlib.util.spec_from_file_location("migration_preflight_sql_ci_target", HERE.parent / "migration-preflight.py")
